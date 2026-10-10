@@ -1,0 +1,33 @@
+[Unit]
+Description=Admin SUN89 — Biro Jasa Management System Express Backend
+Documentation=file:///opt/admin-sun89/current/docs/deployment.md
+After=network.target
+
+[Service]
+Type=simple
+User=sun89
+Group=sun89
+WorkingDirectory=/opt/admin-sun89/current
+EnvironmentFile=/opt/admin-sun89/shared/.env
+ExecStart=/usr/bin/node /opt/admin-sun89/current/node_modules/tsx/dist/cli.mjs /opt/admin-sun89/current/server/src/server.ts
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+# Hardening / Sandboxing
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=admin-sun89
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,52 @@
+# Admin SUN89 — Biro Jasa Management System
+# Production Caddy Reverse Proxy Configuration (Automatic HTTPS via Let's Encrypt / ZeroSSL)
+# Place in: /etc/caddy/Caddyfile
+
+admin.birojasa.com {
+    # Automatic TLS management with HTTP -> HTTPS redirection
+    tls admin@birojasa.com
+
+    # Security Headers
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+
+    # Request Body Size Limit (10MB for document uploads)
+    request_body {
+        max_size 10MB
+    }
+
+    # CRITICAL: Prevent direct access to internal storage
+    @denied_uploads path /uploads*
+    respond @denied_uploads 404
+
+    # Reverse Proxy /api/* to Express Backend (:3001)
+    handle /api/* {
+        reverse_proxy 127.0.0.1:3001 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Serve Static Frontend SPA
+    handle {
+        root * /opt/admin-sun89/current/dist
+        try_files {path} /index.html
+        file_server
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/admin-sun89.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+    }
+}

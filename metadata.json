@@ -1,0 +1,6 @@
+{
+  "name": "Admin SUN89",
+  "description": "Streamline the samsat process by providing detailed order information, mutation tracking, and checklist features for efficient management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

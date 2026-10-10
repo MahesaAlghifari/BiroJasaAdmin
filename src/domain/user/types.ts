@@ -1,0 +1,33 @@
+/**
+ * Canonical Domain Types for Users, Roles, and Access Management
+ * Admin SUN89 — Biro Jasa Management System
+ */
+
+export type UserRole = "administrator" | "finance" | "admin" | "messenger" | "SVP" | "CLILEN" | string;
+
+export interface SystemUser {
+  id: number | string;
+  nama: string;
+  jabatan: string;
+  email: string;
+  status: "Aktif" | "Nonaktif" | string;
+  telepon?: string;
+  avatar?: string;
+  lastLogin?: string;
+  createdAt?: string;
+}
+
+export interface UserPermission {
+  module: string;
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canApprove?: boolean;
+}
+
+export interface UserAccess {
+  userId: number | string;
+  role: UserRole;
+  permissions: UserPermission[];
+}

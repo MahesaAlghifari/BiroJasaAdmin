@@ -1,0 +1,64 @@
+/* Central design system tokens */
+:root {
+  --font-family-sans: "Quick Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-base: var(--font-family-sans);
+  --font-family-heading: var(--font-family-sans);
+
+  --font-size-page-title: 1.5rem;      /* 24px */
+  --font-size-section-title: 1.125rem; /* 18px */
+  --font-size-label: 0.8125rem;       /* 13px */
+  --font-size-body: 0.875rem;          /* 14px */
+  --font-size-table: 0.8125rem;        /* 13px */
+  --font-size-caption: 0.75rem;        /* 12px */
+
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-background: var(--background);
+  --color-surface: var(--card);
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-text-label: var(--foreground);
+  --color-text-muted: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: var(--destructive);
+  --color-info: #2563eb;
+}
+
+.dark {
+  --color-background: var(--background);
+  --color-surface: var(--card);
+}
+
+.typography-page-title {
+  font-family: var(--font-family-heading);
+  font-size: var(--font-size-page-title);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--foreground);
+}
+.typography-section-title {
+  font-family: var(--font-family-heading);
+  font-size: var(--font-size-section-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+.typography-label {
+  font-size: var(--font-size-label);
+  font-weight: 500;
+  color: var(--foreground);
+}
+.typography-body {
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  color: var(--foreground);
+}
+.typography-table {
+  font-size: var(--font-size-table);
+}
+.typography-caption {
+  font-size: var(--font-size-caption);
+  color: var(--muted-foreground);
+}

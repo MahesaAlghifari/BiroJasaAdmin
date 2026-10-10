@@ -1,0 +1,18 @@
+{
+  "applicationName": "Admin-SUN89",
+  "applicationVersion": "0.0.1",
+  "gitCommit": "standalone-build",
+  "buildTimestamp": "2026-10-04T10:04:38.707Z",
+  "nodeRuntimeVersion": "v22.19.0",
+  "lockfileVersion": 3,
+  "frontendArtifacts": {
+    "entryHtmlSha256": "01b24e9c67f026cd88f8fc509501fa7ac95cf3b3687c749862c5364b87881be8",
+    "totalFiles": 31,
+    "totalBytes": 3081029
+  },
+  "backendArtifacts": {
+    "entryServerSha256": "640b634d256ab36d4eed5a4cb9b9c142d7eff80226cb8fa14e59f273c21d1590",
+    "totalFiles": 45
+  },
+  "deploymentModel": "Single-Server Linux/Windows Node.js Systemd/Service with Nginx/Caddy Reverse Proxy"
+}
