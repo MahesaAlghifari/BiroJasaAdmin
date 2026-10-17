@@ -13,7 +13,10 @@ import {
   EstimationInput,
   EstimationResult,
 } from "../../domain/estimation/types";
-import { DEFAULT_R4_ANNUAL_TEMPLATE } from "../../domain/estimation/defaultTemplates";
+import {
+  DEFAULT_R4_ANNUAL_TEMPLATE,
+  DEFAULT_R2_ANNUAL_TEMPLATE,
+} from "../../domain/estimation/defaultTemplates";
 import { calculateEstimation, defaultRuleRegistry } from "../../domain/estimation/estimationEngine";
 import { auditLog } from "../utils/auditLog";
 
@@ -29,6 +32,11 @@ class EstimationStore {
       ...DEFAULT_R4_ANNUAL_TEMPLATE,
       components: DEFAULT_R4_ANNUAL_TEMPLATE.components.map((c) => ({ ...c })),
       accIdRates: { ...DEFAULT_R4_ANNUAL_TEMPLATE.accIdRates },
+    });
+    this.templates.set(DEFAULT_R2_ANNUAL_TEMPLATE.id, {
+      ...DEFAULT_R2_ANNUAL_TEMPLATE,
+      components: DEFAULT_R2_ANNUAL_TEMPLATE.components.map((c) => ({ ...c })),
+      accIdRates: { ...DEFAULT_R2_ANNUAL_TEMPLATE.accIdRates },
     });
     this.loadFromStorage();
   }
@@ -81,6 +89,7 @@ class EstimationStore {
   public getTemplate(id = "template-pajak-tahunan-r4"): EstimationTemplateConfig {
     const tpl = this.templates.get(id);
     if (!tpl) {
+      if (id === DEFAULT_R2_ANNUAL_TEMPLATE.id) return DEFAULT_R2_ANNUAL_TEMPLATE;
       return DEFAULT_R4_ANNUAL_TEMPLATE;
     }
     return tpl;
@@ -212,6 +221,14 @@ class EstimationStore {
         ...DEFAULT_R4_ANNUAL_TEMPLATE,
         components: DEFAULT_R4_ANNUAL_TEMPLATE.components.map((c) => ({ ...c })),
         accIdRates: { ...DEFAULT_R4_ANNUAL_TEMPLATE.accIdRates },
+      });
+      this.persist();
+      this.notify();
+    } else if (templateId === DEFAULT_R2_ANNUAL_TEMPLATE.id) {
+      this.templates.set(templateId, {
+        ...DEFAULT_R2_ANNUAL_TEMPLATE,
+        components: DEFAULT_R2_ANNUAL_TEMPLATE.components.map((c) => ({ ...c })),
+        accIdRates: { ...DEFAULT_R2_ANNUAL_TEMPLATE.accIdRates },
       });
       this.persist();
       this.notify();

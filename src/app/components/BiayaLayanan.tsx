@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { pricingStore, usePricingStore, resolveSamsatId, resolveServiceId } from "../data/pricingStore";
 import { cn } from "./ui/utils";
 import { EstimatorR4Tahunan } from "./estimation/EstimatorR4Tahunan";
+import { EstimatorR2Tahunan } from "./estimation/EstimatorR2Tahunan";
 
 export const AVAILABLE_COMPONENTS = [
   { id: "mutasi-legalisir", label: "Legalisir", code: "MK-01" },
@@ -57,6 +58,7 @@ export function BiayaLayanan() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isEstimatorOpen, setIsEstimatorOpen] = useState(false);
+  const [estimatorVehicleTab, setEstimatorVehicleTab] = useState<"R4" | "R2">("R4");
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [selectedComponents, setSelectedComponents] = useState<Record<string, boolean>>({});
   const [formData, setFormData] = useState({
@@ -1260,20 +1262,45 @@ export function BiayaLayanan() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Kalkulator Estimasi R4 Dialog Modal */}
+      {/* Kalkulator Estimasi R4 / R2 Dialog Modal */}
       <Dialog open={isEstimatorOpen} onOpenChange={setIsEstimatorOpen}>
         <DialogContent className="border-border sm:max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader className="pb-3 border-b border-border/70">
-            <DialogTitle className="flex items-center gap-2 text-base font-bold text-foreground">
-              <Calculator className="w-5 h-5 text-primary" />
-              Kalkulator Estimasi Pajak Tahunan R4
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Simulasi perhitungan PKB, SWDKLLJ, denda keterlambatan, dan jasa perpanjangan STNK mobil (R4) sesuai formula Samsat.
-            </DialogDescription>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+                  <Calculator className="w-5 h-5 text-primary" />
+                  Kalkulator Estimasi Pajak Tahunan ({estimatorVehicleTab === "R4" ? "Mobil / R4" : "Motor / R2"})
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                  Simulasi perhitungan PKB, SWDKLLJ, denda keterlambatan, dan jasa perpanjangan sesuai formula workbook resmi.
+                </DialogDescription>
+              </div>
+
+              <div className="flex items-center gap-1 border border-border/70 p-1 rounded-lg bg-muted/40 self-start sm:self-auto shrink-0">
+                <Button
+                  type="button"
+                  variant={estimatorVehicleTab === "R4" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setEstimatorVehicleTab("R4")}
+                  className={cn("h-7 px-3 text-xs font-semibold", estimatorVehicleTab === "R4" && "shadow-xs")}
+                >
+                  Mobil (R4)
+                </Button>
+                <Button
+                  type="button"
+                  variant={estimatorVehicleTab === "R2" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setEstimatorVehicleTab("R2")}
+                  className={cn("h-7 px-3 text-xs font-semibold", estimatorVehicleTab === "R2" && "shadow-xs")}
+                >
+                  Motor (R2)
+                </Button>
+              </div>
+            </div>
           </DialogHeader>
           <div className="pt-2">
-            <EstimatorR4Tahunan />
+            {estimatorVehicleTab === "R4" ? <EstimatorR4Tahunan /> : <EstimatorR2Tahunan />}
           </div>
         </DialogContent>
       </Dialog>

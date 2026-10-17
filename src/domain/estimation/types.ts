@@ -89,6 +89,7 @@ export interface OverdueDuration {
 export interface EstimationResult {
   tahunTunggakan: number;
   bulanTunggakan: number;
+  bulanKalender?: number;
   durasiKeterlambatan: string;
   items: EstimationResultItem[];
   totalPkb: number;

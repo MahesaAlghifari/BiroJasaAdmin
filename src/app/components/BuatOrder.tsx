@@ -48,6 +48,7 @@ import {
   ChevronUp,
   Calendar,
   FileCheck,
+  HelpCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { orderStore, OperationalOrder, StructuredAddress, OrderDocument, PaymentProof } from "../data/orderStore";
@@ -55,8 +56,9 @@ import { pricingStore, usePricingStore, resolveServiceId, resolveSamsatId } from
 import { documentRepository } from "../../data/repositories/documentRepository";
 import { cn } from "./ui/utils";
 import { calculateEstimation } from "../../domain/estimation/estimationEngine";
-import { DEFAULT_R4_ANNUAL_TEMPLATE } from "../../domain/estimation/defaultTemplates";
+import { DEFAULT_R4_ANNUAL_TEMPLATE, DEFAULT_R2_ANNUAL_TEMPLATE } from "../../domain/estimation/defaultTemplates";
 import { estimationStore } from "../data/estimationStore";
+import { CalculationExplanationModal } from "./estimation/CalculationExplanationModal";
 import {
   ProgramSamsat,
   KondisiBerkas,
@@ -144,6 +146,29 @@ export function BuatOrder({
     "stnk-hilang": 0,
     "pemekaran-wilayah": 0,
   });
+
+  // R2 Annual Estimator Form States (Motor)
+  const [r2ProgramSamsat, setR2ProgramSamsat] = useState<ProgramSamsat>("NORMAL");
+  const [r2KondisiBerkas, setR2KondisiBerkas] = useState<KondisiBerkas>("TIDAK ADA KTP");
+  const [r2WilayahAccId, setR2WilayahAccId] = useState<WilayahAccId>("NON ACC ID");
+  const [r2TanggalEstimasi, setR2TanggalEstimasi] = useState<string>("");
+  const [r2ShowIncidentals, setR2ShowIncidentals] = useState<boolean>(false);
+  const [r2ManualValues, setR2ManualValues] = useState<Record<string, number>>({
+    "stnk-hilang": 0,
+    "proses-dan-acc-id": 350000,
+    etle: 0,
+    "req-nopol-ganjil-acak": 0,
+    "pemekaran-wilayah": 0,
+  });
+
+  // Calculation Explanation Popup Modal States
+  const [explanationModalOpen, setExplanationModalOpen] = useState(false);
+  const [explanationTargetItemId, setExplanationTargetItemId] = useState<string | null>("denda-pkb-pajak-baru");
+
+  const handleOpenExplanation = (itemId: string | null = null) => {
+    setExplanationTargetItemId(itemId);
+    setExplanationModalOpen(true);
+  };
 
   const clearFieldError = (key: string) => {
     if (step1Errors[key]) {
@@ -234,7 +259,11 @@ export function BuatOrder({
     (formData.layanan === "Perpanjangan 1 Tahun" || resolveServiceId(formData.layanan) === "perpanjangan-1-tahun") &&
     (formData.jenisKendaraan === "Mobil" || (formData.jenisKendaraan as string) === "R4");
 
-  // Cost calculation via pricingStore SSoT or estimationEngine (for R4 Annual)
+  const isR2Annual =
+    (formData.layanan === "Perpanjangan 1 Tahun" || resolveServiceId(formData.layanan) === "perpanjangan-1-tahun") &&
+    (formData.jenisKendaraan === "Motor" || (formData.jenisKendaraan as string) === "R2");
+
+  // Cost calculation via pricingStore SSoT or estimationEngine (for R4 and R2 Annual)
   const calculateCost = () => {
     const pkb = parseFloat(formData.nominalPkbTerakhir) || 0;
     const swdkllj = isOpsenEnabled ? (parseFloat(formData.nominalSwdkllj) || 0) : 0;
@@ -254,6 +283,8 @@ export function BuatOrder({
         snapshot: undefined,
         isR4Annual: false,
         r4Result: undefined as EstimationResult | undefined,
+        isR2Annual: false,
+        r2Result: undefined as EstimationResult | undefined,
       };
     }
 
@@ -328,6 +359,85 @@ export function BuatOrder({
         snapshot,
         isR4Annual: true,
         r4Result,
+        isR2Annual: false,
+        r2Result: undefined as EstimationResult | undefined,
+      };
+    }
+
+    if (isR2Annual) {
+      const template = estimationStore.getTemplate("template-pajak-tahunan-r2") || DEFAULT_R2_ANNUAL_TEMPLATE;
+      const estimationInput: EstimationInput = {
+        pkbDasar: pkb,
+        tanggalJatuhTempo: formData.pkbBerlakuSd || "",
+        tanggalEstimasi: r2TanggalEstimasi || new Date().toISOString().split("T")[0],
+        programSamsat: r2ProgramSamsat,
+        kondisiBerkas: r2KondisiBerkas,
+        wilayahAccId: r2WilayahAccId,
+        manualValues: r2ManualValues,
+      };
+
+      const r2Result = calculateEstimation(estimationInput, template);
+
+      // Map R2 result items to OrderCostBreakdownItem[]
+      const breakdown = r2Result.items
+        .filter((it) => it.amount > 0 || it.includesInTotal)
+        .map((it) => {
+          let category: "Pajak" | "Jasa" | "Samsat" | "Operasional" = "Pajak";
+          if (it.category === "JASA") category = "Jasa";
+          else if (it.category === "ADMIN") category = "Samsat";
+          else if (it.category === "INSIDENTAL") category = "Operasional";
+
+          return {
+            itemId: it.id,
+            code: it.code,
+            name: it.name,
+            amount: it.amount,
+            category,
+            source: it.isManual
+              ? ("Operasional" as const)
+              : it.category === "JASA"
+              ? ("BiayaLayanan" as const)
+              : ("Kendaraan" as const),
+            isRequired: !it.isManual,
+          };
+        });
+
+      const cetakSkpAmount = r2Result.items.find((i) => i.id === "cetak-skp")?.amount || 0;
+      const prosesAccAmount = r2Result.items.find((i) => i.id === "proses-dan-acc-id")?.amount || 0;
+      const jasaAmount = r2Result.items.find((i) => i.id === "jasa")?.amount || 200000;
+
+      const snapshot: any = {
+        serviceId: "perpanjangan-1-tahun",
+        serviceName: "Perpanjangan 1 Tahun",
+        samsatId: resolveSamsatId(formData.wilayahSamsatAsal),
+        samsatName: formData.wilayahSamsatAsal,
+        metodeLayanan: formData.metodeLayanan,
+        biayaJasa: jasaAmount,
+        biayaSamsat: cetakSkpAmount + prosesAccAmount,
+        biayaAntarJemput: 0,
+        pkb: r2Result.totalPkb + r2Result.totalDendaPkb,
+        swdkllj: r2Result.totalSwdkllj,
+        dendaSwdkllj: r2Result.totalDendaSwdkllj + cetakSkpAmount + prosesAccAmount + r2Result.totalInsidental,
+        totalEstimasi: r2Result.totalEstimasi,
+        breakdown,
+        createdAt: new Date().toISOString(),
+      };
+
+      return {
+        biayaJasa: jasaAmount,
+        biayaSamsat: cetakSkpAmount + prosesAccAmount,
+        biayaAntarJemput: 0,
+        subtotalLayanan: r2Result.totalAdminDanJasa + r2Result.totalInsidental,
+        pkb: r2Result.totalPkb + r2Result.totalDendaPkb,
+        swdkllj: r2Result.totalSwdkllj,
+        dendaSwdkllj: r2Result.totalDendaSwdkllj + cetakSkpAmount + prosesAccAmount + r2Result.totalInsidental,
+        total: r2Result.totalEstimasi,
+        breakdown,
+        snapshot,
+        isR4Annual: false,
+        r4Result: undefined as EstimationResult | undefined,
+        isR2Annual: true,
+        r2Result,
       };
     }
 
@@ -356,6 +466,8 @@ export function BuatOrder({
       snapshot,
       isR4Annual: false,
       r4Result: undefined as EstimationResult | undefined,
+      isR2Annual: false,
+      r2Result: undefined as EstimationResult | undefined,
     };
   };
 
@@ -718,7 +830,7 @@ export function BuatOrder({
         createdBy: currentUserName,
         createdById: currentUserId,
         createdByRole: currentUserRole,
-        estimationResult: cost.r4Result,
+        estimationResult: cost.r4Result || cost.r2Result,
         payment: {
           tipePembayaran: formData.tipePembayaran,
           metodePembayaran: paymentMethodResolved,
@@ -1251,16 +1363,21 @@ export function BuatOrder({
                             Otomatis R4 (Rp 143.000 + Tunggakan)
                           </Badge>
                         )}
+                        {isR2Annual && (
+                          <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                            Otomatis R2 (Rp 35.000 + Tunggakan)
+                          </Badge>
+                        )}
                       </div>
                       <Input
                         type="number"
-                        placeholder={isR4Annual ? "143000 (Otomatis)" : (isOpsenEnabled ? "143000" : "0")}
-                        disabled={!isOpsenEnabled || isR4Annual}
-                        value={isR4Annual ? (cost.r4Result?.totalSwdkllj.toString() || "143000") : (isOpsenEnabled ? formData.nominalSwdkllj : "0")}
+                        placeholder={isR4Annual ? "143000 (Otomatis)" : isR2Annual ? "35000 (Otomatis)" : (isOpsenEnabled ? "143000" : "0")}
+                        disabled={!isOpsenEnabled || isR4Annual || isR2Annual}
+                        value={isR4Annual ? (cost.r4Result?.totalSwdkllj.toString() || "143000") : isR2Annual ? (cost.r2Result?.totalSwdkllj.toString() || "35000") : (isOpsenEnabled ? formData.nominalSwdkllj : "0")}
                         onChange={(e) => setFormData({ ...formData, nominalSwdkllj: e.target.value })}
                         className={cn(
                           "bg-input-background border-border h-9 text-xs font-mono tabular-nums",
-                          (!isOpsenEnabled || isR4Annual) && "opacity-60 bg-muted cursor-not-allowed"
+                          (!isOpsenEnabled || isR4Annual || isR2Annual) && "opacity-60 bg-muted cursor-not-allowed"
                         )}
                       />
                       {!isOpsenEnabled && (
@@ -1271,6 +1388,11 @@ export function BuatOrder({
                       {isR4Annual && (
                         <p className="text-[10px] text-blue-600 dark:text-blue-400">
                           Perpanjangan 1 Tahun Mobil (R4) menggunakan formula resmi: SWDKLLJ Pokok Rp 143.000 + SWDKLLJ Tertunggak ({cost.r4Result?.tahunTunggakan || 0} thn).
+                        </p>
+                      )}
+                      {isR2Annual && (
+                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                          Perpanjangan 1 Tahun Motor (R2) menggunakan formula resmi: SWDKLLJ Pokok Rp 35.000 + SWDKLLJ Tertunggak ({cost.r2Result?.tahunTunggakan || 0} thn).
                         </p>
                       )}
                     </div>
@@ -1292,12 +1414,24 @@ export function BuatOrder({
                               </p>
                             </div>
                           </div>
-                          {cost.r4Result && (
-                            <Badge variant="outline" className="text-[11px] font-mono bg-background text-foreground border-border gap-1 py-1 px-2.5">
-                              <Clock className="w-3.5 h-3.5 text-primary" />
-                              Keterlambatan: <strong className="text-primary">{cost.r4Result.durasiKeterlambatan}</strong> ({cost.r4Result.tahunTunggakan} Thn {cost.r4Result.bulanTunggakan} Bln)
-                            </Badge>
-                          )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                              className="h-7 text-[11px] gap-1 px-2.5 font-medium border-primary/30 text-primary hover:bg-primary/10 bg-background/80 shadow-2xs"
+                            >
+                              <HelpCircle className="w-3.5 h-3.5" />
+                              Penjelasan Rumus
+                            </Button>
+                            {cost.r4Result && (
+                              <Badge variant="outline" className="text-[11px] font-mono bg-background text-foreground border-border gap-1 py-1 px-2.5">
+                                <Clock className="w-3.5 h-3.5 text-primary" />
+                                Keterlambatan: <strong className="text-primary">{cost.r4Result.durasiKeterlambatan}</strong> ({cost.r4Result.tahunTunggakan} Thn {cost.r4Result.bulanTunggakan} Bln)
+                              </Badge>
+                            )}
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -1457,6 +1591,209 @@ export function BuatOrder({
                                   placeholder="0"
                                   value={r4ManualValues["pemekaran-wilayah"] || ""}
                                   onChange={(e) => setR4ManualValues({ ...r4ManualValues, "pemekaran-wilayah": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* R2 ANNUAL TAX ESTIMATOR PARAMETERS */}
+                    {isR2Annual && (
+                      <div className="sm:col-span-2 md:col-span-3 mt-2 p-3.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-emerald-500/20">
+                          <div className="flex items-center gap-2">
+                            <span className="p-1.5 rounded-md bg-emerald-500/10 text-emerald-600">
+                              <Calculator className="w-4 h-4" />
+                            </span>
+                            <div>
+                              <h5 className="text-xs font-semibold text-foreground">
+                                Parameter Perhitungan Pajak Tahunan Motor (R2)
+                              </h5>
+                              <p className="text-[11px] text-muted-foreground">
+                                Menggunakan formula resmi Workbook PAJAK TAHUNAN R2 (DATEDIF & ROUNDUP)
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                              className="h-7 text-[11px] gap-1 px-2.5 font-medium border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10 bg-background/80 shadow-2xs"
+                            >
+                              <HelpCircle className="w-3.5 h-3.5" />
+                              Penjelasan Rumus
+                            </Button>
+                            {cost.r2Result && (
+                              <Badge variant="outline" className="text-[11px] font-mono bg-background text-foreground border-border gap-1 py-1 px-2.5">
+                                <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                                Keterlambatan: <strong className="text-emerald-600">{cost.r2Result.durasiKeterlambatan}</strong> ({cost.r2Result.tahunTunggakan} Thn, Denda: {cost.r2Result.bulanTunggakan} Bln)
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {/* Program Samsat */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Program Samsat <span className="text-destructive">*</span>
+                            </Label>
+                            <Select
+                              value={r2ProgramSamsat}
+                              onValueChange={(val: ProgramSamsat) => setR2ProgramSamsat(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="NORMAL" className="text-xs font-medium">
+                                  NORMAL (Denda PKB & SWDKLLJ Aktif)
+                                </SelectItem>
+                                <SelectItem value="FREE Biaya Denda" className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                  FREE Biaya Denda (Denda PKB Bebas)
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Tanggal Estimasi */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Tanggal Estimasi (Default: Hari Ini)
+                            </Label>
+                            <Input
+                              type="date"
+                              value={r2TanggalEstimasi || new Date().toISOString().split("T")[0]}
+                              onChange={(e) => setR2TanggalEstimasi(e.target.value)}
+                              className="bg-background border-border h-9 text-xs font-mono"
+                            />
+                          </div>
+
+                          {/* Kondisi Berkas / KTP */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Kelengkapan Berkas / KTP
+                            </Label>
+                            <Select
+                              value={r2KondisiBerkas}
+                              onValueChange={(val: KondisiBerkas) => setR2KondisiBerkas(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="TIDAK ADA KTP" className="text-xs">
+                                  TIDAK ADA KTP (Perlu ACC ID)
+                                </SelectItem>
+                                <SelectItem value="LENGKAP" className="text-xs">
+                                  LENGKAP (Ada KTP)
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Wilayah ACC ID */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Wilayah ACC ID (Opsional)
+                            </Label>
+                            <Select
+                              value={r2WilayahAccId}
+                              onValueChange={(val: WilayahAccId) => setR2WilayahAccId(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="NON ACC ID" className="text-xs">NON ACC ID (Default Rp 350.000)</SelectItem>
+                                <SelectItem value="DKI Jakarta" className="text-xs">DKI Jakarta (Rp 350.000)</SelectItem>
+                                <SelectItem value="Bogor" className="text-xs">Bogor (Rp 200.000)</SelectItem>
+                                <SelectItem value="Tanggerang" className="text-xs">Tangerang (Rp 350.000)</SelectItem>
+                                <SelectItem value="Depok" className="text-xs">Depok (Rp 350.000)</SelectItem>
+                                <SelectItem value="Bekasi" className="text-xs">Bekasi (Rp 350.000)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Toggle Incidentals */}
+                          <div className="space-y-1.5 sm:col-span-2 flex flex-col justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setR2ShowIncidentals(!r2ShowIncidentals)}
+                              className="h-9 text-xs w-full sm:w-auto self-start justify-between gap-2 border-dashed"
+                            >
+                              <span>Biaya Tambahan / Insidental (Opsional)</span>
+                              {r2ShowIncidentals ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Expandable Incidentals */}
+                        {r2ShowIncidentals && (
+                          <div className="p-3 bg-background/60 rounded-md border border-border/60 space-y-2 mt-2">
+                            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              Input Komponen Manual / Insidental R2 (Rp):
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">STNK Hilang</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r2ManualValues["stnk-hilang"] || ""}
+                                  onChange={(e) => setR2ManualValues({ ...r2ManualValues, "stnk-hilang": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Proses & ACC ID</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="350000"
+                                  value={r2ManualValues["proses-dan-acc-id"] !== undefined ? r2ManualValues["proses-dan-acc-id"] : ""}
+                                  onChange={(e) => setR2ManualValues({ ...r2ManualValues, "proses-dan-acc-id": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">ETLE</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r2ManualValues["etle"] || ""}
+                                  onChange={(e) => setR2ManualValues({ ...r2ManualValues, etle: parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">REQ NOPOL</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r2ManualValues["req-nopol-ganjil-acak"] || ""}
+                                  onChange={(e) => setR2ManualValues({ ...r2ManualValues, "req-nopol-ganjil-acak": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Pemekaran Wil.</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r2ManualValues["pemekaran-wilayah"] || ""}
+                                  onChange={(e) => setR2ManualValues({ ...r2ManualValues, "pemekaran-wilayah": parseFloat(e.target.value) || 0 })}
                                   className="h-7 text-xs font-mono"
                                 />
                               </div>
@@ -2173,9 +2510,21 @@ export function BuatOrder({
                               </span>
                             </div>
                           </div>
-                          <Badge variant="outline" className="text-[10px] font-mono bg-background">
-                            Template R4 Tahunan
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                              className="h-7 text-[11px] gap-1 px-2.5 font-medium border-primary/30 text-primary hover:bg-primary/10 bg-background/80 shadow-2xs"
+                            >
+                              <Calculator className="w-3.5 h-3.5" />
+                              Detail Penjelasan Hitungan
+                            </Button>
+                            <Badge variant="outline" className="text-[10px] font-mono bg-background">
+                              Template R4 Tahunan
+                            </Badge>
+                          </div>
                         </div>
 
                         {/* Group 1: Pokok & Denda PKB */}
@@ -2190,26 +2539,66 @@ export function BuatOrder({
                             </span>
                           </div>
                           <div className="space-y-1 text-xs pl-2">
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">PKB Tertunggak:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                PKB Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("pkb-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung PKB Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className="font-mono tabular-nums">
                                 Rp {(cost.r4Result.items.find((i) => i.id === "pkb-tertunggak")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Pajak Baru:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className="font-mono tabular-nums">
                                 Rp {(cost.r4Result.items.find((i) => i.id === "pajak-baru")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Denda PKB Tertunggak:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda PKB Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-pkb-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung Denda PKB Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-pkb-tertunggak")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
                                 Rp {(cost.r4Result.items.find((i) => i.id === "denda-pkb-tertunggak")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Denda PKB Pajak Baru:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda PKB Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung Denda PKB Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-pkb-pajak-baru")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
                                 Rp {(cost.r4Result.items.find((i) => i.id === "denda-pkb-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
                               </span>
@@ -2229,26 +2618,66 @@ export function BuatOrder({
                             </span>
                           </div>
                           <div className="space-y-1 text-xs pl-2">
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">SWDKLLJ Tertunggak:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                SWDKLLJ Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("swdkllj-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat tarif & rumus SWDKLLJ Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className="font-mono tabular-nums">
                                 Rp {(cost.r4Result.items.find((i) => i.id === "swdkllj-tertunggak")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">SWDKLLJ Pajak Baru:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                SWDKLLJ Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("swdkllj-pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat tarif SWDKLLJ Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className="font-mono tabular-nums">
                                 Rp {(cost.r4Result.items.find((i) => i.id === "swdkllj-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Denda SWDKLLJ Tertunggak:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda SWDKLLJ Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-swdkllj-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & tarif Denda SWDKLLJ Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-swdkllj-tertunggak")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
                                 Rp {(cost.r4Result.items.find((i) => i.id === "denda-swdkllj-tertunggak")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Denda SWDKLLJ Pajak Baru:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda SWDKLLJ Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-swdkllj-pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat aturan Denda SWDKLLJ Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-swdkllj-pajak-baru")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
                                 Rp {(cost.r4Result.items.find((i) => i.id === "denda-swdkllj-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
                               </span>
@@ -2268,20 +2697,40 @@ export function BuatOrder({
                             </span>
                           </div>
                           <div className="space-y-1 text-xs pl-2">
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Cetak SKP (Samsat):</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Cetak SKP (Samsat):
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("cetak-skp")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat aturan Cetak SKP"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className="font-mono tabular-nums">
                                 Rp {(cost.r4Result.items.find((i) => i.id === "cetak-skp")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Jasa Pengurusan Biro:</span>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Jasa Pengurusan Biro:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("jasa")}
+                                  className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat tarif Jasa Biro SUN89"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
                               <span className="font-mono tabular-nums">
                                 Rp {(cost.r4Result.items.find((i) => i.id === "jasa")?.amount || 0).toLocaleString("id-ID")}
                               </span>
                             </div>
                             {(cost.r4Result.items.find((i) => i.id === "jr")?.amount || 0) > 0 && (
-                              <div className="flex justify-between">
+                              <div className="flex justify-between items-center">
                                 <span className="text-muted-foreground">JR:</span>
                                 <span className="font-mono tabular-nums">
                                   Rp {(cost.r4Result.items.find((i) => i.id === "jr")?.amount || 0).toLocaleString("id-ID")}
@@ -2307,8 +2756,18 @@ export function BuatOrder({
                               {cost.r4Result.items
                                 .filter((i) => i.category === "INSIDENTAL" && i.amount > 0)
                                 .map((item) => (
-                                  <div key={item.id} className="flex justify-between">
-                                    <span className="text-muted-foreground">{item.name}:</span>
+                                  <div key={item.id} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground flex items-center gap-1">
+                                      {item.name}:
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenExplanation("insidental")}
+                                        className="text-muted-foreground/60 hover:text-primary transition-colors p-0.5 rounded cursor-pointer"
+                                        title="Lihat penjelasan biaya insidental"
+                                      >
+                                        <HelpCircle className="w-3 h-3" />
+                                      </button>
+                                    </span>
                                     <span className="font-mono tabular-nums">Rp {item.amount.toLocaleString("id-ID")}</span>
                                   </div>
                                 ))}
@@ -2322,6 +2781,14 @@ export function BuatOrder({
                             <span className="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
                               <FileCheck className="w-3.5 h-3.5" />
                               5. Biaya ACC ID (Cell I5)
+                              <button
+                                type="button"
+                                onClick={() => handleOpenExplanation("acc-id")}
+                                className="text-amber-700/70 dark:text-amber-400/70 hover:text-amber-800 dark:hover:text-amber-300 transition-colors p-0.5 rounded cursor-pointer"
+                                title="Lihat aturan Biaya ACC ID R4"
+                              >
+                                <HelpCircle className="w-3 h-3" />
+                              </button>
                             </span>
                             <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30">
                               Tidak Masuk Total
@@ -2342,11 +2809,320 @@ export function BuatOrder({
                           </p>
                         </div>
                       </div>
+                    ) : cost.isR2Annual && cost.r2Result ? (
+                      <div className="space-y-3 pb-2.5 border-b border-border/60">
+                        {/* Header Banner */}
+                        {/* Header Banner */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-emerald-600" />
+                            <div>
+                              <span className="font-semibold text-foreground">
+                                Durasi Keterlambatan: {cost.r2Result.durasiKeterlambatan}
+                              </span>
+                              <span className="text-muted-foreground text-[11px] block">
+                                {cost.r2Result.tahunTunggakan} Tahun, Denda: {cost.r2Result.bulanTunggakan} Bulan • Program Samsat: <strong className="text-foreground">{r2ProgramSamsat}</strong>
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                              className="h-7 text-[11px] gap-1 px-2.5 font-medium border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10 bg-background/80 shadow-2xs"
+                            >
+                              <Calculator className="w-3.5 h-3.5" />
+                              Detail Penjelasan Hitungan
+                            </Button>
+                            <Badge variant="outline" className="text-[10px] font-mono bg-background text-emerald-600 border-emerald-500/30">
+                              Template R2 Tahunan
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {/* Group 1: Pokok & Denda PKB */}
+                        <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                          <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-blue-500" />
+                              1. Pokok & Denda PKB
+                            </span>
+                            <span className="font-mono tabular-nums text-primary font-bold">
+                              Rp {(cost.r2Result.totalPkb + cost.r2Result.totalDendaPkb).toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-xs pl-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                PKB Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("pkb-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung PKB Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r2Result.items.find((i) => i.id === "pkb-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r2Result.items.find((i) => i.id === "pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda PKB Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-pkb-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung Denda PKB Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className={cn("font-mono tabular-nums", (cost.r2Result.items.find((i) => i.id === "denda-pkb-tertunggak")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r2Result.items.find((i) => i.id === "denda-pkb-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda PKB Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus & cara hitung Denda PKB Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className={cn("font-mono tabular-nums", (cost.r2Result.items.find((i) => i.id === "denda-pkb-pajak-baru")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r2Result.items.find((i) => i.id === "denda-pkb-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Group 2: Pokok & Denda SWDKLLJ (Motor) */}
+                        <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                          <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-amber-500" />
+                              2. Pokok & Denda SWDKLLJ (Motor)
+                            </span>
+                            <span className="font-mono tabular-nums text-primary font-bold">
+                              Rp {(cost.r2Result.totalSwdkllj + cost.r2Result.totalDendaSwdkllj).toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-xs pl-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                SWDKLLJ Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("swdkllj-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat tarif SWDKLLJ Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r2Result.items.find((i) => i.id === "swdkllj-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                SWDKLLJ Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("swdkllj-pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat tarif SWDKLLJ Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r2Result.items.find((i) => i.id === "swdkllj-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda SWDKLLJ Tertunggak:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-swdkllj-tertunggak")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat rumus Denda SWDKLLJ Tertunggak"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className={cn("font-mono tabular-nums", (cost.r2Result.items.find((i) => i.id === "denda-swdkllj-tertunggak")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r2Result.items.find((i) => i.id === "denda-swdkllj-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Denda SWDKLLJ Pajak Baru:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("denda-swdkllj-pajak-baru")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat aturan Denda SWDKLLJ Pajak Baru"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className={cn("font-mono tabular-nums", (cost.r2Result.items.find((i) => i.id === "denda-swdkllj-pajak-baru")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r2Result.items.find((i) => i.id === "denda-swdkllj-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Group 3: Administrasi, Proses & Jasa */}
+                        <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                          <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                              3. Administrasi, Proses & Jasa
+                            </span>
+                            <span className="font-mono tabular-nums text-primary font-bold">
+                              Rp {cost.r2Result.totalAdminDanJasa.toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-xs pl-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Proses dan ACC ID:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("proses-dan-acc-id")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat aturan Proses dan ACC ID R2"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className="font-mono tabular-nums font-semibold">
+                                Rp {(cost.r2Result.items.find((i) => i.id === "proses-dan-acc-id")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Cetak SKP (Samsat):
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("cetak-skp")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat aturan Cetak SKP"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r2Result.items.find((i) => i.id === "cetak-skp")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                Jasa Pengurusan Biro:
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenExplanation("jasa")}
+                                  className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                  title="Lihat tarif Jasa Pengurusan Motor"
+                                >
+                                  <HelpCircle className="w-3 h-3" />
+                                </button>
+                              </span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r2Result.items.find((i) => i.id === "jasa")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            {(cost.r2Result.items.find((i) => i.id === "stnk-hilang")?.amount || 0) > 0 && (
+                              <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">STNK Hilang:</span>
+                                <span className="font-mono tabular-nums">
+                                  Rp {(cost.r2Result.items.find((i) => i.id === "stnk-hilang")?.amount || 0).toLocaleString("id-ID")}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Group 4: Biaya Insidental (bila ada nilai) */}
+                        {cost.r2Result.totalInsidental > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                                4. Biaya Insidental
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.r2Result.totalInsidental.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.r2Result.items
+                                .filter((i) => i.category === "INSIDENTAL" && i.amount > 0)
+                                .map((item) => (
+                                  <div key={item.id} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground flex items-center gap-1">
+                                      {item.name}:
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenExplanation("insidental")}
+                                        className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                        title="Lihat penjelasan biaya insidental"
+                                      >
+                                        <HelpCircle className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                    <span className="font-mono tabular-nums">Rp {item.amount.toLocaleString("id-ID")}</span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       cost.breakdown && cost.breakdown.length > 0 ? (
                         <div className="space-y-1.5 pb-2.5 border-b border-border/60">
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                            Komponen Biaya Terhitung:
+                          <div className="flex items-center justify-between">
+                            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              Komponen Biaya Terhitung:
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenExplanation("jasa")}
+                              className="h-6 text-[10px] gap-1 px-2 border-primary/30 text-primary hover:bg-primary/10 bg-background/80"
+                            >
+                              <HelpCircle className="w-3 h-3" />
+                              Penjelasan Biaya
+                            </Button>
                           </div>
                           <div className="space-y-1 pl-1">
                             {cost.breakdown.map((item, idx) => (
@@ -2379,7 +3155,7 @@ export function BuatOrder({
                       )
                     )}
 
-                    {!cost.isR4Annual && (
+                    {!cost.isR4Annual && !cost.isR2Annual && (
                       <>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Subtotal Biaya Layanan:</span>
@@ -2415,7 +3191,7 @@ export function BuatOrder({
                     <div className="border-t border-border/80 pt-2 flex justify-between items-baseline">
                       <div>
                         <span className="text-sm font-semibold text-foreground">
-                          {cost.isR4Annual ? "Total Estimasi Akhir (Pajak + Jasa):" : "Total Estimasi Awal:"}
+                          {cost.isR4Annual || cost.isR2Annual ? "Total Estimasi Akhir (Pajak + Jasa):" : "Total Estimasi Awal:"}
                         </span>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
                           Skema: <strong className="text-foreground">{formData.tipePembayaran}</strong> • Metode: <strong className="text-foreground">{formData.metodeLayanan}</strong>
@@ -2643,6 +3419,22 @@ export function BuatOrder({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Calculation Explanation Popup Modal */}
+      <CalculationExplanationModal
+        open={explanationModalOpen}
+        onOpenChange={setExplanationModalOpen}
+        initialItemId={explanationTargetItemId}
+        estimationResult={cost.r4Result || cost.r2Result || null}
+        vehicleType={formData.jenisKendaraan}
+        serviceType={formData.layanan}
+        pkbDasar={parseFloat(formData.nominalPkbTerakhir) || 0}
+        tanggalJatuhTempo={formData.pkbBerlakuSd || ""}
+        tanggalEstimasi={isR2Annual ? r2TanggalEstimasi : r4TanggalEstimasi}
+        programSamsat={isR2Annual ? r2ProgramSamsat : r4ProgramSamsat}
+        kondisiBerkas={isR2Annual ? r2KondisiBerkas : r4KondisiBerkas}
+        wilayahAccId={isR2Annual ? r2WilayahAccId : r4WilayahAccId}
+      />
     </div>
   );
 }

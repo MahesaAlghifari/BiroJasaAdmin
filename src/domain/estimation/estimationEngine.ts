@@ -25,6 +25,8 @@ export interface RuleCalculationContext {
   programSamsat: ProgramSamsat;
   template: EstimationTemplateConfig;
   manualValues: Record<string, number>;
+  kondisiBerkas?: KondisiBerkas;
+  wilayahAccId?: WilayahAccId;
 }
 
 export type RuleHandler = (ctx: RuleCalculationContext) => number;
@@ -45,15 +47,18 @@ export const BUILTIN_RULE_HANDLERS: Record<string, RuleHandler> = {
 
   // Cell F15: =ROUNDUP(IF(I11="free biaya denda",0,IF(I11="normal",IF(C15<>"",SUM(C15*I6/12*12),""),"")),-3)
   DENDA_PKB_TERTUNGGAK: (ctx) => {
-    if (ctx.programSamsat === "FREE Biaya Denda") return 0;
+    const program = (ctx.programSamsat || "").trim().toLowerCase();
+    if (program === "free biaya denda") return 0;
     const pkbTertunggak = ctx.pkbDasar * ctx.tahunTunggakan;
     const raw = pkbTertunggak * ctx.template.koefisienDenda;
     return Math.ceil(raw / 1000) * 1000;
   },
 
-  // Cell F16: =ROUNDUP(IF(I11="free biaya denda",0,IF(I11="normal",SUM(I14*I6/12*I13),"")),-3)
+  // Cell F16: =ROUNDUP(IF(I11="free biaya denda";0;IF(I11="normal";SUM(I14*I6/12*I13);""));-3)
   DENDA_PKB_PAJAK_BARU: (ctx) => {
-    if (ctx.programSamsat === "FREE Biaya Denda") return 0;
+    const program = (ctx.programSamsat || "").trim().toLowerCase();
+    if (program === "free biaya denda") return 0;
+    // SUM(I14*I6/12*I13) where I14 = PKB Dasar, I6 = Koefisien Denda (0.48), I13 = Bulan Denda
     const raw = (ctx.pkbDasar * ctx.template.koefisienDenda / 12) * ctx.bulanTunggakan;
     return Math.ceil(raw / 1000) * 1000;
   },
@@ -85,6 +90,28 @@ export const BUILTIN_RULE_HANDLERS: Record<string, RuleHandler> = {
 
   // Cell C25: =IF(AND(I7="5 tahunan",I9="mobil"),100000,IF(AND(I7="5 tahunan",I9="motor"),60000,IF(I7="tahunan",0,"")))
   ADMIN_TNKB: () => 0,
+
+  // Cell C27: proses dan acc id (Sheet 5)
+  // Masuk dalam total C30. Default Rp 350.000 untuk Motor.
+  // Jika berkas LENGKAP -> 0.
+  // Jika wilayah spesifik dipilih selain NON ACC ID -> ikuti tarif wilayah.
+  // Jika berkas tidak diisi/kosong -> 0 (tidak menebak biaya).
+  PROSES_DAN_ACC_ID: (ctx) => {
+    const manualVal = ctx.manualValues ? ctx.manualValues["proses-dan-acc-id"] : undefined;
+    if (typeof manualVal === "number" && !isNaN(manualVal) && isFinite(manualVal)) {
+      return Math.max(0, manualVal);
+    }
+    if (ctx.kondisiBerkas === "LENGKAP") {
+      return 0;
+    }
+    if (ctx.wilayahAccId && ctx.template.accIdRates[ctx.wilayahAccId] !== undefined && ctx.wilayahAccId !== "NON ACC ID") {
+      return ctx.template.accIdRates[ctx.wilayahAccId];
+    }
+    if (!ctx.kondisiBerkas) {
+      return 0;
+    }
+    return ctx.template.components.find((c) => c.id === "proses-dan-acc-id")?.defaultValue ?? 350000;
+  },
 
   // Cell C28: =IF(I13+I12>0,IF(I9="motor",50000,IF(I9="mobil",100000,"Nilai F9 tidak valid")),"")
   CETAK_SKP: (ctx) => {
@@ -148,7 +175,15 @@ export function calculateEstimation(
   // 1. Calculate calendar overdue duration
   const overdue = calculateOverdueDuration(input.tanggalJatuhTempo, input.tanggalEstimasi);
   const tahunTunggakan = overdue.years;
-  const bulanTunggakan = overdue.months;
+  const isDelay = overdue.years > 0 || overdue.months > 0;
+
+  // Sheet 5 cell I13 rule:
+  // For Motor (R2), if overdue, bulan denda is calendar months + 5
+  // For Mobil (R4), bulan denda is calendar months
+  const bulanTunggakan = isDelay
+    ? (template.vehicleType === "Motor" ? overdue.months + 5 : overdue.months)
+    : 0;
+  const bulanKalender = overdue.months;
 
   const ctx: RuleCalculationContext = {
     pkbDasar,
@@ -157,6 +192,8 @@ export function calculateEstimation(
     programSamsat: input.programSamsat,
     template,
     manualValues,
+    kondisiBerkas: input.kondisiBerkas,
+    wilayahAccId: input.wilayahAccId,
   };
 
   // 2. Evaluate all active template components in display order
@@ -169,12 +206,14 @@ export function calculateEstimation(
   for (const comp of sortedComponents) {
     let amount = 0;
     const isManual = comp.valueType === "manual" || comp.isEditable === true;
+    const hasManualOverride =
+      manualValues[comp.id] !== undefined &&
+      typeof manualValues[comp.id] === "number" &&
+      !isNaN(manualValues[comp.id]) &&
+      isFinite(manualValues[comp.id]);
 
-    if (isManual) {
-      const overrideVal = manualValues[comp.id];
-      amount = typeof overrideVal === "number" && !isNaN(overrideVal) && isFinite(overrideVal)
-        ? Math.max(0, overrideVal)
-        : comp.defaultValue;
+    if (hasManualOverride) {
+      amount = Math.max(0, manualValues[comp.id]);
     } else if (comp.ruleId) {
       const handler = registry.get(comp.ruleId);
       if (handler) {
@@ -192,7 +231,7 @@ export function calculateEstimation(
       name: comp.name,
       category: comp.category,
       amount: Math.max(0, amount),
-      isManual,
+      isManual: hasManualOverride || comp.valueType === "manual",
       includesInTotal: comp.includesInTotal,
       description: comp.description,
     });
@@ -220,25 +259,41 @@ export function calculateEstimation(
     }
   }
 
-  // 4. ACC ID (evaluated separately, strictly EXCLUDED from totalEstimasi)
+  // 4. ACC ID handling
   let accIdAmount: number | null = null;
   let accIdStatus: "LENGKAP" | "CALCULATED" | "NOT_AVAILABLE" = "NOT_AVAILABLE";
 
   const kondisiBerkas = input.kondisiBerkas ? input.kondisiBerkas.trim().toUpperCase() : undefined;
-  if (kondisiBerkas === "LENGKAP") {
-    accIdAmount = 0;
-    accIdStatus = "LENGKAP";
-  } else if (kondisiBerkas === "TIDAK ADA KTP") {
-    if (input.wilayahAccId) {
-      accIdAmount = resolveAccIdRate(template.accIdRates, input.wilayahAccId);
+  if (template.vehicleType === "Motor") {
+    // For R2, "Proses dan ACC ID" is part of the items breakdown and included in totalEstimasi
+    const prosesAccItem = items.find((i) => i.id === "proses-dan-acc-id");
+    if (kondisiBerkas === "LENGKAP") {
+      accIdAmount = 0;
+      accIdStatus = "LENGKAP";
+    } else if (kondisiBerkas === "TIDAK ADA KTP") {
+      accIdAmount = prosesAccItem ? prosesAccItem.amount : 350000;
       accIdStatus = "CALCULATED";
     } else {
       accIdAmount = null;
       accIdStatus = "NOT_AVAILABLE";
     }
   } else {
-    accIdAmount = null;
-    accIdStatus = "NOT_AVAILABLE";
+    // For R4, ACC ID is evaluated separately and strictly EXCLUDED from totalEstimasi
+    if (kondisiBerkas === "LENGKAP") {
+      accIdAmount = 0;
+      accIdStatus = "LENGKAP";
+    } else if (kondisiBerkas === "TIDAK ADA KTP") {
+      if (input.wilayahAccId) {
+        accIdAmount = resolveAccIdRate(template.accIdRates, input.wilayahAccId);
+        accIdStatus = "CALCULATED";
+      } else {
+        accIdAmount = null;
+        accIdStatus = "NOT_AVAILABLE";
+      }
+    } else {
+      accIdAmount = null;
+      accIdStatus = "NOT_AVAILABLE";
+    }
   }
 
   // 5. Final total with Excel ROUNDUP(..., -3) (up to nearest 1.000)
@@ -247,6 +302,7 @@ export function calculateEstimation(
   return {
     tahunTunggakan,
     bulanTunggakan,
+    bulanKalender,
     durasiKeterlambatan: overdue.formatted,
     items,
     totalPkb,
