@@ -31,6 +31,7 @@ export interface IFinanceRepository {
   resolveInvoice(id: number, details?: any): boolean;
   completeInvoice(id: number, completedBy?: string): boolean;
   addKasKantor?(item: Omit<KasKantorItem, "id">): KasKantorItem | null;
+  addPengeluaran?(item: Omit<PengeluaranItem, "id">): PengeluaranItem | null;
   saveInvoice?(invoice: InvoiceBillingRecord): void;
   setProvider?(provider: IFinanceDataProvider): void;
   getProvider?(): IFinanceDataProvider;
@@ -113,6 +114,10 @@ export class FinanceRepository implements IFinanceRepository {
 
   public addKasKantor(item: Omit<KasKantorItem, "id">): KasKantorItem | null {
     return this.provider.addKasKantor ? this.provider.addKasKantor(item) : null;
+  }
+
+  public addPengeluaran(item: Omit<PengeluaranItem, "id">): PengeluaranItem | null {
+    return this.provider.addPengeluaran ? this.provider.addPengeluaran(item) : null;
   }
 
   public saveInvoice(invoice: InvoiceBillingRecord): void {

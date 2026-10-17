@@ -4,7 +4,7 @@
  */
 
 import { db } from "../database/db";
-import { InvoiceBillingRecord, KasKantorItem } from "../../../src/domain/finance/types";
+import { InvoiceBillingRecord, KasKantorItem, PengeluaranItem } from "../../../src/domain/finance/types";
 
 export class DbFinanceRepository {
   public getAllInvoices(): InvoiceBillingRecord[] {
@@ -97,6 +97,7 @@ export class DbFinanceRepository {
       kredit: r.kredit,
       saldo: r.saldo,
       total: r.saldo,
+      penanggungJawab: r.penanggung_jawab || undefined,
     })) as unknown as KasKantorItem[];
   }
 
@@ -111,8 +112,8 @@ export class DbFinanceRepository {
       : lastSaldo - item.kredit;
 
     const insertStmt = db.prepare(`
-      INSERT INTO kas_kantor (tanggal, keterangan, status, debit, kredit, saldo)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO kas_kantor (tanggal, keterangan, status, debit, kredit, saldo, penanggung_jawab)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     const res = insertStmt.run(
@@ -121,7 +122,8 @@ export class DbFinanceRepository {
       item.status,
       item.debit,
       item.kredit,
-      newSaldo
+      newSaldo,
+      item.penanggungJawab || null
     );
 
     return {
@@ -133,7 +135,42 @@ export class DbFinanceRepository {
       kredit: item.kredit,
       saldo: newSaldo,
       total: newSaldo,
+      penanggungJawab: item.penanggungJawab,
     } as unknown as KasKantorItem;
+  }
+
+  public getAllPengeluaran(): PengeluaranItem[] {
+    const stmt = db.prepare("SELECT * FROM pengeluaran ORDER BY id DESC");
+    const rows = stmt.all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      tanggal: r.tanggal,
+      keterangan: r.keterangan,
+      nominal: r.nominal,
+      penanggungJawab: r.penanggung_jawab || undefined,
+    })) as PengeluaranItem[];
+  }
+
+  public addPengeluaran(item: Omit<PengeluaranItem, "id">): PengeluaranItem {
+    const insertStmt = db.prepare(`
+      INSERT INTO pengeluaran (tanggal, keterangan, nominal, penanggung_jawab)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    const res = insertStmt.run(
+      item.tanggal,
+      item.keterangan,
+      item.nominal,
+      item.penanggungJawab || null
+    );
+
+    return {
+      id: Number(res.lastInsertRowid),
+      tanggal: item.tanggal,
+      keterangan: item.keterangan,
+      nominal: item.nominal,
+      penanggungJawab: item.penanggungJawab,
+    };
   }
 }
 

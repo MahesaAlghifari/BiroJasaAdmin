@@ -35,6 +35,7 @@ export interface IFinanceDataProvider {
   resolveInvoice(id: number, details?: any): boolean;
   completeInvoice(id: number, completedBy?: string): boolean;
   addKasKantor?(item: Omit<KasKantorItem, "id">): KasKantorItem | null;
+  addPengeluaran?(item: Omit<PengeluaranItem, "id">): PengeluaranItem | null;
   saveInvoice?(invoice: InvoiceBillingRecord): void;
   subscribe(listener: () => void): () => void;
   isLoading?(): boolean;
@@ -174,6 +175,20 @@ export class MockFinanceProvider implements IFinanceDataProvider {
         : lastTotal - (item.kredit || 0),
     };
     this.kasKantor.push(newEntry);
+    this.notify();
+    return newEntry;
+  }
+
+  public addPengeluaran(item: Omit<PengeluaranItem, "id">): PengeluaranItem {
+    const nextId = Math.max(0, ...this.pengeluaran.map((p) => p.id)) + 1;
+    const newEntry: PengeluaranItem = {
+      id: nextId,
+      tanggal: item.tanggal,
+      keterangan: item.keterangan,
+      nominal: item.nominal,
+      penanggungJawab: item.penanggungJawab,
+    };
+    this.pengeluaran.unshift(newEntry);
     this.notify();
     return newEntry;
   }

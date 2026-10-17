@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate, useLocation } from "react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Card } from "./ui/card";
 import { ScrollArea } from "./ui/scroll-area";
@@ -35,6 +35,7 @@ const VALID_CATEGORIES: PenjualanContractCategory[] = [
 export function DataPenjualan() {
   const { category } = useParams<{ category?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Authoritative URL-driven active tab
   const activeTab: PenjualanContractCategory = (category && VALID_CATEGORIES.includes(category as PenjualanContractCategory))
@@ -48,7 +49,14 @@ export function DataPenjualan() {
   }, [category, navigate]);
 
   const handleTabChange = (val: string) => {
-    navigate(`/finance/data-penjualan/${val}`);
+    if (val === activeTab) {
+      return;
+    }
+    const targetPath = `/finance/data-penjualan/${val}`;
+    if (location.pathname === targetPath || (typeof window !== "undefined" && window.location.pathname === targetPath)) {
+      return;
+    }
+    navigate(targetPath);
   };
 
   const [isAdding, setIsAdding] = useState(false);

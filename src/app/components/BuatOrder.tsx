@@ -389,15 +389,15 @@ export function BuatOrder({
     const errors: Record<string, string> = {};
 
     if (!formData.customer.trim()) {
-      errors.customer = "Nama customer / pemesan wajib diisi!";
+      errors.customer = "Nama Customer wajib diisi!";
     }
     if (!formData.nomorHP.trim()) {
-      errors.nomorHP = "Nomor HP / WhatsApp wajib diisi!";
+      errors.nomorHP = "Nomor Telepon wajib diisi!";
     } else if (formData.nomorHP.length < 9) {
-      errors.nomorHP = "Nomor HP minimal terdiri dari 9 digit angka!";
+      errors.nomorHP = "Nomor Telepon minimal terdiri dari 9 digit angka!";
     }
     if (!formData.layanan) {
-      errors.layanan = "Silakan pilih jenis layanan terlebih dahulu!";
+      errors.layanan = "Silakan pilih jenis pengurusan terlebih dahulu!";
     }
     if (!plateNumber.trim()) {
       errors.plateNumber = "Nomor polisi kendaraan wajib diisi!";
@@ -443,17 +443,17 @@ export function BuatOrder({
 
     // Final Validations
     if (!formData.customer.trim()) {
-      toast.error("Nama customer / pemesan wajib diisi!");
+      toast.error("Nama Customer wajib diisi!");
       setCurrentStep(1);
       return;
     }
     if (!formData.nomorHP.trim() || formData.nomorHP.length < 9) {
-      toast.error("Nomor HP / WhatsApp wajib diisi (minimal 9 digit)!");
+      toast.error("Nomor Telepon wajib diisi (minimal 9 digit)!");
       setCurrentStep(1);
       return;
     }
     if (!formData.layanan) {
-      toast.error("Silakan pilih jenis layanan terlebih dahulu!");
+      toast.error("Silakan pilih jenis pengurusan terlebih dahulu!");
       setCurrentStep(1);
       return;
     }
@@ -713,7 +713,7 @@ export function BuatOrder({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div id="field-customer" className="space-y-1.5">
                       <Label htmlFor="input-customer" className="text-xs">
-                        Nama Customer / Pemesan <span className="text-destructive">*</span>
+                        Nama Customer <span className="text-destructive">*</span>
                       </Label>
                       <Input
                         id="input-customer"
@@ -738,7 +738,7 @@ export function BuatOrder({
 
                     <div id="field-nomorHP" className="space-y-1.5">
                       <Label htmlFor="input-nomorHP" className="text-xs">
-                        Nomor HP / WhatsApp <span className="text-destructive">*</span>
+                        Nomor Telepon <span className="text-destructive">*</span>
                       </Label>
                       <Input
                         id="input-nomorHP"
@@ -801,7 +801,7 @@ export function BuatOrder({
                     {/* Jenis Layanan */}
                     <div id="field-layanan" className="space-y-1.5 sm:col-span-2">
                       <Label className="text-xs">
-                        Jenis Layanan <span className="text-destructive">*</span>
+                        Jenis Pengurusan <span className="text-destructive">*</span>
                       </Label>
                       <Select
                         value={formData.layanan}
@@ -818,7 +818,7 @@ export function BuatOrder({
                         }}
                       >
                         <SelectTrigger className={cn("bg-input-background border-border h-9 text-xs", step1Errors.layanan && "border-destructive ring-1 ring-destructive/40")}>
-                          <SelectValue placeholder="Pilih jenis layanan Samsat" />
+                          <SelectValue placeholder="Pilih jenis pengurusan Samsat" />
                         </SelectTrigger>
                         <SelectContent>
                           {layananOptions.map((layanan) => (
@@ -1807,17 +1807,17 @@ export function BuatOrder({
                   {/* Summary Overview Grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-lg bg-card/60 border border-border/50 text-xs">
                     <div>
-                      <p className="text-[11px] text-muted-foreground">Customer</p>
+                      <p className="text-[11px] text-muted-foreground">Nama Customer</p>
                       <p className="font-semibold text-foreground">{formData.customer || "-"}</p>
                       <p className="text-[11px] text-muted-foreground font-mono">{formData.nomorHP || "-"}</p>
                     </div>
                     <div>
-                      <p className="text-[11px] text-muted-foreground">Kendaraan & Nopol</p>
+                      <p className="text-[11px] text-muted-foreground">Kendaraan & Nomor Polisi</p>
                       <p className="font-semibold text-foreground">{formData.jenisKendaraan} ({formData.tahunKendaraan})</p>
                       <p className="text-xs font-mono font-bold text-primary">{getCombinedNopol() || "-"}</p>
                     </div>
                     <div>
-                      <p className="text-[11px] text-muted-foreground">Layanan & Metode</p>
+                      <p className="text-[11px] text-muted-foreground">Jenis Pengurusan & Metode</p>
                       <p className="font-semibold text-foreground">{formData.layanan || "-"}</p>
                       <p className="text-[11px] text-muted-foreground">{formData.metodeLayanan}</p>
                     </div>
@@ -1863,7 +1863,7 @@ export function BuatOrder({
                       </div>
                     ) : (
                       <div className="text-xs text-muted-foreground italic py-1 pb-2 border-b border-border/60">
-                        Pilih jenis layanan pada formulir di Step 1 untuk melihat rincian biaya.
+                        Pilih jenis pengurusan pada formulir di Step 1 untuk melihat rincian biaya.
                       </div>
                     )}
 
@@ -2087,11 +2087,11 @@ export function BuatOrder({
                 <span className="font-mono font-bold text-primary">{createdOrderSuccess.orderNo}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Customer</span>
+                <span className="text-muted-foreground">Nama Customer</span>
                 <span className="font-medium text-foreground">{createdOrderSuccess.customer}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Layanan</span>
+                <span className="text-muted-foreground">Jenis Pengurusan</span>
                 <span className="font-medium text-foreground">{createdOrderSuccess.layanan}</span>
               </div>
               <div className="flex justify-between items-center">

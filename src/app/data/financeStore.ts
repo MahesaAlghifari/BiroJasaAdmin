@@ -328,6 +328,14 @@ class FinanceStore {
     if (Array.isArray(repoProfit)) {
       this.profitData = repoProfit;
     }
+    const repoPengeluaran = financeRepository.getPengeluaranList();
+    if (Array.isArray(repoPengeluaran)) {
+      this.pengeluaran = repoPengeluaran;
+    }
+    const repoMessenger = financeRepository.getKasMessengerList();
+    if (Array.isArray(repoMessenger)) {
+      this.kasMessenger = repoMessenger;
+    }
     this.recomputeLabaRugi();
     this.notify();
   }
@@ -1202,11 +1210,12 @@ class FinanceStore {
       keterangan: item.keterangan,
       debit: item.debit,
       kredit: item.kredit,
+      penanggungJawab: item.penanggungJawab,
       total: runningTotal,
       invoiceRef: item.invoiceRef,
     };
 
-    this.kasKantor.push(newItem);
+    this.kasKantor.unshift(newItem);
     this.notify();
     return newItem;
   }
@@ -1272,12 +1281,21 @@ class FinanceStore {
   // ==========================================
 
   public addPengeluaran(item: Omit<PengeluaranItem, "id">): PengeluaranItem {
+    if (this.isApiMode) {
+      const added = financeRepository.addPengeluaran ? financeRepository.addPengeluaran(item) : null;
+      if (added) {
+        this.syncFromRepository();
+        return added;
+      }
+    }
+
     const nextId = Math.max(0, ...this.pengeluaran.map((p) => p.id)) + 1;
     const newItem: PengeluaranItem = {
       id: nextId,
       tanggal: item.tanggal,
       keterangan: item.keterangan,
       nominal: item.nominal,
+      penanggungJawab: item.penanggungJawab,
     };
     this.pengeluaran.unshift(newItem);
     this.notify();

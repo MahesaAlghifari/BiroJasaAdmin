@@ -9,7 +9,7 @@ import { createInitialOrders } from "../../../src/data/mock/orderMockData";
 import { STAGES, StageName, OperationalOrder } from "../../../src/domain/order/types";
 import { DEMO_CREDENTIALS } from "../../../src/data/repositories/userRepository";
 import { pricingStore } from "../../../src/app/data/pricingStore";
-import { tagihanData, kasKantorData } from "../../../src/app/data/financeDummyData";
+import { tagihanData, kasKantorData, pengeluaranKantorData } from "../../../src/app/data/financeDummyData";
 
 export function seedDatabase(): void {
   // 1. Seed Users if table is empty
@@ -203,6 +203,26 @@ export function seedDatabase(): void {
         item.debit || 0,
         item.kredit || 0,
         item.total || 0
+      );
+    }
+  }
+
+  // 6. Seed Pengeluaran if table is empty
+  const pengeluaranCountStmt = db.prepare("SELECT COUNT(*) as count FROM pengeluaran");
+  const pengeluaranCount = (pengeluaranCountStmt.get() as { count: number }).count;
+
+  if (pengeluaranCount === 0 && Array.isArray(pengeluaranKantorData) && pengeluaranKantorData.length > 0) {
+    const insertPengeluaran = db.prepare(`
+      INSERT INTO pengeluaran (tanggal, keterangan, nominal, penanggung_jawab)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    for (const item of pengeluaranKantorData) {
+      insertPengeluaran.run(
+        item.tanggal,
+        item.keterangan,
+        item.nominal || 0,
+        item.penanggungJawab || null
       );
     }
   }

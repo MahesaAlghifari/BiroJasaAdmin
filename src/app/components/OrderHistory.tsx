@@ -164,7 +164,7 @@ export function OrderHistory() {
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Cari order, customer, atau nopol..."
+              placeholder="Cari order, nama customer, atau nomor polisi..."
               className="pl-9 bg-input-background border-border h-9 text-xs"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -267,14 +267,14 @@ export function OrderHistory() {
         </div>
 
         {/* Table */}
-        <div className="rounded-xl border border-border/80 overflow-x-auto shadow-2xs bg-card flex-1 flex flex-col min-h-[220px]">
+        <div className="rounded-xl border border-border/80 overflow-hidden shadow-2xs bg-card flex-1 flex flex-col min-h-[220px]">
           <Table className={`w-full min-w-[850px] ${filteredOrders.length === 0 ? "h-full" : ""}`}>
             <TableHeader className="bg-muted/40 border-b border-border/80">
               <TableRow>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Order</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Customer</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nopol</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Layanan</TableHead>
+                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nama Customer</TableHead>
+                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nomor Polisi</TableHead>
+                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Jenis Pengurusan</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Samsat</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tanggal Selesai</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Total Final</TableHead>
@@ -399,17 +399,17 @@ export function OrderHistory() {
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="p-2 rounded bg-card border border-border">
-                    <span className="text-[10px] text-muted-foreground block">Customer</span>
+                    <span className="text-[10px] text-muted-foreground block">Nama Customer</span>
                     <span className="font-semibold text-foreground">{selectedOrder.customer}</span>
                     <span className="text-[10px] text-muted-foreground block">{selectedOrder.nomorHP}</span>
                   </div>
                   <div className="p-2 rounded bg-card border border-border">
-                    <span className="text-[10px] text-muted-foreground block">Kendaraan & Nopol</span>
+                    <span className="text-[10px] text-muted-foreground block">Kendaraan & Nomor Polisi</span>
                     <span className="font-mono font-bold text-primary">{selectedOrder.nopol}</span>
                     <span className="text-[10px] text-muted-foreground block">{selectedOrder.rawOrder?.jenisKendaraan || "Kendaraan"}</span>
                   </div>
                   <div className="p-2 rounded bg-card border border-border">
-                    <span className="text-[10px] text-muted-foreground block">Layanan & Samsat</span>
+                    <span className="text-[10px] text-muted-foreground block">Jenis Pengurusan & Samsat</span>
                     <span className="font-medium text-foreground">{selectedOrder.layanan}</span>
                     <span className="text-[10px] text-muted-foreground block">{selectedOrder.samsat}</span>
                   </div>

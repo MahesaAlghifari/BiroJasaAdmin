@@ -370,7 +370,7 @@ function AppContent() {
         {/* Page Content */}
         <main className="flex-1 overflow-auto min-w-0 w-full">
           <ErrorBoundary
-            key={location.pathname}
+            resetKey={location.pathname}
             fallbackTitle={`Terjadi kendala saat memuat ${routeMeta.title}`}
             onReset={() => navigate("/dashboard")}
           >

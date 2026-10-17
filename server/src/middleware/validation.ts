@@ -173,7 +173,7 @@ export function validateInvoicePaymentPayload(req: Request, res: Response, next:
  * Validates Finance Kas Kantor Payload
  */
 export function validateKasKantorPayload(req: Request, res: Response, next: NextFunction): void {
-  const { keterangan, status, debit, kredit } = req.body || {};
+  const { keterangan, status, debit, kredit, penanggungJawab } = req.body || {};
 
   if (!keterangan || typeof keterangan !== "string" || !keterangan.trim()) {
     res.status(400).json({
@@ -204,6 +204,43 @@ export function validateKasKantorPayload(req: Request, res: Response, next: Next
       timestamp: new Date().toISOString(),
     });
     return;
+  }
+
+  if (penanggungJawab !== undefined && typeof penanggungJawab === "string") {
+    req.body.penanggungJawab = penanggungJawab.trim() || undefined;
+  }
+
+  next();
+}
+
+/**
+ * Validates Finance Pengeluaran Payload
+ */
+export function validatePengeluaranPayload(req: Request, res: Response, next: NextFunction): void {
+  const { keterangan, nominal, penanggungJawab } = req.body || {};
+
+  if (!keterangan || typeof keterangan !== "string" || !keterangan.trim()) {
+    res.status(400).json({
+      success: false,
+      error: { code: "VALIDATION_ERROR", message: "Keterangan pengeluaran wajib diisi." },
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const numNominal = Number(nominal ?? 0);
+  if (!Number.isFinite(numNominal) || numNominal <= 0) {
+    res.status(400).json({
+      success: false,
+      error: { code: "VALIDATION_ERROR", message: "Nominal pengeluaran harus berupa angka positif yang valid." },
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  req.body.nominal = numNominal;
+  if (penanggungJawab !== undefined && typeof penanggungJawab === "string") {
+    req.body.penanggungJawab = penanggungJawab.trim() || undefined;
   }
 
   next();

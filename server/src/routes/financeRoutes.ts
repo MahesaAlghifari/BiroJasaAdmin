@@ -10,11 +10,14 @@ import {
   payInvoice,
   getKasKantor,
   addKasKantor,
+  getPengeluaran,
+  addPengeluaran,
 } from "../controllers/financeController";
 import { requireAuth, requireRoles } from "../middleware/auth";
 import {
   validateInvoicePaymentPayload,
   validateKasKantorPayload,
+  validatePengeluaranPayload,
 } from "../middleware/validation";
 
 export const financeRouter = Router();
@@ -59,3 +62,21 @@ financeRouter.post(
   validateKasKantorPayload,
   addKasKantor
 );
+
+// Pengeluaran read (Protected)
+financeRouter.get(
+  "/pengeluaran",
+  requireAuth,
+  requireRoles("administrator", "admin", "finance"),
+  getPengeluaran
+);
+
+// Pengeluaran mutation (Administrator & Finance)
+financeRouter.post(
+  "/pengeluaran",
+  requireAuth,
+  requireRoles("administrator", "finance"),
+  validatePengeluaranPayload,
+  addPengeluaran
+);
+

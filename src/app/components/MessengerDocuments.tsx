@@ -555,14 +555,14 @@ export function MessengerDocuments() {
                       <div className="flex items-center gap-2 md:gap-3">
                         <User className="w-3 h-3 md:w-4 md:h-4 text-muted-foreground" />
                         <div>
-                          <p className="text-[10px] md:text-xs text-muted-foreground">Nama</p>
+                          <p className="text-[10px] md:text-xs text-muted-foreground">Nama Customer</p>
                           <p className="text-xs md:text-sm">{selectedTask.customerName}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 md:gap-3">
                         <Phone className="w-3 h-3 md:w-4 md:h-4 text-muted-foreground" />
                         <div>
-                          <p className="text-[10px] md:text-xs text-muted-foreground">Telepon</p>
+                          <p className="text-[10px] md:text-xs text-muted-foreground">Nomor Telepon</p>
                           <p className="text-xs md:text-sm">{selectedTask.customerPhone}</p>
                         </div>
                       </div>
@@ -576,7 +576,7 @@ export function MessengerDocuments() {
                       <div className="flex items-center gap-2 md:gap-3">
                         <Car className="w-3 h-3 md:w-4 md:h-4 text-muted-foreground" />
                         <div>
-                          <p className="text-[10px] md:text-xs text-muted-foreground">Nopol</p>
+                          <p className="text-[10px] md:text-xs text-muted-foreground">Nomor Polisi</p>
                           <p className="text-xs md:text-sm">{selectedTask.nopol}</p>
                         </div>
                       </div>

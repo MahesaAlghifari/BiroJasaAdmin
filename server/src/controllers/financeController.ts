@@ -54,3 +54,22 @@ export async function addKasKantor(req: AuthenticatedRequest, res: Response, nex
     next(err);
   }
 }
+
+export async function getPengeluaran(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const entries = financeService.getAllPengeluaran();
+    res.json({ success: true, message: "OK", data: entries, timestamp: new Date().toISOString() });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function addPengeluaran(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const entry = financeService.addPengeluaran(req.body, req.user);
+    res.status(201).json({ success: true, message: "Transaksi pengeluaran berhasil ditambahkan.", data: entry, timestamp: new Date().toISOString() });
+  } catch (err) {
+    next(err);
+  }
+}
+

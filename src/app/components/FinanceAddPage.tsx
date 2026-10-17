@@ -39,6 +39,8 @@ export function FinanceAddPage({
     fields.forEach((field) => {
       if (field.type === "date") {
         row[field.key] = new Date().toISOString().split("T")[0];
+      } else if (field.type === "number") {
+        row[field.key] = "0";
       } else {
         row[field.key] = "";
       }
@@ -73,7 +75,11 @@ export function FinanceAddPage({
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       for (const field of fields) {
-        const val = row[field.key];
+        let val = row[field.key];
+        if (field.type === "number" && (val === undefined || val === null || String(val).trim() === "")) {
+          row[field.key] = "0";
+          val = "0";
+        }
         if (val === undefined || val === null || String(val).trim() === "") {
           toast.error(`Baris ke-${i + 1}: ${field.label} wajib diisi`);
           return;

@@ -657,7 +657,7 @@ export function MessengerTaskDetailModal({
               <div className="p-4 rounded-xl border border-border bg-card space-y-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div>
-                    <span className="text-muted-foreground">Customer:</span>
+                    <span className="text-muted-foreground">Nama Customer:</span>
                     <p className="font-semibold text-foreground mt-0.5">{task.customer}</p>
                   </div>
                   <div>
@@ -665,11 +665,11 @@ export function MessengerTaskDetailModal({
                     <p className="font-semibold text-foreground mt-0.5">{task.phone}</p>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Plat Nomor (Nopol):</span>
+                    <span className="text-muted-foreground">Nomor Polisi:</span>
                     <p className="font-semibold text-foreground mt-0.5">{task.nopol}</p>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Layanan:</span>
+                    <span className="text-muted-foreground">Jenis Pengurusan:</span>
                     <p className="font-semibold text-foreground mt-0.5">{task.jenisTugas}</p>
                   </div>
                   <div>

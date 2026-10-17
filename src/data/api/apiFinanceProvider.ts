@@ -125,6 +125,23 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
             kredit: Number(k.kredit || 0),
             total: Number(k.total ?? k.saldo ?? 0),
             saldo: Number(k.saldo ?? k.total ?? 0),
+            penanggungJawab: k.penanggungJawab || k.penanggung_jawab || undefined,
+          }));
+        }
+      }
+
+      const pengeluaranRes = await fetch(`${this.baseUrl}/finance/pengeluaran`, {
+        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      });
+      if (pengeluaranRes.ok) {
+        const pengeluaranPayload = await pengeluaranRes.json();
+        if (pengeluaranPayload.success && Array.isArray(pengeluaranPayload.data)) {
+          this.pengeluaran = pengeluaranPayload.data.map((p: any) => ({
+            id: Number(p.id),
+            tanggal: p.tanggal,
+            keterangan: p.keterangan,
+            nominal: Number(p.nominal || 0),
+            penanggungJawab: p.penanggungJawab || p.penanggung_jawab || undefined,
           }));
         }
       }
@@ -312,10 +329,11 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
       keterangan: item.keterangan,
       debit: item.debit || 0,
       kredit: item.kredit || 0,
+      penanggungJawab: item.penanggungJawab,
       total: (item.status === "Debit" || item.status === "Pemasukan") ? lastTotal + (item.debit || 0) : lastTotal - (item.kredit || 0),
     };
 
-    this.kasKantor.push(newEntry);
+    this.kasKantor.unshift(newEntry);
     this.notify();
 
     fetch(`${this.baseUrl}/finance/kas-kantor`, {
@@ -345,6 +363,55 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
         const idx = this.kasKantor.findIndex((k) => k.id === newEntry.id);
         if (idx !== -1) {
           this.kasKantor.splice(idx, 1);
+          this.notify();
+        }
+      });
+
+    return newEntry;
+  }
+
+  public addPengeluaran(item: Omit<PengeluaranItem, "id">): PengeluaranItem | null {
+    const nextId = Date.now();
+    const newEntry: PengeluaranItem = {
+      id: nextId,
+      tanggal: item.tanggal,
+      keterangan: item.keterangan,
+      nominal: item.nominal,
+      penanggungJawab: item.penanggungJawab,
+    };
+
+    this.pengeluaran.unshift(newEntry);
+    this.notify();
+
+    fetch(`${this.baseUrl}/finance/pengeluaran`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      body: JSON.stringify(item),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((payload) => {
+        if (payload?.success && payload.data) {
+          const idx = this.pengeluaran.findIndex((p) => p.id === newEntry.id);
+          if (idx !== -1) {
+            this.pengeluaran[idx] = {
+              id: Number(payload.data.id),
+              tanggal: payload.data.tanggal,
+              keterangan: payload.data.keterangan,
+              nominal: Number(payload.data.nominal || 0),
+              penanggungJawab: payload.data.penanggungJawab || payload.data.penanggung_jawab || undefined,
+            };
+            this.notify();
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to persist pengeluaran entry, rolling back:", err);
+        const idx = this.pengeluaran.findIndex((p) => p.id === newEntry.id);
+        if (idx !== -1) {
+          this.pengeluaran.splice(idx, 1);
           this.notify();
         }
       });

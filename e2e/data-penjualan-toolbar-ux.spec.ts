@@ -52,18 +52,19 @@ test.describe("Phase 8.5: Data Penjualan Toolbar & Interaction UX Refinement", (
     // 4. Clicking inactive tab changes active appearance
     await inactiveTab.click();
     await expect(page).toHaveURL(`${DP}/mutasi-as`);
-    await page.waitForTimeout(100);
-
-    const newActiveBg = await inactiveTab.evaluate((el: HTMLElement) => window.getComputedStyle(el).backgroundColor);
-    const newActiveColor = await inactiveTab.evaluate((el: HTMLElement) => window.getComputedStyle(el).color);
-    expect(newActiveBg).toBe(PRIMARY);
-    expect(newActiveColor).toBe(WHITE);
+    await expect.poll(async () => {
+      return inactiveTab.evaluate((el: HTMLElement) => window.getComputedStyle(el).backgroundColor);
+    }).toBe(PRIMARY);
+    await expect.poll(async () => {
+      return inactiveTab.evaluate((el: HTMLElement) => window.getComputedStyle(el).color);
+    }).toBe(WHITE);
 
     // 5. URL-driven state remains correct
     await page.reload();
     await expect(page).toHaveURL(`${DP}/mutasi-as`);
-    const reloadedBg = await inactiveTab.evaluate((el: HTMLElement) => window.getComputedStyle(el).backgroundColor);
-    expect(reloadedBg).toBe(PRIMARY);
+    await expect.poll(async () => {
+      return inactiveTab.evaluate((el: HTMLElement) => window.getComputedStyle(el).backgroundColor);
+    }).toBe(PRIMARY);
 
     // Capture screenshot
     await page.screenshot({

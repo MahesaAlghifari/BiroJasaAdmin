@@ -1099,7 +1099,7 @@ export function BiayaLayanan() {
               </div>
 
               {/* Table */}
-              <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+              <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
                 <Table className={`w-full min-w-[650px] ${paginatedData.length === 0 ? "h-full" : ""}`}>
                   <TableHeader className="bg-muted/40 border-b border-border">
                     <TableRow className="hover:bg-transparent">

@@ -7,7 +7,7 @@ import { dbFinanceRepository } from "../repositories/dbFinanceRepository";
 import { dbOrderRepository } from "../repositories/dbOrderRepository";
 import { dbAuditRepository } from "../repositories/dbAuditRepository";
 import { runInTransaction } from "../database/db";
-import { InvoiceBillingRecord, KasKantorItem } from "../../../src/domain/finance/types";
+import { InvoiceBillingRecord, KasKantorItem, PengeluaranItem } from "../../../src/domain/finance/types";
 import { ApiError } from "../middleware/errorHandler";
 import { TokenPayload } from "../utils/crypto";
 
@@ -99,6 +99,28 @@ export class FinanceService {
       action: "ADD_KAS",
       module: "Kas Kantor",
       details: `Transaksi Kas: ${item.keterangan} (${item.status}) Rp ${(item.debit || item.kredit).toLocaleString("id-ID")}`,
+      metadata: { item },
+      createdAt: new Date().toISOString(),
+    });
+
+    return created;
+  }
+
+  public getAllPengeluaran(): PengeluaranItem[] {
+    return dbFinanceRepository.getAllPengeluaran();
+  }
+
+  public addPengeluaran(item: Omit<PengeluaranItem, "id">, user?: TokenPayload | null): PengeluaranItem {
+    const created = dbFinanceRepository.addPengeluaran(item);
+
+    dbAuditRepository.save({
+      id: `log-pengeluaran-${Date.now()}`,
+      userId: user?.userId || "usr-finance",
+      userName: user?.nama || "Finance User",
+      userRole: user?.role || "finance",
+      action: "ADD_PENGELUARAN",
+      module: "Pengeluaran",
+      details: `Pengeluaran: ${item.keterangan} Rp ${item.nominal.toLocaleString("id-ID")}${item.penanggungJawab ? ` (PJ: ${item.penanggungJawab})` : ""}`,
       metadata: { item },
       createdAt: new Date().toISOString(),
     });

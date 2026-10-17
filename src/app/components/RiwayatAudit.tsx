@@ -246,7 +246,7 @@ export function RiwayatAudit() {
         </div>
 
         {/* Table */}
-        <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs">
+        <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs">
           <Table className="w-full min-w-[700px]">
             <TableHeader className="bg-muted/40 border-b border-border">
               <TableRow className="hover:bg-transparent">

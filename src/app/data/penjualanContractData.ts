@@ -206,9 +206,11 @@ export function buildTableColumnsFromContract(columnList: readonly string[]): Co
     const isStatusBPKB = colName === "Status BPKB";
     const isBPKB = colName === "BPKB";
 
+    const displayLabel = colName === "Plat No" ? "Nomor Polisi" : colName;
+
     const baseCol: Column = {
       key: colName,
-      label: colName, // Exact contract label
+      label: displayLabel,
     };
 
     if (isDate) {
@@ -253,32 +255,33 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
       colName.toLowerCase().includes("uang") ||
       colName.toLowerCase().includes("profit") ||
       colName.toLowerCase().includes("cashback");
+    const label = colName === "Plat No" ? "Nomor Polisi" : colName;
 
     if (isDate) {
-      return { key: colName, label: colName, type: "date" };
+      return { key: colName, label, type: "date" };
     }
     if (colName === "R4 / R2") {
-      return { key: colName, label: colName, type: "select", options: ["R4", "R2"] };
+      return { key: colName, label, type: "select", options: ["R4", "R2"] };
     }
     if (colName === "Jenis Bayar") {
-      return { key: colName, label: colName, type: "select", options: ["Transfer", "Cash", "Tempo"] };
+      return { key: colName, label, type: "select", options: ["Transfer", "Cash", "Tempo"] };
     }
     if (colName === "Bank Uang Keluar") {
-      return { key: colName, label: colName, type: "select", options: ["BCA", "Mandiri", "BRI", "BNI", "Kas Kantor", "Kas Messenger", "Cash"] };
+      return { key: colName, label, type: "select", options: ["BCA", "Mandiri", "BRI", "BNI", "Kas Kantor", "Kas Messenger", "Cash"] };
     }
     if (colName === "Status") {
-      return { key: colName, label: colName, type: "select", options: ["Selesai", "Proses", "Pending", "Belum Bayar", "Kurang Bayar"] };
+      return { key: colName, label, type: "select", options: ["Selesai", "Proses", "Pending", "Belum Bayar", "Kurang Bayar"] };
     }
     if (colName === "BPKB") {
-      return { key: colName, label: colName, type: "select", options: ["Ada", "Belum"] };
+      return { key: colName, label, type: "select", options: ["Ada", "Belum"] };
     }
     if (colName === "Status BPKB") {
-      return { key: colName, label: colName, type: "select", options: ["Selesai", "Proses"] };
+      return { key: colName, label, type: "select", options: ["Selesai", "Proses"] };
     }
     if (isNumber) {
-      return { key: colName, label: colName, type: "number", placeholder: "0" };
+      return { key: colName, label, type: "number", placeholder: "0" };
     }
-    return { key: colName, label: colName, type: "text" };
+    return { key: colName, label, type: "text" };
   });
 }
 

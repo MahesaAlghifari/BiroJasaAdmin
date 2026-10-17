@@ -63,7 +63,7 @@ export function InvoiceDialog({ open, onOpenChange, order }: InvoiceDialogProps)
                   <span>{invoiceDate.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
                 </div>
                 <div className="flex gap-4">
-                  <span className="w-24">Customer</span>
+                  <span className="w-24">Nama Customer</span>
                   <span>:</span>
                   <span>{order.customer}</span>
                 </div>
@@ -93,7 +93,7 @@ export function InvoiceDialog({ open, onOpenChange, order }: InvoiceDialogProps)
                   <td className="text-right py-3 px-2">Rp {order.totalBiaya.toLocaleString('id-ID')}</td>
                 </tr>
                 <tr className="border-b border-gray-300">
-                  <td className="py-3 px-2">Nopol: {order.nopol}</td>
+                  <td className="py-3 px-2">Nomor Polisi: {order.nopol}</td>
                   <td className="text-right py-3 px-2">-</td>
                 </tr>
               </tbody>

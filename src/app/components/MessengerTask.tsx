@@ -125,7 +125,7 @@ export function MessengerTask() {
 
   const handleAddTask = () => {
     if (!newTaskData.customer.trim() || !newTaskData.jenisTugas.trim()) {
-      toast.error("Mohon lengkapi nama customer dan jenis layanan!");
+      toast.error("Mohon lengkapi nama customer dan jenis pengurusan!");
       return;
     }
 
@@ -197,7 +197,7 @@ export function MessengerTask() {
   const handleUpdateTask = () => {
     if (!editTaskData) return;
     if (!editTaskData.customer.trim() || !editTaskData.jenisTugas.trim()) {
-      toast.error("Mohon lengkapi nama customer dan jenis layanan!");
+      toast.error("Mohon lengkapi nama customer dan jenis pengurusan!");
       return;
     }
 
@@ -373,7 +373,7 @@ export function MessengerTask() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input 
-                placeholder="Cari no berkas, customer, messenger, atau nopol..." 
+                placeholder="Cari no berkas, nama customer, messenger, atau nomor polisi..." 
                 className="pl-10 bg-input-background border-border"
                 value={searchTerm}
                 onChange={(e) => {
@@ -429,15 +429,15 @@ export function MessengerTask() {
           {/* Table */}
 
           {/* Table */}
-          <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+          <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
             <Table className={`w-full min-w-[750px] ${paginatedData.length === 0 ? "h-full" : ""}`}>
               <TableHeader className="bg-secondary/30">
                 <TableRow>
                   <TableHead className="w-12">No</TableHead>
                   <TableHead>No Berkas</TableHead>
                   <TableHead>Messenger</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Jenis Layanan</TableHead>
+                  <TableHead>Nama Customer</TableHead>
+                  <TableHead>Jenis Pengurusan</TableHead>
                   <TableHead>Keterangan Tugas</TableHead>
                   <TableHead>Lokasi</TableHead>
                   <TableHead>Tgl Terima</TableHead>
@@ -560,13 +560,13 @@ export function MessengerTask() {
                   <p className="font-medium text-foreground">{selectedTask.messenger}</p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Customer</Label>
+                  <Label className="text-xs text-muted-foreground">Nama Customer</Label>
                   <p className="font-medium text-foreground">{selectedTask.customer}</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Jenis Layanan</Label>
+                  <Label className="text-xs text-muted-foreground">Jenis Pengurusan</Label>
                   <p className="text-foreground">{selectedTask.jenisTugas}</p>
                 </div>
                 <div className="space-y-1">
@@ -580,7 +580,7 @@ export function MessengerTask() {
                   <p className="font-mono text-foreground">{selectedTask.nopol}</p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">No. Telepon / WA</Label>
+                  <Label className="text-xs text-muted-foreground">Nomor Telepon</Label>
                   <p className="font-mono text-foreground">{selectedTask.phone}</p>
                 </div>
               </div>
@@ -641,7 +641,7 @@ export function MessengerTask() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Customer</Label>
+                  <Label className="text-xs">Nama Customer</Label>
                   <Input 
                     value={editTaskData.customer}
                     onChange={(e) => setEditTaskData({...editTaskData, customer: e.target.value})}
@@ -652,10 +652,10 @@ export function MessengerTask() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Jenis Layanan</Label>
+                  <Label className="text-xs">Jenis Pengurusan</Label>
                   <Select value={editTaskData.jenisTugas} onValueChange={(value) => setEditTaskData({...editTaskData, jenisTugas: value})}>
                     <SelectTrigger className="bg-input-background border-border h-9 text-xs">
-                      <SelectValue placeholder="Pilih jenis layanan" />
+                      <SelectValue placeholder="Pilih jenis pengurusan" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Perpanjangan 1 Tahun" className="text-xs">Perpanjangan 1 Tahun</SelectItem>
@@ -791,7 +791,7 @@ export function MessengerTask() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Customer *</Label>
+                <Label className="text-xs">Nama Customer *</Label>
                 <Input 
                   value={newTaskData.customer}
                   onChange={(e) => setNewTaskData({...newTaskData, customer: e.target.value})}
@@ -802,10 +802,10 @@ export function MessengerTask() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-xs">Jenis Layanan *</Label>
+                <Label className="text-xs">Jenis Pengurusan *</Label>
                 <Select value={newTaskData.jenisTugas} onValueChange={(value) => setNewTaskData({...newTaskData, jenisTugas: value})}>
                   <SelectTrigger className="bg-input-background border-border h-9 text-xs">
-                    <SelectValue placeholder="Pilih jenis layanan" />
+                    <SelectValue placeholder="Pilih jenis pengurusan" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Perpanjangan 1 Tahun" className="text-xs">Perpanjangan 1 Tahun</SelectItem>

@@ -154,7 +154,7 @@ export function EnhancedTable({
 
 
       {/* Table */}
-      <div className="rounded-xl border border-border/80 overflow-x-auto shadow-xs bg-card flex-1 flex flex-col min-h-[220px]">
+      <div className="rounded-xl border border-border/80 overflow-hidden shadow-xs bg-card flex-1 flex flex-col min-h-[220px]">
         <Table className={`w-full min-w-[550px] ${paginatedData.length === 0 ? "h-full" : ""}`}>
           <TableHeader className="bg-muted/40 border-b border-border/80">
             <TableRow>

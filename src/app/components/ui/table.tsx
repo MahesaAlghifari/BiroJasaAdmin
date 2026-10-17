@@ -4,11 +4,18 @@ import * as React from "react";
 
 import { cn } from "./utils";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+interface TableProps extends React.ComponentProps<"table"> {
+  containerClassName?: string;
+}
+
+function Table({ className, containerClassName, ...props }: TableProps) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-lg"
+      className={cn(
+        "relative w-full overflow-x-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-lg flex-1 flex flex-col min-h-0",
+        containerClassName
+      )}
       tabIndex={0}
       role="region"
       aria-label="Tabel data"

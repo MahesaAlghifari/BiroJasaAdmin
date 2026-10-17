@@ -848,14 +848,14 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[700px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
-                    <TableHead>Layanan</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
+                    <TableHead>Jenis Pengurusan</TableHead>
                     <TableHead>Wilayah Samsat</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
@@ -924,14 +924,14 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[750px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
-                    <TableHead>Layanan</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
+                    <TableHead>Jenis Pengurusan</TableHead>
                     <TableHead>Lokasi Jemput</TableHead>
                     <TableHead>Messenger</TableHead>
                     <TableHead>Jadwal</TableHead>
@@ -1007,14 +1007,14 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[750px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
-                    <TableHead>Layanan</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
+                    <TableHead>Jenis Pengurusan</TableHead>
                     <TableHead>Messenger</TableHead>
                     <TableHead>Kelengkapan</TableHead>
                     <TableHead>Status</TableHead>
@@ -1087,14 +1087,14 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[750px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
-                    <TableHead>Layanan</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
+                    <TableHead>Jenis Pengurusan</TableHead>
                     <TableHead>Messenger</TableHead>
                     <TableHead>Estimasi Awal</TableHead>
                     <TableHead>Progress</TableHead>
@@ -1185,14 +1185,14 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[750px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
-                    <TableHead>Layanan</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
+                    <TableHead>Jenis Pengurusan</TableHead>
                     <TableHead>Estimasi Awal</TableHead>
                     <TableHead>Biaya Aktual</TableHead>
                     <TableHead>Status</TableHead>
@@ -1272,14 +1272,14 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[750px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
-                    <TableHead>Layanan</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
+                    <TableHead>Jenis Pengurusan</TableHead>
                     <TableHead>Total Biaya Final</TableHead>
                     <TableHead>Status Harga</TableHead>
                     <TableHead>Status</TableHead>
@@ -1375,13 +1375,13 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[750px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
                     <TableHead>Alamat Antar</TableHead>
                     <TableHead>Messenger</TableHead>
                     <TableHead>Tanggal Antar</TableHead>
@@ -1455,14 +1455,14 @@ export function OrderTracking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs flex-1 flex flex-col min-h-[220px]">
+            <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
               <Table className={cn("w-full min-w-[750px]", filteredOrders.length === 0 && "h-full")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead>No Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Nopol</TableHead>
-                    <TableHead>Layanan</TableHead>
+                    <TableHead>Nama Customer</TableHead>
+                    <TableHead>Nomor Polisi</TableHead>
+                    <TableHead>Jenis Pengurusan</TableHead>
                     <TableHead>Messenger</TableHead>
                     <TableHead>Tanggal Selesai</TableHead>
                     <TableHead>Total Biaya</TableHead>
@@ -1574,7 +1574,7 @@ export function OrderTracking({
                       <p className="font-medium text-foreground mt-0.5">{selectedOrder.namaPemilik}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Nomor Telepon / WhatsApp</p>
+                      <p className="text-muted-foreground">Nomor Telepon</p>
                       <p className="font-mono text-foreground mt-0.5">{selectedOrder.nomorHP}</p>
                     </div>
                     <div>
@@ -1592,11 +1592,11 @@ export function OrderTracking({
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 p-3.5 rounded-lg bg-muted/30 border border-border">
                     <div>
-                      <p className="text-muted-foreground">Jenis Layanan</p>
+                      <p className="text-muted-foreground">Jenis Pengurusan</p>
                       <p className="font-medium text-foreground mt-0.5">{selectedOrder.layanan}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Nomor Polisi (Nopol)</p>
+                      <p className="text-muted-foreground">Nomor Polisi</p>
                       <p className="font-mono text-foreground font-semibold mt-0.5">{selectedOrder.nopol}</p>
                     </div>
                     <div>
@@ -2054,16 +2054,16 @@ export function OrderTracking({
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
-                      <p className="text-muted-foreground">Nama Pelanggan</p>
+                      <p className="text-muted-foreground">Nama Customer</p>
                       <p className="font-medium text-foreground mt-0.5">{selectedOrder.customer}</p>
                       <p className="font-mono text-[11px] text-muted-foreground">{selectedOrder.nomorHP}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Layanan</p>
+                      <p className="text-muted-foreground">Jenis Pengurusan</p>
                       <p className="font-medium text-foreground mt-0.5">{selectedOrder.layanan}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Kendaraan & Nopol</p>
+                      <p className="text-muted-foreground">Kendaraan & Nomor Polisi</p>
                       <p className="font-mono text-foreground font-semibold mt-0.5">{selectedOrder.nopol}</p>
                       <p className="text-muted-foreground text-[11px]">{selectedOrder.jenisKendaraan} ({selectedOrder.tahunKendaraan})</p>
                     </div>
@@ -2405,15 +2405,15 @@ export function OrderTracking({
                   <div className="p-3.5 sm:p-4 rounded-lg bg-muted/30 border border-border space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       <div>
-                        <p className="text-muted-foreground">Customer</p>
+                        <p className="text-muted-foreground">Nama Customer</p>
                         <p className="font-medium text-foreground mt-0.5">{selectedOrder.customer}</p>
                       </div>
                       <div>
-                        <p className="text-muted-foreground">Kendaraan</p>
+                        <p className="text-muted-foreground">Nomor Polisi</p>
                         <p className="font-mono text-foreground font-semibold mt-0.5">{selectedOrder.nopol}</p>
                       </div>
                       <div>
-                        <p className="text-muted-foreground">Layanan</p>
+                        <p className="text-muted-foreground">Jenis Pengurusan</p>
                         <p className="font-medium text-foreground mt-0.5">{selectedOrder.layanan}</p>
                       </div>
                       <div>
@@ -2575,7 +2575,7 @@ export function OrderTracking({
               {currentTab === "Supervisi" ? "Review & Supervisi Biaya" : "Verifikasi Ulang Biaya Final"} — {selectedOrder?.orderNo}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Customer: <span className="font-medium text-foreground">{selectedOrder?.customer}</span> • Layanan: <span className="font-medium text-foreground">{selectedOrder?.layanan}</span>
+              Nama Customer: <span className="font-medium text-foreground">{selectedOrder?.customer}</span> • Jenis Pengurusan: <span className="font-medium text-foreground">{selectedOrder?.layanan}</span>
             </DialogDescription>
           </DialogHeader>
 
@@ -3371,11 +3371,11 @@ export function OrderTracking({
                       <p className="font-mono text-[11px] text-muted-foreground">{selectedOrder.nomorHP || "-"}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Layanan</p>
+                      <p className="text-muted-foreground">Jenis Pengurusan</p>
                       <p className="font-medium text-foreground mt-0.5">{selectedOrder.layanan}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Kendaraan & Nopol</p>
+                      <p className="text-muted-foreground">Kendaraan & Nomor Polisi</p>
                       <p className="font-mono text-foreground font-semibold mt-0.5">{selectedOrder.nopol}</p>
                     </div>
                     <div>
@@ -3502,15 +3502,15 @@ export function OrderTracking({
                     <span className="font-mono text-primary font-semibold">{selectedOrder.orderNo}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Customer:</span>
+                    <span className="text-muted-foreground">Nama Customer:</span>
                     <span className="font-medium text-foreground">{selectedOrder.customer} ({selectedOrder.nomorHP})</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Kendaraan:</span>
+                    <span className="text-muted-foreground">Nomor Polisi:</span>
                     <span className="font-mono font-medium">{selectedOrder.nopol} ({selectedOrder.jenisKendaraan || "Kendaraan"})</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Layanan:</span>
+                    <span className="text-muted-foreground">Jenis Pengurusan:</span>
                     <span>{selectedOrder.layanan}</span>
                   </div>
                 </div>

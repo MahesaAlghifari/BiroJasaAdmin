@@ -198,7 +198,7 @@ export function Order() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input 
-                placeholder="Cari no order, customer, atau nopol..." 
+                placeholder="Cari no order, nama customer, atau nomor polisi..." 
                 className="pl-10 bg-input-background border-border"
                 value={searchTerm}
                 onChange={(e) => {
@@ -215,7 +215,7 @@ export function Order() {
               }}
             >
               <SelectTrigger className="w-full lg:w-[250px] bg-input-background border-border">
-                <SelectValue placeholder="Semua Layanan" />
+                <SelectValue placeholder="Semua Jenis Pengurusan" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Semua Layanan</SelectItem>
@@ -244,9 +244,9 @@ export function Order() {
                 <TableRow>
                   <TableHead>No</TableHead>
                   <TableHead>No Order</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Nopol</TableHead>
-                  <TableHead>Layanan</TableHead>
+                  <TableHead>Nama Customer</TableHead>
+                  <TableHead>Nomor Polisi</TableHead>
+                  <TableHead>Jenis Pengurusan</TableHead>
                   <TableHead>Tgl Order</TableHead>
                   <TableHead>Tgl Selesai</TableHead>
                   <TableHead>Total Biaya</TableHead>
@@ -352,11 +352,11 @@ export function Order() {
                   </h4>
                   <Card className="p-4 border border-border/80 bg-card shadow-xs space-y-2">
                     <div className="grid grid-cols-2 gap-2 text-sm">
-                      <span className="text-muted-foreground">Nama:</span>
+                      <span className="text-muted-foreground">Nama Customer:</span>
                       <span className="font-medium text-foreground">{selectedOrder.customer}</span>
                       <span className="text-muted-foreground">Alamat:</span>
                       <span className="text-foreground">{selectedOrder.alamat}</span>
-                      <span className="text-muted-foreground">Telepon:</span>
+                      <span className="text-muted-foreground">Nomor Telepon:</span>
                       <span className="font-mono tabular-nums text-foreground">{selectedOrder.telepon}</span>
                       <span className="text-muted-foreground">Email:</span>
                       <span className="text-foreground">{selectedOrder.email}</span>
@@ -372,9 +372,9 @@ export function Order() {
                   </h4>
                   <Card className="p-4 border border-border/80 bg-card shadow-xs space-y-2">
                     <div className="grid grid-cols-2 gap-2 text-sm">
-                      <span className="text-muted-foreground">Nopol:</span>
+                      <span className="text-muted-foreground">Nomor Polisi:</span>
                       <span className="font-mono tabular-nums font-medium text-foreground">{selectedOrder.nopol}</span>
-                      <span className="text-muted-foreground">Jenis Layanan:</span>
+                      <span className="text-muted-foreground">Jenis Pengurusan:</span>
                       <span className="text-foreground">{selectedOrder.layanan}</span>
                       <span className="text-muted-foreground">Wilayah Samsat:</span>
                       <span className="text-foreground">{selectedOrder.wilayah}</span>

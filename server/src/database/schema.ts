@@ -76,6 +76,16 @@ export function initializeSchema(targetDb: DatabaseSync): void {
       debit REAL NOT NULL DEFAULT 0,
       kredit REAL NOT NULL DEFAULT 0,
       saldo REAL NOT NULL DEFAULT 0,
+      penanggung_jawab TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS pengeluaran (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tanggal TEXT NOT NULL,
+      keterangan TEXT NOT NULL,
+      nominal REAL NOT NULL DEFAULT 0,
+      penanggung_jawab TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -120,6 +130,8 @@ export function initializeSchema(targetDb: DatabaseSync): void {
   `);
 
   migrateDocumentsTable(targetDb);
+  migrateKasKantorTable(targetDb);
+  migratePengeluaranTable(targetDb);
 
   targetDb.exec(`
     CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active);
@@ -198,5 +210,33 @@ function migrateDocumentsTable(targetDb: DatabaseSync): void {
     }
   } catch (err) {
     console.warn("[SUN89 Migration] Warning during documents table migration:", err);
+  }
+}
+
+function migrateKasKantorTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(kas_kantor)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("penanggung_jawab")) {
+      targetDb.exec("ALTER TABLE kas_kantor ADD COLUMN penanggung_jawab TEXT;");
+    }
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during kas_kantor table migration:", err);
+  }
+}
+
+function migratePengeluaranTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(pengeluaran)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("penanggung_jawab")) {
+      targetDb.exec("ALTER TABLE pengeluaran ADD COLUMN penanggung_jawab TEXT;");
+    }
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during pengeluaran table migration:", err);
   }
 }

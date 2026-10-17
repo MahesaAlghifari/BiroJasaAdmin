@@ -132,6 +132,7 @@ export interface KasKantorItem {
   kredit: number;
   total: number;
   invoiceRef?: string;
+  penanggungJawab?: string;
 }
 
 export interface PengeluaranItem {
@@ -139,6 +140,7 @@ export interface PengeluaranItem {
   tanggal: string;
   keterangan: string;
   nominal: number;
+  penanggungJawab?: string;
 }
 
 export interface BelumKurangBayarItem {

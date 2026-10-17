@@ -141,8 +141,15 @@ export function EnhancedTableWithDialogs({
   const [tableFontSize, setTableFontSize] = useState<"1x" | "2x" | "3x">("1x");
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<Set<string>>(() => new Set(columns.map(c => c.key)));
 
-  // Synchronize visibleColumnKeys when columns prop updates
+  // Synchronize visibleColumnKeys when columns prop updates or when subTabTitle changes
+  const prevSubTabRef = React.useRef(subTabTitle);
   React.useEffect(() => {
+    if (prevSubTabRef.current !== subTabTitle) {
+      prevSubTabRef.current = subTabTitle;
+      setVisibleColumnKeys(new Set(columns.map(c => c.key)));
+      return;
+    }
+
     setVisibleColumnKeys(prev => {
       const currentKeys = new Set(columns.map(c => c.key));
       if (prev.size === 0) return currentKeys;
@@ -150,9 +157,13 @@ export function EnhancedTableWithDialogs({
       columns.forEach(c => {
         if (prev.has(c.key)) next.add(c.key);
       });
+      // If none or only 1 column matched out of many, it's a completely different schema
+      if (next.size <= 1 && columns.length > 2) {
+        return currentKeys;
+      }
       return next.size > 0 ? next : currentKeys;
     });
-  }, [columns]);
+  }, [subTabTitle, columns]);
 
   const isAllColumnsVisible = visibleColumnKeys.size === columns.length;
   const isSomeColumnsVisible = visibleColumnKeys.size > 0 && visibleColumnKeys.size < columns.length;
@@ -869,8 +880,8 @@ export function EnhancedTableWithDialogs({
         <div className="relative w-full sm:w-72 md:w-80">
           <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
-            placeholder={searchPlaceholder || "Cari berdasarkan nopol, customer, invoice..."}
-            aria-label={searchPlaceholder || "Cari berdasarkan nopol, customer, invoice"}
+            placeholder={searchPlaceholder || "Cari berdasarkan nomor polisi, nama customer, invoice..."}
+            aria-label={searchPlaceholder || "Cari berdasarkan nomor polisi, nama customer, invoice"}
             className="pl-8 bg-background border-border h-8 text-xs font-normal placeholder:font-normal placeholder:text-muted-foreground/60"
             value={searchTerm}
             onChange={(e) => {
@@ -884,7 +895,7 @@ export function EnhancedTableWithDialogs({
 
       {/* Main Table: Desktop (Full Columns with desktop settings) & Mobile (2 Primary Columns + Actions) */}
       <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs flex-1 flex flex-col min-h-[220px]">
-        <div className="overflow-x-auto w-full flex-1 flex flex-col">
+        <div className="w-full flex-1 flex flex-col min-h-0">
           <Table className={`finance-table finance-table--font-${tableFontSize === "1x" ? "1" : tableFontSize === "2x" ? "2" : "3"} w-full min-w-[700px] md:min-w-[850px] ${paginatedData.length === 0 ? "h-full" : ""}`}>
             <TableHeader className="finance-table__header bg-muted/40 border-b border-border">
               <TableRow className="hover:bg-transparent">

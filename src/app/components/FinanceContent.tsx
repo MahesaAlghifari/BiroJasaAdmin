@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams } from "react-router";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
@@ -36,6 +36,7 @@ import {
 import { formatRupiah, formatCustomerName, PlateNumberBadge } from "../utils/financeFormatters";
 import { useFinanceStore, InvoiceBillingRecord } from "../data/financeStore";
 import { orderStore } from "../data/orderStore";
+import { useKaryawanPengguna } from "../data/karyawanPenggunaAdapter";
 
 interface FinanceContentProps {
   tab: string;
@@ -43,6 +44,25 @@ interface FinanceContentProps {
 
 export function FinanceContent({ tab }: FinanceContentProps) {
   const [filterPeriod, setFilterPeriod] = useState("monthly");
+  
+  // Authoritative employee records for messenger & responsible selectors
+  const { karyawan } = useKaryawanPengguna();
+
+  const messengerOptions = useMemo(() => {
+    const activeMessengers = karyawan.filter(
+      (k) => (k.jabatan || "").toUpperCase() === "MESSENGER" && k.status === "Aktif"
+    );
+    const names = activeMessengers.map((k) => k.nama);
+    return names.length > 0 ? names : ["Rudi Hartono", "Joko Prasetyo", "Budi Santoso", "Andi Pratama"];
+  }, [karyawan]);
+
+  const responsibleOptions = useMemo(() => {
+    const activeResponsible = karyawan.filter(
+      (k) => (k.jabatan || "").toUpperCase() !== "MESSENGER" && k.status === "Aktif"
+    );
+    const names = activeResponsible.map((k) => k.nama);
+    return names.length > 0 ? names : ["Siti Nurhaliza", "Andi Wijaya", "Dewi Lestari", "Maya Safitri"];
+  }, [karyawan]);
   
   // State for adding mode (switches from table view to standalone FinanceAddPage)
   const [isAdding, setIsAdding] = useState(false);
@@ -124,12 +144,12 @@ export function FinanceContent({ tab }: FinanceContentProps) {
 
     const profitColumns: Column[] = [
       { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" },
-      { key: "nopol", label: "Plat nomor", filterable: true, filterType: "text" },
-      { key: "customer", label: "Customer", filterable: true, filterType: "text" },
+      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" },
+      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" },
       { key: "namaBerkas", label: "Nama berkas" },
       { 
         key: "pengurusan", 
-        label: "Pengurusan", 
+        label: "Jenis Pengurusan", 
         filterable: true, 
         filterType: "select", 
         filterOptions: ["PAJAK TAHUNAN", "PAJAK 5 TAHUNAN", "MUTASI LD", "MUTASI AS", "BALIK NAMA", "BBN 1", "BBN 2"] 
@@ -164,7 +184,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
             data={profitData}
             subTabTitle="Profit"
             onView={(item) => setViewingItem({ item, subTabTitle: "Profit", columns: profitColumns })}
-            searchPlaceholder="Cari berdasarkan nopol, customer, invoice..."
+            searchPlaceholder="Cari berdasarkan nomor polisi, nama customer, invoice..."
             hideAddButton={true}
             hideEditButton={true}
             hideDeleteButton={true}
@@ -228,8 +248,8 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   if (tab === "kas-messenger") {
     const kasMessengerFields: FieldConfig[] = [
       { key: "tanggal", label: "Tanggal", type: "date" },
-      { key: "jenis", label: "Jenis transaksi", type: "select", options: ["PETTY CASH", "OPERASIONAL", "BIAYA SAMSAT"] },
-      { key: "messenger", label: "Nama messenger", type: "text", placeholder: "Contoh: Ahmad" },
+      { key: "jenis", label: "Jenis transaksi", type: "select", options: ["Petty cash", "Operasional", "Biaya Samsat"] },
+      { key: "messenger", label: "Nama messenger", type: "select", options: messengerOptions, placeholder: "Pilih messenger" },
       { key: "keterangan", label: "Keterangan", type: "text", placeholder: "Rincian keperluan kas" },
       { key: "in", label: "Kas masuk (in)", type: "number", placeholder: "0" },
       { key: "out", label: "Kas keluar (out)", type: "number", placeholder: "0" },
@@ -243,9 +263,23 @@ export function FinanceContent({ tab }: FinanceContentProps) {
         label: "Jenis kas", 
         filterable: true, 
         filterType: "select", 
-        filterOptions: ["PETTY CASH", "OPERASIONAL", "BIAYA SAMSAT"] 
+        filterOptions: ["Petty cash", "Operasional", "Biaya Samsat"],
+        render: (val: any) => {
+          const str = String(val || "");
+          const lower = str.toLowerCase();
+          if (lower.includes("petty")) return "Petty cash";
+          if (lower.includes("operasional")) return "Operasional";
+          if (lower.includes("samsat")) return "Biaya Samsat";
+          return str;
+        }
       },
-      { key: "messenger", label: "Messenger", filterable: true, filterType: "text" },
+      { 
+        key: "messenger", 
+        label: "Messenger", 
+        filterable: true, 
+        filterType: "select", 
+        filterOptions: messengerOptions 
+      },
       { key: "keterangan", label: "Keterangan" },
       { key: "in", label: "Masuk" },
       { key: "out", label: "Keluar" },
@@ -260,8 +294,8 @@ export function FinanceContent({ tab }: FinanceContentProps) {
       rows.forEach((row) => {
         addKasMessenger({
           tanggal: row.tanggal || new Date().toLocaleDateString("id-ID"),
-          jenis: row.jenis || "OPERASIONAL",
-          messenger: row.messenger || "Ahmad",
+          jenis: row.jenis || "Operasional",
+          messenger: row.messenger || messengerOptions[0] || "Rudi Hartono",
           keterangan: row.keterangan || "",
           in: parseInt(row.in) || 0,
           out: parseInt(row.out) || 0,
@@ -366,6 +400,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
       { key: "tanggal", label: "Tanggal", type: "date" },
       { key: "status", label: "Tipe arus kas", type: "select", options: ["Debit", "Kredit"] },
       { key: "keterangan", label: "Keterangan", type: "text", placeholder: "Contoh: Pembayaran invoice atau biaya sewa" },
+      { key: "penanggungJawab", label: "Penanggung jawab", type: "select", options: responsibleOptions, placeholder: "Pilih penanggung jawab" },
       { key: "debit", label: "Debit (masuk)", type: "number", placeholder: "0" },
       { key: "kredit", label: "Kredit (keluar)", type: "number", placeholder: "0" },
       { key: "total", label: "Saldo akhir", type: "number", placeholder: "0" },
@@ -381,6 +416,14 @@ export function FinanceContent({ tab }: FinanceContentProps) {
         filterOptions: ["Debit", "Kredit"] 
       },
       { key: "keterangan", label: "Keterangan" },
+      { 
+        key: "penanggungJawab", 
+        label: "Penanggung jawab", 
+        filterable: true, 
+        filterType: "select", 
+        filterOptions: responsibleOptions,
+        render: (val: any) => val || "-"
+      },
       { key: "debit", label: "Debit (masuk)" },
       { key: "kredit", label: "Kredit (keluar)" },
       { key: "total", label: "Saldo" },
@@ -396,6 +439,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
           tanggal: row.tanggal || new Date().toLocaleDateString("id-ID"),
           status: row.status || "Debit",
           keterangan: row.keterangan || "",
+          penanggungJawab: row.penanggungJawab || undefined,
           debit: parseInt(row.debit) || 0,
           kredit: parseInt(row.kredit) || 0,
           total: parseInt(row.total) || undefined,
@@ -498,12 +542,21 @@ export function FinanceContent({ tab }: FinanceContentProps) {
     const pengeluaranFields: FieldConfig[] = [
       { key: "tanggal", label: "Tanggal pengeluaran", type: "date" },
       { key: "keterangan", label: "Keterangan biaya", type: "text", placeholder: "Contoh: Listrik bulanan, ATK kantor" },
+      { key: "penanggungJawab", label: "Penanggung jawab", type: "select", options: responsibleOptions, placeholder: "Pilih penanggung jawab" },
       { key: "nominal", label: "Nominal pengeluaran", type: "number", placeholder: "0" },
     ];
 
     const pengeluaranColumns: Column[] = [
       { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" },
       { key: "keterangan", label: "Keterangan pengeluaran", filterable: true, filterType: "text" },
+      { 
+        key: "penanggungJawab", 
+        label: "Penanggung jawab", 
+        filterable: true, 
+        filterType: "select", 
+        filterOptions: responsibleOptions,
+        render: (val: any) => val || "-"
+      },
       { key: "nominal", label: "Nominal" },
     ];
 
@@ -514,6 +567,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
         addPengeluaran({
           tanggal: row.tanggal || new Date().toLocaleDateString("id-ID"),
           keterangan: row.keterangan || "",
+          penanggungJawab: row.penanggungJawab || undefined,
           nominal: parseInt(row.nominal) || 0,
         });
       });
@@ -610,11 +664,11 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   if (tab === "tagihan") {
     const tagihanFields: FieldConfig[] = [
       { key: "tanggal", label: "Tanggal tagihan", type: "date" },
-      { key: "customer", label: "Customer", type: "text", placeholder: "Nama customer atau badan usaha" },
-      { key: "nopol", label: "Plat nomor", type: "text", placeholder: "Contoh: B 1234 ABC" },
+      { key: "customer", label: "Nama Customer", type: "text", placeholder: "Nama customer atau badan usaha" },
+      { key: "nopol", label: "Nomor Polisi", type: "text", placeholder: "Contoh: B 1234 ABC" },
       { 
         key: "jenisLayanan", 
-        label: "Jenis layanan", 
+        label: "Jenis Pengurusan", 
         type: "select", 
         options: ["Mutasi LD", "Mutasi AS", "BBN 1", "BBN 2", "Pajak Tahunan", "Perpanjangan 5 Tahun", "Balik Nama", "Ganti Plat", "Duplikat STNK"] 
       },
@@ -694,7 +748,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
       },
       { 
         key: "customer", 
-        label: "Customer", 
+        label: "Nama Customer", 
         filterable: true, 
         filterType: "text" as const,
         render: (value: string, item: InvoiceBillingRecord) => (
@@ -711,7 +765,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
       },
       { 
         key: "nopol", 
-        label: "No. Polisi", 
+        label: "Nomor Polisi", 
         filterable: true, 
         filterType: "text" as const,
         render: (value: string) => <PlateNumberBadge plate={value || "-"} />
@@ -923,7 +977,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
             onView={(item) => setViewingItem({ item, subTabTitle: "Tagihan", columns: tagihanColumns })}
             onEdit={(item, updated) => updateInvoice(item.id, updated)}
             hideDeleteButton={true}
-            searchPlaceholder="Cari customer, nopol, atau layanan tagihan..."
+            searchPlaceholder="Cari nama customer, nomor polisi, atau jenis pengurusan..."
             editFields={tagihanFields}
           />
         </Card>
@@ -1300,10 +1354,10 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   if (tab === "belum-bayar") {
     const belumBayarColumns = [
       { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" as const },
-      { key: "nopol", label: "Plat nomor", filterable: true, filterType: "text" as const },
-      { key: "customer", label: "Customer", filterable: true, filterType: "text" as const },
+      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" as const },
+      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" as const },
       { key: "namaBerkas", label: "Nama berkas" },
-      { key: "pengurusan", label: "Pengurusan" },
+      { key: "pengurusan", label: "Jenis Pengurusan" },
       { key: "uangMasuk", label: "Uang masuk" },
       { key: "biayaSamsat", label: "Biaya samsat" },
       { key: "profit", label: "Profit" },
@@ -1323,7 +1377,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
             onView={(item) => setViewingItem({ item, subTabTitle: "Belum & kurang bayar", columns: belumBayarColumns })}
             onEdit={(item, updated) => updateInvoice(item.id, updated)}
             onDelete={(item) => deleteInvoice(item.id)}
-            searchPlaceholder="Cari customer, nopol..."
+            searchPlaceholder="Cari nama customer, nomor polisi..."
             hideAddButton={true}
           />
         </Card>
@@ -1334,10 +1388,10 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   if (tab === "profit-pending") {
     const profitPendingColumns = [
       { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" as const },
-      { key: "nopol", label: "Plat nomor", filterable: true, filterType: "text" as const },
-      { key: "customer", label: "Customer", filterable: true, filterType: "text" as const },
+      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" as const },
+      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" as const },
       { key: "namaBerkas", label: "Nama berkas" },
-      { key: "pengurusan", label: "Pengurusan" },
+      { key: "pengurusan", label: "Jenis Pengurusan" },
       { key: "uangMasuk", label: "Uang masuk" },
       { key: "biayaSamsat", label: "Biaya samsat" },
       { key: "profit", label: "Profit" },
@@ -1357,7 +1411,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
             onView={(item) => setViewingItem({ item, subTabTitle: "Profit terpending", columns: profitPendingColumns })}
             onEdit={(item, updated) => updateInvoice(item.id, updated)}
             onDelete={(item) => deleteInvoice(item.id)}
-            searchPlaceholder="Cari customer, nopol, alasan..."
+            searchPlaceholder="Cari nama customer, nomor polisi, alasan..."
             hideAddButton={true}
           />
         </Card>
@@ -1368,10 +1422,10 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   if (tab === "cashback-pending") {
     const cashbackPendingColumns = [
       { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" as const },
-      { key: "nopol", label: "Plat nomor", filterable: true, filterType: "text" as const },
-      { key: "customer", label: "Customer", filterable: true, filterType: "text" as const },
+      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" as const },
+      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" as const },
       { key: "namaBerkas", label: "Nama berkas" },
-      { key: "pengurusan", label: "Pengurusan" },
+      { key: "pengurusan", label: "Jenis Pengurusan" },
       { key: "uangMasuk", label: "Uang masuk" },
       { key: "profit", label: "Profit" },
       { key: "jumlahCashback", label: "Jumlah cashback" },
@@ -1391,7 +1445,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
             onView={(item) => setViewingItem({ item, subTabTitle: "Cashback terpending", columns: cashbackPendingColumns })}
             onEdit={(item, updated) => updateInvoice(item.id, updated)}
             onDelete={(item) => deleteInvoice(item.id)}
-            searchPlaceholder="Cari customer, nopol..."
+            searchPlaceholder="Cari nama customer, nomor polisi..."
             hideAddButton={true}
           />
         </Card>

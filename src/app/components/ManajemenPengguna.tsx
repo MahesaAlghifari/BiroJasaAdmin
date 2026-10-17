@@ -212,7 +212,7 @@ export function ManajemenPengguna() {
         </div>
 
         {/* RESPONSIVE TABLE WRAPPER (Fill Width, horizontal scrollable if needed) */}
-        <div className="rounded-lg border border-border bg-card overflow-x-auto shadow-2xs w-full flex-1 flex flex-col min-h-[220px]">
+        <div className="rounded-lg border border-border bg-card overflow-hidden shadow-2xs w-full flex-1 flex flex-col min-h-[220px]">
           <Table className={cn("w-full min-w-[750px]", paginatedData.length === 0 && "h-full")}>
             <TableHeader className="bg-muted/40 border-b border-border">
               <TableRow className="hover:bg-transparent">
