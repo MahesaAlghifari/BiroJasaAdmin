@@ -27,7 +27,12 @@ import {
 
 export type { ProfitItem, KasMessengerItem, KasKantorItem, PengeluaranItem, LabaRugiMonthlyItem };
 
+import { orderRepository } from "../../data/repositories/orderRepository";
 import {
+  resolveOrderSalesCategory,
+  projectOrderToContractRow,
+  deriveStatusPengerjaan,
+  deriveStatusPembayaran,
   initialMutasiLDContract,
   initialMutasiASContract,
   initialBBNContract,
@@ -50,7 +55,7 @@ import {
   CollectionState,
   derivePaymentStatus,
 } from "../../domain/finance/types";
-import { SettlementCondition, RefundStatus } from "../../domain/order/types";
+import { SettlementCondition, RefundStatus, OperationalOrder } from "../../domain/order/types";
 import type { ReimbursementRequest } from "../../domain/messenger/types";
 
 export type {
@@ -67,7 +72,31 @@ export type {
   RefundStatus,
   ReimbursementRequest,
 };
-export { derivePaymentStatus };
+
+export type OrderCreatorFn = (data: {
+  customer: string;
+  nopol: string;
+  layanan: string;
+  namaPemilik?: string;
+  nomorHP?: string;
+  wilayahSamsatAsal?: string;
+  jenisKendaraan?: string;
+  biayaJasa?: number;
+  totalEstimasi?: number;
+  uangMasuk?: number;
+  uangKeluar?: number;
+  r4r2?: string;
+  bpkb?: string;
+  [key: string]: any;
+}) => OperationalOrder | false;
+
+export {
+  derivePaymentStatus,
+  resolveOrderSalesCategory,
+  projectOrderToContractRow,
+  deriveStatusPengerjaan,
+  deriveStatusPembayaran,
+};
 
 
 // Phone number dictionary for sample customers to support WhatsApp contact
@@ -253,6 +282,12 @@ class FinanceStore {
   private labaRugiData: LabaRugiMonthlyItem[];
   private isApiMode: boolean;
   private unsubscribeRepo?: () => void;
+  private unsubscribeOrderRepo?: () => void;
+  private orderCreator: OrderCreatorFn | null = null;
+
+  public setOrderCreator(creator: OrderCreatorFn): void {
+    this.orderCreator = creator;
+  }
 
   constructor() {
     this.isApiMode = APP_CONFIG.dataProvider === "api";
@@ -285,6 +320,11 @@ class FinanceStore {
       this.profitData = [...rawProfitData];
       this.labaRugiData = [...rawLabaRugiData];
     }
+
+    // Subscribe to order repository updates to project orders into Data Penjualan reactively
+    this.unsubscribeOrderRepo = orderRepository.subscribe(() => {
+      this.notify();
+    });
   }
 
   public setApiMode(isApi: boolean): void {
@@ -300,6 +340,16 @@ class FinanceStore {
       this.pengeluaran = [];
       this.profitData = [];
       this.labaRugiData = [];
+      this.contractDatasets = {
+        "mutasi-ld": [],
+        "mutasi-as": [],
+        bbn: [],
+        "perpanjangan-pajak": [],
+        "lain-lain": [],
+        "belum-kurang-bayar": [],
+        "profit-terpending": [],
+        "cashback-terpending": [],
+      };
       this.syncFromRepository();
       this.unsubscribeRepo = financeRepository.subscribe(() => {
         this.syncFromRepository();
@@ -311,6 +361,16 @@ class FinanceStore {
       this.pengeluaran = [...rawPengeluaranData];
       this.profitData = [...rawProfitData];
       this.labaRugiData = [...rawLabaRugiData];
+      this.contractDatasets = {
+        "mutasi-ld": [...initialMutasiLDContract],
+        "mutasi-as": [...initialMutasiASContract],
+        bbn: [...initialBBNContract],
+        "perpanjangan-pajak": [...initialPerpanjanganPajakContract],
+        "lain-lain": [...initialLainLainContract],
+        "belum-kurang-bayar": [...initialBelumKurangBayarContract],
+        "profit-terpending": [...initialProfitTerpendingContract],
+        "cashback-terpending": [...initialCashbackTerpendingContract],
+      };
       this.notify();
     }
   }
@@ -661,7 +721,65 @@ class FinanceStore {
         }));
     }
 
-    return this.contractDatasets[category] || [];
+    // Operational categories: "mutasi-ld" | "mutasi-as" | "bbn" | "perpanjangan-pajak" | "lain-lain"
+    const allOrders = orderRepository.getAllFlat();
+    const matchingOrders = allOrders.filter(
+      (order) => resolveOrderSalesCategory(order.layanan) === category
+    );
+
+    const archivedOrders = typeof orderRepository.getArchivedOrders === "function" ? orderRepository.getArchivedOrders() : [];
+    const archivedOrderNos = new Set(archivedOrders.map((o) => o.orderNo));
+
+    const projectedRows = matchingOrders.map((order) => {
+      // Strict linking: Invoices must only be linked via orderNo or invoice identifier (never by nopol or customer name)
+      const linkedInvoice = this.invoices.find(
+        (inv) =>
+          (inv.orderNo && inv.orderNo === order.orderNo) ||
+          (order.payment?.invoiceNo &&
+            (inv.invoice === order.payment.invoiceNo || inv.invoiceNo === order.payment.invoiceNo))
+      );
+      const isArchived = archivedOrderNos.has(order.orderNo) || Boolean((order as any).isArchived);
+      return projectOrderToContractRow(order, linkedInvoice, isArchived);
+    });
+
+    const manualOrFixtureData = this.contractDatasets[category] || [];
+
+    if (this.isApiMode) {
+      // In API Mode: ONLY show live projected orders and any runtime additions (no mock fixtures)
+      const mappedManual = manualOrFixtureData.map((row: any) => ({
+        ...row,
+        "Status Pengerjaan": row["Status Pengerjaan"] || "-",
+        "Status Pembayaran": row["Status Pembayaran"] || "Tagihan Tidak Tersedia",
+        Status: row["Status"] || row["Status Pengerjaan"] || "-",
+      }));
+      return [...projectedRows, ...mappedManual];
+    }
+
+    // In Mock Mode: Show live projected orders deduplicated against legacy fixtures
+    const projectedOrderNos = new Set(projectedRows.map((r) => r.orderNo));
+    const filteredFixtures = manualOrFixtureData.filter(
+      (row: any) => !row.orderNo || !projectedOrderNos.has(row.orderNo)
+    );
+
+    // Apply neutral fallback for legacy mock fixtures (never fabricated progress)
+    const mappedFixtures = filteredFixtures.map((row: any) => {
+      const statusPengerjaan = row["Status Pengerjaan"] || "-";
+      let statusPembayaran = row["Status Pembayaran"];
+      if (!statusPembayaran) {
+        const inv = this.invoices.find(
+          (i) => row["No Invoice"] && (i.invoice === row["No Invoice"] || i.invoiceNo === row["No Invoice"])
+        );
+        statusPembayaran = inv ? deriveStatusPembayaran(inv) : "Tagihan Tidak Tersedia";
+      }
+      return {
+        ...row,
+        "Status Pengerjaan": statusPengerjaan,
+        "Status Pembayaran": statusPembayaran,
+        Status: row["Status"] || statusPengerjaan,
+      };
+    });
+
+    return [...projectedRows, ...mappedFixtures];
   }
 
   // =========================================================================
@@ -1027,10 +1145,12 @@ class FinanceStore {
     categories.forEach((cat) => {
       const dataset = this.contractDatasets[cat];
       const foundIdx = dataset.findIndex(
-        (row) => row["No Invoice"] === record.invoice || row["Plat No"] === record.nopol
+        (row) => row["No Invoice"] === record.invoice || (row.orderNo && row.orderNo === record.orderNo)
       );
       if (foundIdx !== -1) {
-        dataset[foundIdx]["Status"] = record.status === "Lunas" ? "Selesai" : record.status;
+        const statusPembayaran = deriveStatusPembayaran(record);
+        dataset[foundIdx]["Status Pembayaran"] = statusPembayaran;
+        dataset[foundIdx]["Status"] = dataset[foundIdx]["Status Pengerjaan"] || statusPembayaran;
         dataset[foundIdx]["Uang Masuk dari Konsumen"] = record.terbayar;
       }
     });
@@ -1187,6 +1307,37 @@ class FinanceStore {
     return true;
   }
 
+  // Phase 9.4: Reconcile temporary optimistic orderNo with backend-confirmed canonical orderNo
+  public reconcileOrderNo(oldOrderNo: string, newOrderNo: string, newInvoiceNo?: string): boolean {
+    const existingIdx = this.invoices.findIndex((inv) => inv.orderNo === newOrderNo);
+    const tempIdx = this.invoices.findIndex((inv) => inv.orderNo === oldOrderNo);
+
+    // If an invoice for newOrderNo already exists (e.g. idempotent retry), remove the temp duplicate
+    if (existingIdx !== -1 && tempIdx !== -1 && existingIdx !== tempIdx) {
+      this.invoices.splice(tempIdx, 1);
+      this.notify();
+      return true;
+    }
+
+    if (tempIdx === -1) return false;
+    this.invoices[tempIdx].orderNo = newOrderNo;
+    if (newInvoiceNo) {
+      this.invoices[tempIdx].invoice = newInvoiceNo;
+    }
+    this.syncContractRowFromInvoice(this.invoices[tempIdx]);
+    this.notify();
+    return true;
+  }
+
+  // Phase 9.4: Clean up optimistic invoice if order creation fails (anti-ghost row)
+  public removeInvoiceByOrderNo(orderNo: string): boolean {
+    const idx = this.invoices.findIndex((inv) => inv.orderNo === orderNo);
+    if (idx === -1) return false;
+    this.invoices.splice(idx, 1);
+    this.notify();
+    return true;
+  }
+
   // ==========================================
   // KAS KANTOR CRUD
   // ==========================================
@@ -1322,9 +1473,13 @@ class FinanceStore {
   // DATA PENJUALAN CONTRACT SYNC
   // ==========================================
 
-  public updateContractData(category: PenjualanContractCategory, id: number, updatedFields: Record<string, any>): boolean {
+  public updateContractData(
+    category: PenjualanContractCategory,
+    id: number | string,
+    updatedFields: Record<string, any>
+  ): boolean {
     if (category === "belum-kurang-bayar" || category === "profit-terpending" || category === "cashback-terpending") {
-      const inv = this.invoices.find((i) => i.id === id);
+      const inv = this.invoices.find((i) => i.id === id || String(i.id) === String(id));
       if (inv) {
         if (updatedFields["Uang Masuk dari Konsumen"] !== undefined) {
           const newPaid = Number(updatedFields["Uang Masuk dari Konsumen"]) || 0;
@@ -1338,9 +1493,54 @@ class FinanceStore {
       }
     }
 
+    // Check if updating a projected order (id starts with "ord:")
+    if (typeof id === "string" && id.startsWith("ord:")) {
+      const orderNo = id.slice(4);
+      const order = orderRepository.getByOrderNo(orderNo);
+      if (order) {
+        const orderUpdates: Partial<OperationalOrder> = {};
+        if (updatedFields["Nama Customer"]) {
+          orderUpdates.customer = updatedFields["Nama Customer"];
+        }
+        if (updatedFields["Nama"]) {
+          orderUpdates.namaPemilik = updatedFields["Nama"];
+        }
+        if (updatedFields["Plat No"]) {
+          orderUpdates.nopol = updatedFields["Plat No"];
+        }
+        if (updatedFields["Jenis Pengurusan"]) {
+          orderUpdates.layanan = updatedFields["Jenis Pengurusan"];
+        }
+        if (updatedFields["Samsat"]) {
+          orderUpdates.wilayahSamsatAsal = updatedFields["Samsat"];
+        }
+        if (updatedFields["R4 / R2"]) {
+          orderUpdates.jenisKendaraan = updatedFields["R4 / R2"] === "R2" ? "Motor" : "Mobil";
+        }
+        if (updatedFields["BPKB"] && order.clientDocuments) {
+          const bpkbVal = updatedFields["BPKB"] === "Ada" ? "Sudah Tersedia" : "Belum Tersedia";
+          orderUpdates.clientDocuments = {
+            ...order.clientDocuments,
+            BPKB: {
+              ...(order.clientDocuments.BPKB || { name: "BPKB Asli" }),
+              status: bpkbVal,
+            },
+          };
+        }
+
+        // Phase 9.2: Derived status fields (Status Pengerjaan, Status Pembayaran, No Invoice, Profit, dsb.)
+        // MUST NOT be mutated arbitrarily from a generic table cell edit!
+        // Derived statuses must always follow canonical domain lifecycle.
+
+        orderRepository.updateOrder(orderNo, orderUpdates);
+        this.notify();
+        return true;
+      }
+    }
+
     const dataset = this.contractDatasets[category];
     if (!dataset) return false;
-    const idx = dataset.findIndex((r) => r.id === id);
+    const idx = dataset.findIndex((r) => r.id === id || String(r.id) === String(id));
     if (idx === -1) return false;
 
     dataset[idx] = { ...dataset[idx], ...updatedFields };
@@ -1361,9 +1561,185 @@ class FinanceStore {
   }
 
   public addContractData(category: PenjualanContractCategory, rows: any[]): boolean {
+    const isOperational = [
+      "mutasi-ld",
+      "mutasi-as",
+      "bbn",
+      "perpanjangan-pajak",
+      "lain-lain",
+    ].includes(category);
+
+    if (isOperational) {
+      if (!rows || rows.length === 0) return false;
+
+      // 1. Strict validation: Customer, Nopol, Layanan are required for every row
+      for (const row of rows) {
+        const customer = (row["Nama Customer"] || row.customer || "").trim();
+        const nopol = (row["Plat No"] || row.nopol || "").trim();
+        const defaultLayanan =
+          category === "mutasi-ld"
+            ? "Mutasi Luar Daerah"
+            : category === "mutasi-as"
+            ? "Mutasi Antar Samsat"
+            : category === "bbn"
+            ? "Balik Nama"
+            : category === "perpanjangan-pajak"
+            ? "Perpanjangan Pajak"
+            : "Lain-Lain";
+        const layanan = (row["Jenis Pengurusan"] || row.layanan || defaultLayanan).trim();
+
+        if (!customer || !nopol || !layanan) {
+          console.warn("[FinanceStore] addContractData validation failed: missing customer, nopol, or layanan", row);
+          return false;
+        }
+      }
+
+      // 2. Create canonical orders
+      for (const row of rows) {
+        const customer = (row["Nama Customer"] || row.customer || "").trim();
+        const nopol = (row["Plat No"] || row.nopol || "").trim();
+        const defaultLayanan =
+          category === "mutasi-ld"
+            ? "Mutasi Luar Daerah"
+            : category === "mutasi-as"
+            ? "Mutasi Antar Samsat"
+            : category === "bbn"
+            ? "Balik Nama"
+            : category === "perpanjangan-pajak"
+            ? "Perpanjangan Pajak"
+            : "Lain-Lain";
+        const layanan = (row["Jenis Pengurusan"] || row.layanan || defaultLayanan).trim();
+        const namaPemilik = (row["Nama"] || row.namaPemilik || customer).trim();
+        const samsat = (row["Samsat"] || row.samsat || "Jakarta Timur").trim();
+        const r4r2 = row["R4 / R2"] || row.r4r2;
+        const jenisKendaraan = r4r2 === "R2" ? "Motor" : "Mobil";
+        const uangMasuk = Number(row["Uang Masuk dari Konsumen"] || row.uangMasuk) || 0;
+        const uangKeluar = Number(row["Uang Keluar dari Biro Jasa"] || row.uangKeluar) || 0;
+        const profit = Number(row["Profit"] || row.profit) || Math.max(0, uangMasuk - uangKeluar);
+        const bpkb = row["BPKB"] || row.bpkb;
+
+        if (this.orderCreator) {
+          const res = this.orderCreator({
+            customer,
+            nopol,
+            layanan,
+            namaPemilik,
+            wilayahSamsatAsal: samsat,
+            jenisKendaraan,
+            biayaJasa: profit,
+            totalEstimasi: uangMasuk || profit,
+            uangMasuk,
+            uangKeluar,
+            r4r2,
+            bpkb,
+            invoiceNo: row["No Invoice"] || row.invoiceNo,
+          });
+          if (res === false) return false;
+        } else {
+          // Direct canonical creation fallback if orderCreator not yet wired
+          const orderCount = orderRepository.getAllFlat().length + 101;
+          const orderNo = `ORD-${String(orderCount).padStart(4, "0")}`;
+          const totalEst = uangMasuk || profit;
+
+          const newOrder: OperationalOrder = {
+            orderNo,
+            customer,
+            nomorHP: "081200000000",
+            layanan,
+            currentStep: 1,
+            currentStageName: "Verifikasi",
+            catatanOrder: "Order dibuat dari Data Penjualan (+ Tambah Data).",
+            createdAt: new Date().toISOString().split("T")[0],
+            namaPemilik,
+            kepemilikanKendaraan: "Pribadi",
+            jenisKendaraan,
+            tahunKendaraan: new Date().getFullYear(),
+            nopol,
+            pkbBerlakuSd: "",
+            tahunPajak: String(new Date().getFullYear()),
+            bulanPajak: "Januari",
+            nominalPkbTerakhir: 0,
+            nominalSwdkllj: 143000,
+            wilayahSamsatAsal: samsat,
+            wilayahSamsatTujuan: "-",
+            alamatPenjemputan: {
+              kota: samsat,
+              kecamatan: "",
+              kelurahan: "",
+              detail: "Loket Kantor",
+              rtRw: "",
+              nomor: "",
+              landmark: "",
+            },
+            alamatPengantaran: {
+              kota: samsat,
+              kecamatan: "",
+              kelurahan: "",
+              detail: "Loket Kantor",
+              rtRw: "",
+              nomor: "",
+              landmark: "",
+            },
+            clientDocuments: {
+              stnk: { name: "STNK.pdf", status: "Sudah Tersedia", isOptional: false },
+              bpkb: { name: "BPKB.pdf", status: bpkb === "Ada" ? "Sudah Tersedia" : "Belum Tersedia", isOptional: false },
+              ktp: { name: "KTP.pdf", status: "Sudah Tersedia", isOptional: false },
+            },
+            updatedDocuments: [],
+            biayaJasa: profit,
+            pkb: 0,
+            swdkllj: 143000,
+            dendaSwdkllj: 0,
+            totalEstimasi: totalEst,
+            samsatProcesses: [],
+            payment: {
+              tipePembayaran: uangMasuk >= totalEst && totalEst > 0 ? "Bayar di Awal" : "Bayar di Akhir",
+              metodePembayaran: "Transfer",
+              statusPembayaran: uangMasuk >= totalEst && totalEst > 0 ? "Lunas" : uangMasuk > 0 ? "Kurang" : "Belum Bayar",
+              totalBiaya: totalEst,
+              totalEstimasi: totalEst,
+              dibayar: uangMasuk,
+              kurang: Math.max(0, totalEst - uangMasuk),
+              overpayment: 0,
+              settlementCondition: "PENDING_FINALIZATION",
+              refundStatus: "NONE",
+              isPaymentVerified: uangMasuk >= totalEst && totalEst > 0,
+            },
+            rekapDocuments: [],
+          };
+
+          const invRecord = this.addInvoice({
+            orderNo,
+            customer,
+            nopol,
+            jenisLayanan: layanan,
+            totalTagihan: totalEst,
+            terbayar: uangMasuk,
+            metodePembayaran: "Transfer",
+            dueTrigger: "AFTER_DOCUMENT_RECEIVED",
+            collectionStatus: uangMasuk >= totalEst && totalEst > 0 ? "LUNAS" : "BELUM_JATUH_TEMPO",
+            settlementCondition: "PENDING_FINALIZATION",
+            refundStatus: "NONE",
+            overpayment: 0,
+            invoice: row["No Invoice"] || row.invoiceNo || undefined,
+          });
+          newOrder.payment.invoiceNo = invRecord.invoice;
+
+          orderRepository.saveOrder(newOrder);
+        }
+      }
+
+      this.notify();
+      return true;
+    }
+
+    // For non-operational categories (financial tabs 6-8)
     const dataset = this.contractDatasets[category];
     if (!dataset) return false;
-    const nextId = Math.max(0, ...dataset.map((d: any) => d.id || 0)) + 1;
+    const numericIds = dataset
+      .map((d: any) => (typeof d.id === "number" ? d.id : 0))
+      .filter((n: number) => !isNaN(n));
+    const nextId = (numericIds.length > 0 ? Math.max(...numericIds) : 0) + 1;
     const newItems = rows.map((row, i) => ({
       id: nextId + i,
       ...row,
@@ -1373,13 +1749,18 @@ class FinanceStore {
     return true;
   }
 
-  public deleteContractData(category: PenjualanContractCategory, id: number): boolean {
+  public deleteContractData(category: PenjualanContractCategory, id: number | string): boolean {
     if (category === "belum-kurang-bayar" || category === "profit-terpending" || category === "cashback-terpending") {
-      return this.deleteInvoice(id);
+      return this.deleteInvoice(typeof id === "number" ? id : Number(id));
+    }
+    // Projected orders cannot be destructively deleted from Data Penjualan tab
+    if (typeof id === "string" && id.startsWith("ord:")) {
+      console.warn(`[FinanceStore] Cannot delete canonical operational order (${id}) from Data Penjualan projection.`);
+      return false;
     }
     const dataset = this.contractDatasets[category];
     if (!dataset) return false;
-    this.contractDatasets[category] = dataset.filter((d: any) => d.id !== id);
+    this.contractDatasets[category] = dataset.filter((d: any) => d.id !== id && String(d.id) !== String(id));
     this.notify();
     return true;
   }
@@ -1538,6 +1919,8 @@ export function useFinanceStore() {
     addInvoice: financeStore.addInvoice.bind(financeStore),
     updateInvoice: financeStore.updateInvoice.bind(financeStore),
     deleteInvoice: financeStore.deleteInvoice.bind(financeStore),
+    reconcileOrderNo: financeStore.reconcileOrderNo.bind(financeStore),
+    removeInvoiceByOrderNo: financeStore.removeInvoiceByOrderNo.bind(financeStore),
     addKasKantor: financeStore.addKasKantor.bind(financeStore),
     updateKasKantor: financeStore.updateKasKantor.bind(financeStore),
     deleteKasKantor: financeStore.deleteKasKantor.bind(financeStore),

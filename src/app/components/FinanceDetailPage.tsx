@@ -1,7 +1,8 @@
 import React from "react";
+import { useNavigate } from "react-router";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
-import { ArrowLeft, Edit, FileText } from "lucide-react";
+import { ArrowLeft, Edit, ExternalLink, ShieldCheck, Clock, FileText, Info } from "lucide-react";
 import { 
   formatDateDDMMYYYY, 
   formatRupiah, 
@@ -11,6 +12,9 @@ import {
   formatBerkasName,
   toSentenceCase
 } from "../utils/financeFormatters";
+import { orderRepository } from "../../data/repositories/orderRepository";
+import { deriveStatusPengerjaan, deriveStatusPembayaran } from "../data/penjualanContractData";
+import { financeStore } from "../data/financeStore";
 
 interface FieldDef {
   key: string;
@@ -32,6 +36,8 @@ export function FinanceDetailPage({
   onBack,
   onEdit
 }: FinanceDetailPageProps) {
+  const navigate = useNavigate();
+
   if (!item) {
     return (
       <div className="p-6 text-center">
@@ -43,6 +49,11 @@ export function FinanceDetailPage({
       </div>
     );
   }
+
+  // Phase 9.2: Canonical order resolution
+  const orderNo = item.orderNo || (typeof item.id === "string" && item.id.startsWith("ord:") ? item.id.slice(4) : null);
+  const canonicalOrder = orderNo ? orderRepository.getByOrderNo(orderNo) : null;
+  const isProjectedOrder = !!canonicalOrder;
 
   // Determine list of fields to display
   const fields = columns && columns.length > 0 
@@ -69,17 +80,17 @@ export function FinanceDetailPage({
     }
 
     // Status
-    if (lower === "status" || lower === "statusbpkb" || lower === "statusprofit" || lower === "statuscashback") {
+    if (lower === "status" || lower.includes("status pengerjaan") || lower.includes("status pembayaran") || lower === "statusbpkb" || lower === "statusprofit" || lower === "statuscashback") {
       return <PlainTextStatus status={String(value)} />;
     }
 
     // Customer
-    if (lower === "customer") {
+    if (lower === "customer" || lower.includes("nama customer")) {
       return <span className="text-foreground font-medium">{formatCustomerName(String(value))}</span>;
     }
 
-    // Nama berkas
-    if (lower === "namaberkas" || lower === "namasesuaibpkb") {
+    // Nama berkas / Nama pemilik
+    if (lower === "namaberkas" || lower === "namasesuaibpkb" || lower === "nama") {
       return <span className="text-foreground">{formatBerkasName(String(value))}</span>;
     }
 
@@ -118,7 +129,7 @@ export function FinanceDetailPage({
 
   return (
     <div className="space-y-5">
-      {/* Breadcrumb (Requirement 3) */}
+      {/* Breadcrumb */}
       <nav className="text-xs text-muted-foreground flex items-center gap-1.5" aria-label="Breadcrumb">
         <span className="hover:text-foreground cursor-pointer" onClick={onBack}>Finance</span>
         <span>/</span>
@@ -158,8 +169,123 @@ export function FinanceDetailPage({
         </div>
       </div>
 
-      {/* Detail Content Card */}
+      {/* Phase 9.2: Canonical Order Banner vs Legacy Fixture Badge */}
+      {isProjectedOrder && canonicalOrder ? (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-primary text-primary-foreground">
+                {canonicalOrder.orderNo}
+              </span>
+              <span className="text-xs font-semibold text-foreground">
+                Order Operasional Kanonis
+              </span>
+              <span className="text-xs text-muted-foreground">
+                • Tahap {canonicalOrder.currentStep}: {canonicalOrder.currentStageName || "Verifikasi"}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Terintegrasi langsung dengan Order Tracking, Dokumen Kendaraan, dan Billing Keuangan.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigate("/order/tracking")}
+            className="h-8 text-xs border-primary/40 text-primary hover:bg-primary/10 gap-1.5 font-medium shrink-0"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Lacak di Order Tracking</span>
+          </Button>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 flex items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              <strong>Data Historis Fixture / Mock:</strong> Baris ini merupakan arsip simulasi statis dan tidak terhubung ke order kanonis aktif.
+            </span>
+          </div>
+          <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-300 font-mono text-[10px] font-semibold uppercase tracking-wider shrink-0">
+            Legacy Fixture
+          </span>
+        </div>
+      )}
+
+      {/* Rich Canonical Order Information Sections if available */}
+      {isProjectedOrder && canonicalOrder && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Customer & Vehicle Info */}
+          <Card className="p-4 border border-border bg-card shadow-xs space-y-3">
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pelanggan & Kendaraan</h4>
+              <PlateNumberBadge plate={canonicalOrder.nopol} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <p className="text-muted-foreground">Nama Customer</p>
+                <p className="font-medium text-foreground">{canonicalOrder.customer}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Nomor Telepon / HP</p>
+                <p className="font-mono text-foreground">{canonicalOrder.nomorHP || "-"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Nama Sesuai BPKB</p>
+                <p className="text-foreground">{canonicalOrder.namaPemilik || "-"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Jenis & Tahun Kendaraan</p>
+                <p className="text-foreground">{canonicalOrder.jenisKendaraan} ({canonicalOrder.tahunKendaraan || "-"})</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Samsat Asal</p>
+                <p className="text-foreground">{canonicalOrder.wilayahSamsatAsal || "-"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Samsat Tujuan</p>
+                <p className="text-foreground">{canonicalOrder.wilayahSamsatTujuan || "-"}</p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Service & Process Lifecycle Info */}
+          <Card className="p-4 border border-border bg-card shadow-xs space-y-3">
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tahapan & Pengerjaan</h4>
+              <PlainTextStatus status={deriveStatusPengerjaan(canonicalOrder)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <p className="text-muted-foreground">Jenis Pengurusan</p>
+                <p className="font-medium text-foreground">{canonicalOrder.layanan}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Status Pengerjaan</p>
+                <p className="font-medium text-foreground">{deriveStatusPengerjaan(canonicalOrder)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Tahap Operasional</p>
+                <p className="text-foreground">Tahap {canonicalOrder.currentStep} ({canonicalOrder.currentStageName || "Proses"})</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Status BPKB</p>
+                <p className="text-foreground">{canonicalOrder.clientDocuments?.BPKB?.status || canonicalOrder.clientDocuments?.bpkb?.status || "Ada"}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-muted-foreground">Catatan Order</p>
+                <p className="text-foreground text-[11px] leading-relaxed italic">{canonicalOrder.catatanOrder || "Tidak ada catatan."}</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Detail Content Card (Table Fields) */}
       <Card className="p-5 border border-border bg-card shadow-xs">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4 pb-2 border-b border-border">
+          Rincian Data Tabel ({subTabTitle})
+        </h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-4 gap-x-6">
           {fields.map(f => (
             <div key={f.key} className="space-y-1 pb-3 border-b border-border/40 sm:border-b-0">

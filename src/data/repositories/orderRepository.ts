@@ -18,6 +18,7 @@ export interface IOrderRepository {
   getArchivedOrders(): OperationalOrder[];
   subscribe(listener: () => void): () => void;
   saveOrder(order: OperationalOrder): void;
+  saveOrderAsync?(order: OperationalOrder): Promise<OperationalOrder>;
   updateOrder(orderNo: string, updates: Partial<OperationalOrder>): boolean;
   advanceOrder(orderNo: string, targetStage: StageName, updates?: Partial<OperationalOrder>): boolean;
   rollbackOrder(orderNo: string, targetStage: StageName, updates?: Partial<OperationalOrder>): boolean;
@@ -29,6 +30,8 @@ export interface IOrderRepository {
 
 export class OrderRepository implements IOrderRepository {
   private provider: IOrderDataProvider;
+  private listeners: Set<() => void> = new Set();
+  private unsubscribeProvider?: () => void;
 
   constructor(provider?: IOrderDataProvider) {
     if (provider) {
@@ -38,10 +41,35 @@ export class OrderRepository implements IOrderRepository {
                     (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_APP_DATA_PROVIDER === "api");
       this.provider = isApi ? new ApiOrderProvider() : mockOrderProvider;
     }
+    this.wireProvider();
+  }
+
+  private wireProvider(): void {
+    if (this.unsubscribeProvider) {
+      this.unsubscribeProvider();
+      this.unsubscribeProvider = undefined;
+    }
+    if (this.provider && typeof this.provider.subscribe === "function") {
+      this.unsubscribeProvider = this.provider.subscribe(() => {
+        this.notifyListeners();
+      });
+    }
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (err) {
+        console.error("OrderRepository listener error:", err);
+      }
+    });
   }
 
   public setProvider(provider: IOrderDataProvider): void {
     this.provider = provider;
+    this.wireProvider();
+    this.notifyListeners();
   }
 
   public getProvider(): IOrderDataProvider {
@@ -73,11 +101,22 @@ export class OrderRepository implements IOrderRepository {
   }
 
   public subscribe(listener: () => void): () => void {
-    return this.provider.subscribe(listener);
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   public saveOrder(order: OperationalOrder): void {
     this.provider.addOrder(order);
+  }
+
+  public async saveOrderAsync(order: OperationalOrder): Promise<OperationalOrder> {
+    if (typeof (this.provider as any).addOrderAsync === "function") {
+      return await (this.provider as any).addOrderAsync(order);
+    }
+    this.provider.addOrder(order);
+    return order;
   }
 
   public updateOrder(orderNo: string, updates: Partial<OperationalOrder>): boolean {

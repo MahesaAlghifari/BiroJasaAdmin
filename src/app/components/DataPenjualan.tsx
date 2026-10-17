@@ -175,9 +175,13 @@ export function DataPenjualan() {
 
   // Handle Add Submit
   const handleAddSubmit = (rows: any[]) => {
-    addContractData(currentMeta.category, rows);
-    setIsAdding(false);
-    toast.success(`${rows.length} data ${currentMeta.title} berhasil ditambahkan`);
+    const success = addContractData(currentMeta.category, rows);
+    if (success) {
+      setIsAdding(false);
+      toast.success(`${rows.length} order kanonis berhasil ditambahkan dan diproyeksikan`);
+    } else {
+      toast.error("Gagal menambahkan data: Pastikan Nama Customer, Nomor Polisi, dan Jenis Pengurusan terisi dengan benar");
+    }
   };
 
   // Detail View Full Screen

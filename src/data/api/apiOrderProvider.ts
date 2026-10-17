@@ -108,6 +108,98 @@ export class ApiOrderProvider implements IOrderDataProvider {
     return this.activeOrders[stage] || [];
   }
 
+  /**
+   * Phase 9.4: Synchronizes an order with the backend, reconciling temporary client identity
+   * with authoritative backend identity and protecting against ghost rows on failure.
+   */
+  private async syncOrderToBackend(
+    tempOrder: OperationalOrder,
+    targetStage: StageName
+  ): Promise<OperationalOrder> {
+    const tempOrderNo = tempOrder.orderNo;
+    const idempotencyKey = (tempOrder as any).clientRequestId || tempOrderNo;
+    try {
+      const res = await fetch(`${this.baseUrl}/orders`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": idempotencyKey,
+          ...this.getAuthHeader(),
+        },
+        body: JSON.stringify({
+          ...tempOrder,
+          clientRequestId: idempotencyKey,
+        }),
+      });
+
+      if (!res.ok) {
+        let errMessage = `HTTP ${res.status}`;
+        try {
+          const errPayload = await res.json();
+          if (errPayload.message) errMessage = errPayload.message;
+        } catch {
+          // ignore json parse error
+        }
+        throw new Error(`Order creation failed on backend: ${errMessage}`);
+      }
+
+      const payload = await res.json();
+      if (!payload.success || !payload.data) {
+        throw new Error(payload.message || "Failed to create order on backend.");
+      }
+
+      const canonicalOrder: OperationalOrder = payload.data;
+      const canonicalOrderNo = canonicalOrder.orderNo;
+
+      // Reconcile in-memory active orders: remove any instance of tempOrderNo and canonicalOrderNo, then add canonicalOrder
+      for (const stage of STAGES) {
+        if (!this.activeOrders[stage]) continue;
+        this.activeOrders[stage] = this.activeOrders[stage].filter(
+          (o) => o.orderNo !== tempOrderNo && o.orderNo !== canonicalOrderNo
+        );
+      }
+      if (!this.activeOrders[targetStage]) {
+        this.activeOrders[targetStage] = [];
+      }
+      this.activeOrders[targetStage].unshift(canonicalOrder);
+
+      // Reconcile linked invoice in financeStore if temporary ID differs from canonical
+      if (tempOrderNo !== canonicalOrderNo) {
+        try {
+          const { financeStore } = await import("../../app/data/financeStore");
+          financeStore.reconcileOrderNo(
+            tempOrderNo,
+            canonicalOrderNo,
+            canonicalOrder.payment?.invoiceNo
+          );
+        } catch {
+          // safe fallback
+        }
+      }
+
+      this.notify();
+      return canonicalOrder;
+    } catch (err) {
+      // Phase 9.4 Finding 1: Anti-ghost row cleanup on failure
+      for (const stage of STAGES) {
+        if (!this.activeOrders[stage]) continue;
+        const idx = this.activeOrders[stage].findIndex((o) => o.orderNo === tempOrderNo);
+        if (idx !== -1) {
+          this.activeOrders[stage].splice(idx, 1);
+          break;
+        }
+      }
+      try {
+        const { financeStore } = await import("../../app/data/financeStore");
+        financeStore.removeInvoiceByOrderNo(tempOrderNo);
+      } catch {
+        // safe fallback
+      }
+      this.notify();
+      throw err;
+    }
+  }
+
   public addOrder(order: OperationalOrder): void {
     const targetStage: StageName = (STAGES as readonly string[]).includes(order.currentStageName as StageName)
       ? (order.currentStageName as StageName)
@@ -119,14 +211,24 @@ export class ApiOrderProvider implements IOrderDataProvider {
     this.activeOrders[targetStage].unshift(order);
     this.notify();
 
-    // Persist to Express backend in background
-    fetch(`${this.baseUrl}/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
-      body: JSON.stringify(order),
-    }).catch(() => {
-      // background sync fallback
+    // Persist and reconcile in background, rolling back on failure
+    this.syncOrderToBackend(order, targetStage).catch((err) => {
+      console.error("Background sync for new order failed:", err);
     });
+  }
+
+  public async addOrderAsync(order: OperationalOrder): Promise<OperationalOrder> {
+    const targetStage: StageName = (STAGES as readonly string[]).includes(order.currentStageName as StageName)
+      ? (order.currentStageName as StageName)
+      : "Verifikasi";
+
+    if (!this.activeOrders[targetStage]) {
+      this.activeOrders[targetStage] = [];
+    }
+    this.activeOrders[targetStage].unshift(order);
+    this.notify();
+
+    return await this.syncOrderToBackend(order, targetStage);
   }
 
   public updateOrder(orderNo: string, updates: Partial<OperationalOrder>): boolean {

@@ -43,10 +43,11 @@ export async function getOrderByNo(req: AuthenticatedRequest, res: Response, nex
 
 export async function createOrder(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const order = orderService.createOrder(req.body, req.user);
-    res.status(201).json({
+    const idempotencyKey = (req.headers["x-idempotency-key"] as string) || req.body?.clientRequestId;
+    const { order, isExisting } = orderService.createOrderWithIdempotency(req.body, req.user, idempotencyKey);
+    res.status(isExisting ? 200 : 201).json({
       success: true,
-      message: "Order berhasil dibuat.",
+      message: isExisting ? "Order sudah ada (idempotent)." : "Order berhasil dibuat.",
       data: order,
       timestamp: new Date().toISOString(),
     });

@@ -13,6 +13,7 @@ import { runInTransaction } from "../database/db";
 
 export class OrderService {
   private orderCounter = 100;
+  private idempotencyCache = new Map<string, { order: OperationalOrder; timestamp: number }>();
 
   constructor() {
     try {
@@ -47,7 +48,32 @@ export class OrderService {
     return order;
   }
 
-  public createOrder(data: any, user?: TokenPayload | null): OperationalOrder {
+  public createOrder(data: any, user?: TokenPayload | null, idempotencyKey?: string): OperationalOrder {
+    return this.createOrderWithIdempotency(data, user, idempotencyKey).order;
+  }
+
+  public createOrderWithIdempotency(
+    data: any,
+    user?: TokenPayload | null,
+    idempotencyKey?: string
+  ): { order: OperationalOrder; isExisting: boolean } {
+    const resolvedKey = (idempotencyKey || data.clientRequestId || data.idempotencyKey)?.trim();
+    if (resolvedKey) {
+      if (this.idempotencyCache.has(resolvedKey)) {
+        const cached = this.idempotencyCache.get(resolvedKey)!;
+        const existing = dbOrderRepository.getByOrderNo(cached.order.orderNo);
+        if (existing) {
+          return { order: existing, isExisting: true };
+        }
+      }
+      const allRecent = dbOrderRepository.getAllFlat(false);
+      const existing = allRecent.find((o) => (o as any).clientRequestId === resolvedKey);
+      if (existing) {
+        this.idempotencyCache.set(resolvedKey, { order: existing, timestamp: Date.now() });
+        return { order: existing, isExisting: true };
+      }
+    }
+
     if (!data.customer || !data.nomorHP || !data.layanan || !data.nopol) {
       throw new ApiError(400, "VALIDATION_ERROR", "Data wajib belum lengkap (customer, nomorHP, layanan, nopol).");
     }
@@ -58,6 +84,7 @@ export class OrderService {
 
     const newOrder: OperationalOrder = {
       orderNo,
+      ...(resolvedKey ? { clientRequestId: resolvedKey } : {}),
       customer: data.customer,
       nomorHP: data.nomorHP,
       layanan: data.layanan,
@@ -109,39 +136,44 @@ export class OrderService {
 
       samsatProcesses: getDefaultSamsatProcesses(data.layanan),
 
-      payment: data.payment || {
-        tipePembayaran: data.tipePembayaran || "Bayar di Akhir",
-        metodePembayaran: data.metodePembayaran || "Transfer Bank",
-        totalBiaya: data.totalEstimasi || data.biayaJasa || 0,
-        dibayar: 0,
-        kurang: data.totalEstimasi || data.biayaJasa || 0,
-        statusPembayaran: "Belum Lunas",
-        isPaymentVerified: false,
+      payment: {
+        ...(data.payment || {}),
+        tipePembayaran: data.payment?.tipePembayaran || data.tipePembayaran || "Bayar di Akhir",
+        metodePembayaran: data.payment?.metodePembayaran || data.metodePembayaran || "Transfer Bank",
+        totalBiaya: data.payment?.totalBiaya ?? data.totalEstimasi ?? data.biayaJasa ?? 0,
+        dibayar: data.payment?.dibayar ?? 0,
+        kurang: data.payment?.kurang ?? (data.totalEstimasi || data.biayaJasa || 0),
+        statusPembayaran: data.payment?.statusPembayaran || "Belum Lunas",
+        isPaymentVerified: data.payment?.isPaymentVerified ?? false,
         invoiceNo: `INV-${orderNo}`,
       },
 
       rekapDocuments: [],
       costSnapshot: data.costSnapshot,
+      costBreakdown: data.costBreakdown,
+      estimationResult: data.estimationResult,
     };
 
     return runInTransaction(() => {
       dbOrderRepository.saveOrder(newOrder);
 
       // Save initial invoice to finance
+      const initialPaid = newOrder.payment.dibayar || 0;
+      const totalTagihan = newOrder.payment.totalBiaya;
+      const isLunas = initialPaid >= totalTagihan && totalTagihan > 0;
       dbFinanceRepository.saveInvoice({
-        id: this.orderCounter,
-        invoiceNo: `INV-${orderNo}`,
+        invoiceNo: newOrder.payment?.invoiceNo || `INV-${orderNo}`,
         orderNo: orderNo,
         customer: newOrder.customer,
         layanan: newOrder.layanan,
         nopol: newOrder.nopol,
-        status: "UNPAID",
-        totalTagihan: newOrder.payment.totalBiaya,
-        dibayar: 0,
-        sisa: newOrder.payment.totalBiaya,
+        status: isLunas ? "PAID" : initialPaid > 0 ? "PARTIAL" : "UNPAID",
+        totalTagihan,
+        dibayar: initialPaid,
+        sisa: Math.max(0, totalTagihan - initialPaid),
         jatuhTempo: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
         tanggalInvoice: nowStr.split("T")[0],
-      });
+      } as any);
 
       // Audit Log
       dbAuditRepository.save({
@@ -156,7 +188,11 @@ export class OrderService {
         createdAt: nowStr,
       });
 
-      return newOrder;
+      if (resolvedKey) {
+        this.idempotencyCache.set(resolvedKey, { order: newOrder, timestamp: Date.now() });
+      }
+
+      return { order: newOrder, isExisting: false };
     });
   }
 

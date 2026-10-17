@@ -74,6 +74,25 @@ class OrderStore {
         registerFinanceSync();
       });
     }
+
+    // Phase 9.2: Register canonical order creator with FinanceStore
+    const registerFinanceCreator = () => {
+      try {
+        if (typeof financeStore !== "undefined" && financeStore && typeof financeStore.setOrderCreator === "function") {
+          financeStore.setOrderCreator((data) => this.addOrderFromContract(data));
+          return true;
+        }
+      } catch {
+        // Defer if not yet initialized
+      }
+      return false;
+    };
+
+    if (!registerFinanceCreator()) {
+      queueMicrotask(() => {
+        registerFinanceCreator();
+      });
+    }
   }
 
   // Subscribe to changes
@@ -106,8 +125,127 @@ class OrderStore {
     return this.repository.getByOrderNo(orderNo);
   }
 
-  // 1. BUAT ORDER: Tambah Order baru langsung ke Stage 1: VERIFIKASI
-  public addOrder(data: Partial<OperationalOrder> & {
+  // Phase 9.2: Conditional canonical order creation from Data Penjualan contract data
+  public addOrderFromContract(data: {
+    customer: string;
+    nopol: string;
+    layanan: string;
+    namaPemilik?: string;
+    nomorHP?: string;
+    wilayahSamsatAsal?: string;
+    jenisKendaraan?: string;
+    biayaJasa?: number;
+    totalEstimasi?: number;
+    uangMasuk?: number;
+    uangKeluar?: number;
+    r4r2?: string;
+    bpkb?: string;
+    [key: string]: any;
+  }): OperationalOrder | false {
+    if (!data.customer?.trim() || !data.nopol?.trim() || !data.layanan?.trim()) {
+      return false;
+    }
+
+    const totalEst = data.totalEstimasi || data.uangMasuk || 0;
+    const initialPaid = data.uangMasuk || 0;
+    const explicitInvoice = data.invoiceNo || data["No Invoice"];
+
+    return this.addOrder({
+      customer: data.customer.trim(),
+      nopol: data.nopol.trim(),
+      layanan: data.layanan.trim(),
+      namaPemilik: data.namaPemilik?.trim() || data.customer.trim(),
+      nomorHP: data.nomorHP?.trim() || "081200000000",
+      wilayahSamsatAsal: data.wilayahSamsatAsal || "Jakarta Timur",
+      jenisKendaraan: data.jenisKendaraan || (data.r4r2 === "R2" ? "Motor" : "Mobil"),
+      biayaJasa: data.biayaJasa || 0,
+      totalEstimasi: totalEst,
+      catatanOrder: "Order dibuat dari Data Penjualan (+ Tambah Data)",
+      clientDocuments: {
+        stnk: { name: "STNK_Asli.pdf", status: "Sudah Tersedia", isOptional: false },
+        bpkb: { name: "BPKB_Kendaraan.pdf", status: data.bpkb === "Ada" ? "Sudah Tersedia" : "Belum Tersedia", isOptional: false },
+        ktp: { name: "KTP_Pemilik.pdf", status: "Sudah Tersedia", isOptional: false },
+        skkp: { name: "", status: "Belum Tersedia", isOptional: true },
+        lainnya: { name: "", status: "Belum Tersedia", isOptional: true },
+      },
+      payment: {
+        tipePembayaran: initialPaid >= totalEst && totalEst > 0 ? "Bayar di Awal" : "Bayar di Akhir",
+        metodePembayaran: "Transfer",
+        statusPembayaran: initialPaid >= totalEst && totalEst > 0 ? "Lunas" : initialPaid > 0 ? "Kurang" : "Belum Bayar",
+        totalBiaya: totalEst,
+        totalEstimasi: totalEst,
+        dibayar: initialPaid,
+        kurang: Math.max(0, totalEst - initialPaid),
+        overpayment: 0,
+        settlementCondition: "PENDING_FINALIZATION",
+        refundStatus: "NONE",
+        isPaymentVerified: initialPaid >= totalEst && totalEst > 0,
+        invoiceNo: explicitInvoice,
+      },
+    });
+  }
+
+  // Phase 9.4: Asynchronous order creation from Data Penjualan contract data
+  public async addOrderFromContractAsync(data: {
+    customer: string;
+    nopol: string;
+    layanan: string;
+    namaPemilik?: string;
+    nomorHP?: string;
+    wilayahSamsatAsal?: string;
+    jenisKendaraan?: string;
+    biayaJasa?: number;
+    totalEstimasi?: number;
+    uangMasuk?: number;
+    uangKeluar?: number;
+    r4r2?: string;
+    bpkb?: string;
+    [key: string]: any;
+  }): Promise<OperationalOrder | false> {
+    if (!data.customer?.trim() || !data.nopol?.trim() || !data.layanan?.trim()) {
+      return false;
+    }
+
+    const totalEst = data.totalEstimasi || data.uangMasuk || 0;
+    const initialPaid = data.uangMasuk || 0;
+    const explicitInvoice = data.invoiceNo || data["No Invoice"];
+
+    return await this.addOrderAsync({
+      customer: data.customer.trim(),
+      nopol: data.nopol.trim(),
+      layanan: data.layanan.trim(),
+      namaPemilik: data.namaPemilik?.trim() || data.customer.trim(),
+      nomorHP: data.nomorHP?.trim() || "081200000000",
+      wilayahSamsatAsal: data.wilayahSamsatAsal || "Jakarta Timur",
+      jenisKendaraan: data.jenisKendaraan || (data.r4r2 === "R2" ? "Motor" : "Mobil"),
+      biayaJasa: data.biayaJasa || 0,
+      totalEstimasi: totalEst,
+      catatanOrder: "Order dibuat dari Data Penjualan (+ Tambah Data)",
+      clientDocuments: {
+        stnk: { name: "STNK_Asli.pdf", status: "Sudah Tersedia", isOptional: false },
+        bpkb: { name: "BPKB_Kendaraan.pdf", status: data.bpkb === "Ada" ? "Sudah Tersedia" : "Belum Tersedia", isOptional: false },
+        ktp: { name: "KTP_Pemilik.pdf", status: "Sudah Tersedia", isOptional: false },
+        skkp: { name: "", status: "Belum Tersedia", isOptional: true },
+        lainnya: { name: "", status: "Belum Tersedia", isOptional: true },
+      },
+      payment: {
+        tipePembayaran: initialPaid >= totalEst && totalEst > 0 ? "Bayar di Awal" : "Bayar di Akhir",
+        metodePembayaran: "Transfer",
+        statusPembayaran: initialPaid >= totalEst && totalEst > 0 ? "Lunas" : initialPaid > 0 ? "Kurang" : "Belum Bayar",
+        totalBiaya: totalEst,
+        totalEstimasi: totalEst,
+        dibayar: initialPaid,
+        kurang: Math.max(0, totalEst - initialPaid),
+        overpayment: 0,
+        settlementCondition: "PENDING_FINALIZATION",
+        refundStatus: "NONE",
+        isPaymentVerified: initialPaid >= totalEst && totalEst > 0,
+        invoiceNo: explicitInvoice,
+      },
+    });
+  }
+
+  private buildOrderPayload(data: Partial<OperationalOrder> & {
     customer: string;
     layanan: string;
     namaPemilik: string;
@@ -130,8 +268,9 @@ class OrderStore {
       (data.dendaSwdkllj || 0)
     );
 
-    const newOrder: OperationalOrder = {
+    return {
       orderNo,
+      clientRequestId: (data as any).clientRequestId,
       customer: data.customer,
       nomorHP: data.nomorHP,
       layanan: data.layanan,
@@ -192,6 +331,7 @@ class OrderStore {
       metodeLayanan: data.metodeLayanan || data.costSnapshot?.metodeLayanan || "Antar Jemput",
       costBreakdown: data.costBreakdown || data.costSnapshot?.breakdown || [],
       costSnapshot: data.costSnapshot,
+      estimationResult: data.estimationResult,
 
       samsatProcesses: processes,
       currentSamsatProcess: processes[0]?.name || "Antrean Samsat",
@@ -224,17 +364,30 @@ class OrderStore {
       refundStatus: "NONE",
       rekapDocuments: [],
     };
+  }
+
+  // 1. BUAT ORDER: Tambah Order baru langsung ke Stage 1: VERIFIKASI
+  public addOrder(data: Partial<OperationalOrder> & {
+    customer: string;
+    layanan: string;
+    namaPemilik: string;
+    nomorHP: string;
+    nopol: string;
+  }): OperationalOrder {
+    const clientRequestId = (data as any).clientRequestId || `REQ-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const newOrder = this.buildOrderPayload({ ...data, clientRequestId });
+    const orderNo = newOrder.orderNo;
 
     // Register invoice in Finance Store as Single Source of Truth
     try {
       const isLunasInitial = newOrder.payment.tipePembayaran === "Bayar di Awal" && newOrder.payment.isPaymentVerified;
-      const initialPaid = isLunasInitial ? totalEstimasi : (newOrder.payment.dibayar || 0);
+      const initialPaid = isLunasInitial ? newOrder.totalEstimasi : (newOrder.payment.dibayar || 0);
       const invRecord = financeStore.addInvoice({
         orderNo,
         customer: data.customer,
         nopol: data.nopol,
         jenisLayanan: data.layanan,
-        totalTagihan: totalEstimasi,
+        totalTagihan: newOrder.totalEstimasi,
         terbayar: initialPaid,
         metodePembayaran: newOrder.payment.metodePembayaran,
         phone: data.nomorHP,
@@ -244,13 +397,14 @@ class OrderStore {
         settlementCondition: "PENDING_FINALIZATION",
         refundStatus: "NONE",
         overpayment: 0,
+        invoice: newOrder.payment?.invoiceNo || undefined,
       });
       newOrder.payment.invoiceNo = invRecord.invoice;
     } catch {
       // safe fallback
     }
 
-    // Save to repository (Mock provider or future API provider)
+    // Save to repository (Mock provider or API provider)
     this.repository.saveOrder(newOrder);
     this.notify();
 
@@ -269,6 +423,80 @@ class OrderStore {
     }
 
     return newOrder;
+  }
+
+  // Phase 9.4: Asynchronous order creation waiting for backend confirmation & identity reconciliation
+  public async addOrderAsync(data: Partial<OperationalOrder> & {
+    customer: string;
+    layanan: string;
+    namaPemilik: string;
+    nomorHP: string;
+    nopol: string;
+  }): Promise<OperationalOrder> {
+    const clientRequestId = (data as any).clientRequestId || `REQ-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const newOrder = this.buildOrderPayload({ ...data, clientRequestId });
+    const tempOrderNo = newOrder.orderNo;
+
+    // Register invoice in Finance Store optimistically
+    let invRecord: any = null;
+    try {
+      const isLunasInitial = newOrder.payment.tipePembayaran === "Bayar di Awal" && newOrder.payment.isPaymentVerified;
+      const initialPaid = isLunasInitial ? newOrder.totalEstimasi : (newOrder.payment.dibayar || 0);
+      invRecord = financeStore.addInvoice({
+        orderNo: tempOrderNo,
+        customer: data.customer,
+        nopol: data.nopol,
+        jenisLayanan: data.layanan,
+        totalTagihan: newOrder.totalEstimasi,
+        terbayar: initialPaid,
+        metodePembayaran: newOrder.payment.metodePembayaran,
+        phone: data.nomorHP,
+        alamat: data.alamatPenjemputan?.detail || data.alamatPenjemputan?.kota,
+        dueTrigger: "AFTER_DOCUMENT_RECEIVED",
+        collectionStatus: isLunasInitial ? "LUNAS" : "BELUM_JATUH_TEMPO",
+        settlementCondition: "PENDING_FINALIZATION",
+        refundStatus: "NONE",
+        overpayment: 0,
+        invoice: newOrder.payment?.invoiceNo || undefined,
+      });
+      newOrder.payment.invoiceNo = invRecord.invoice;
+    } catch {
+      // safe fallback
+    }
+
+    try {
+      const confirmedOrder = typeof this.repository.saveOrderAsync === "function"
+        ? await this.repository.saveOrderAsync(newOrder)
+        : (this.repository.saveOrder(newOrder), newOrder);
+
+      // Reconcile invoice if backend assigned a different canonical orderNo
+      if (confirmedOrder.orderNo !== tempOrderNo) {
+        financeStore.reconcileOrderNo(tempOrderNo, confirmedOrder.orderNo, confirmedOrder.payment?.invoiceNo);
+      }
+
+      this.notify();
+
+      try {
+        auditLog.log({
+          userId: data.createdById || "usr-admin",
+          userName: data.createdBy || "Admin Loket",
+          userRole: (data.createdByRole as any) || "admin",
+          action: "CREATE",
+          module: "Order",
+          details: `Membuat order baru ${confirmedOrder.orderNo} (${data.customer} - ${data.layanan})`,
+          metadata: { orderNo: confirmedOrder.orderNo, customer: data.customer, nopol: data.nopol, layanan: data.layanan },
+        });
+      } catch {
+        // safe fallback
+      }
+
+      return confirmedOrder;
+    } catch (err) {
+      // Phase 9.4: Clean up optimistic invoice on failure
+      financeStore.removeInvoiceByOrderNo(tempOrderNo);
+      this.notify();
+      throw err;
+    }
   }
 
   // Verifikasi Pembayaran (Khususnya untuk Bayar di Awal di Stage 1)
@@ -602,6 +830,9 @@ export function useOrderStore() {
     archivedOrders: orderStore.getArchivedOrders(),
     getAllOrders: orderStore.getAllOrders.bind(orderStore),
     addOrder: orderStore.addOrder.bind(orderStore),
+    addOrderAsync: orderStore.addOrderAsync.bind(orderStore),
+    addOrderFromContract: orderStore.addOrderFromContract.bind(orderStore),
+    addOrderFromContractAsync: orderStore.addOrderFromContractAsync.bind(orderStore),
     advanceOrder: orderStore.advanceOrder.bind(orderStore),
     updateOrder: orderStore.updateOrder.bind(orderStore),
     verifyPayment: orderStore.verifyPayment.bind(orderStore),

@@ -10,10 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "./ui/pagination";
 import { TablePagination } from "./ui/TablePagination";
-import { Plus, Edit, Trash2, Search } from "lucide-react";
+import { Plus, Edit, Trash2, Search, Calculator } from "lucide-react";
 import { toast } from "sonner";
 import { pricingStore, usePricingStore, resolveSamsatId, resolveServiceId } from "../data/pricingStore";
 import { cn } from "./ui/utils";
+import { EstimatorR4Tahunan } from "./estimation/EstimatorR4Tahunan";
 
 export const AVAILABLE_COMPONENTS = [
   { id: "mutasi-legalisir", label: "Legalisir", code: "MK-01" },
@@ -55,6 +56,7 @@ export function BiayaLayanan() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isEstimatorOpen, setIsEstimatorOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [selectedComponents, setSelectedComponents] = useState<Record<string, boolean>>({});
   const [formData, setFormData] = useState({
@@ -1043,17 +1045,29 @@ export function BiayaLayanan() {
 
   return (
     <div className="flex-1 flex flex-col min-h-full space-y-4">
-      <div>
-        <nav className="text-xs text-muted-foreground flex items-center gap-1.5 pb-2" aria-label="Breadcrumb">
-          <span>Master Data</span>
-          <span>/</span>
-          <span className="text-foreground font-medium">Biaya Layanan</span>
-        </nav>
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold text-foreground tracking-tight">Biaya Layanan</h3>
-          <p className="text-xs md:text-sm text-muted-foreground">
-            Kelola biaya layanan berdasarkan wilayah Samsat
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <nav className="text-xs text-muted-foreground flex items-center gap-1.5 pb-2" aria-label="Breadcrumb">
+            <span>Master Data</span>
+            <span>/</span>
+            <span className="text-foreground font-medium">Biaya Layanan</span>
+          </nav>
+          <div className="mb-4 sm:mb-0">
+            <h3 className="text-lg font-semibold text-foreground tracking-tight">Biaya Layanan</h3>
+            <p className="text-xs md:text-sm text-muted-foreground">
+              Kelola biaya layanan berdasarkan wilayah Samsat
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mb-2 sm:mb-0">
+          <Button
+            variant="outline"
+            className="h-8.5 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10 shadow-2xs font-medium"
+            onClick={() => setIsEstimatorOpen(true)}
+          >
+            <Calculator className="w-4 h-4 text-primary" />
+            <span>Kalkulator Estimasi R4</span>
+          </Button>
         </div>
       </div>
 
@@ -1086,6 +1100,17 @@ export function BiayaLayanan() {
                     <Plus className="w-3.5 h-3.5" />
                     <span>Tambah Biaya</span>
                   </Button>
+                  {tab.value === "perpanjangan-1" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs border-primary/40 text-primary hover:bg-primary/10 gap-1.5 shadow-2xs shrink-0 font-medium"
+                      onClick={() => setIsEstimatorOpen(true)}
+                    >
+                      <Calculator className="w-3.5 h-3.5 text-primary" />
+                      <span>Kalkulator Estimasi R4</span>
+                    </Button>
+                  )}
                 </div>
                 <div className="relative w-full sm:w-72 md:w-80">
                   <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -1234,6 +1259,24 @@ export function BiayaLayanan() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Kalkulator Estimasi R4 Dialog Modal */}
+      <Dialog open={isEstimatorOpen} onOpenChange={setIsEstimatorOpen}>
+        <DialogContent className="border-border sm:max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader className="pb-3 border-b border-border/70">
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+              <Calculator className="w-5 h-5 text-primary" />
+              Kalkulator Estimasi Pajak Tahunan R4
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Simulasi perhitungan PKB, SWDKLLJ, denda keterlambatan, dan jasa perpanjangan STNK mobil (R4) sesuai formula Samsat.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="pt-2">
+            <EstimatorR4Tahunan />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

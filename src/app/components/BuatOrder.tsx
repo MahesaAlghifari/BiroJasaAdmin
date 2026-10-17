@@ -42,12 +42,28 @@ import {
   ArrowLeft,
   ChevronRight,
   ShieldCheck,
+  Clock,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  Calendar,
+  FileCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { orderStore, OperationalOrder, StructuredAddress, OrderDocument, PaymentProof } from "../data/orderStore";
-import { pricingStore, usePricingStore } from "../data/pricingStore";
+import { pricingStore, usePricingStore, resolveServiceId, resolveSamsatId } from "../data/pricingStore";
 import { documentRepository } from "../../data/repositories/documentRepository";
 import { cn } from "./ui/utils";
+import { calculateEstimation } from "../../domain/estimation/estimationEngine";
+import { DEFAULT_R4_ANNUAL_TEMPLATE } from "../../domain/estimation/defaultTemplates";
+import { estimationStore } from "../data/estimationStore";
+import {
+  ProgramSamsat,
+  KondisiBerkas,
+  WilayahAccId,
+  EstimationInput,
+  EstimationResult,
+} from "../../domain/estimation/types";
 
 const layananOptions = [
   "Perpanjangan 1 Tahun",
@@ -114,6 +130,20 @@ export function BuatOrder({
   // Confirmation dialogs
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [createdOrderSuccess, setCreatedOrderSuccess] = useState<OperationalOrder | null>(null);
+
+  // R4 Annual Tax Estimation States
+  const [r4ProgramSamsat, setR4ProgramSamsat] = useState<ProgramSamsat>("NORMAL");
+  const [r4KondisiBerkas, setR4KondisiBerkas] = useState<KondisiBerkas>("LENGKAP");
+  const [r4WilayahAccId, setR4WilayahAccId] = useState<WilayahAccId>("DKI Jakarta");
+  const [r4TanggalEstimasi, setR4TanggalEstimasi] = useState<string>("");
+  const [r4ShowIncidentals, setR4ShowIncidentals] = useState<boolean>(false);
+  const [r4ManualValues, setR4ManualValues] = useState<Record<string, number>>({
+    jr: 0,
+    etle: 0,
+    "pnbp-nopil": 0,
+    "stnk-hilang": 0,
+    "pemekaran-wilayah": 0,
+  });
 
   const clearFieldError = (key: string) => {
     if (step1Errors[key]) {
@@ -200,7 +230,11 @@ export function BuatOrder({
   const isOpsenEnabled = currentConfig?.swdkllj ? currentConfig.swdkllj.enabled !== false : true;
   const isAntarJemputEnabled = currentConfig ? currentConfig.antarJemputEnabled !== false : true;
 
-  // Cost calculation via pricingStore SSoT
+  const isR4Annual =
+    (formData.layanan === "Perpanjangan 1 Tahun" || resolveServiceId(formData.layanan) === "perpanjangan-1-tahun") &&
+    (formData.jenisKendaraan === "Mobil" || (formData.jenisKendaraan as string) === "R4");
+
+  // Cost calculation via pricingStore SSoT or estimationEngine (for R4 Annual)
   const calculateCost = () => {
     const pkb = parseFloat(formData.nominalPkbTerakhir) || 0;
     const swdkllj = isOpsenEnabled ? (parseFloat(formData.nominalSwdkllj) || 0) : 0;
@@ -218,6 +252,82 @@ export function BuatOrder({
         total: pkb + swdkllj,
         breakdown: [] as any[],
         snapshot: undefined,
+        isR4Annual: false,
+        r4Result: undefined as EstimationResult | undefined,
+      };
+    }
+
+    if (isR4Annual) {
+      const template = estimationStore.getTemplate("template-pajak-tahunan-r4") || DEFAULT_R4_ANNUAL_TEMPLATE;
+      const estimationInput: EstimationInput = {
+        pkbDasar: pkb,
+        tanggalJatuhTempo: formData.pkbBerlakuSd || "",
+        tanggalEstimasi: r4TanggalEstimasi || new Date().toISOString().split("T")[0],
+        programSamsat: r4ProgramSamsat,
+        kondisiBerkas: r4KondisiBerkas,
+        wilayahAccId: r4WilayahAccId,
+        manualValues: r4ManualValues,
+      };
+
+      const r4Result = calculateEstimation(estimationInput, template);
+
+      // Map R4 result items to OrderCostBreakdownItem[]
+      const breakdown = r4Result.items
+        .filter((it) => it.amount > 0 || it.includesInTotal)
+        .map((it) => {
+          let category: "Pajak" | "Jasa" | "Samsat" | "Operasional" = "Pajak";
+          if (it.category === "JASA") category = "Jasa";
+          else if (it.category === "ADMIN") category = "Samsat";
+          else if (it.category === "INSIDENTAL") category = "Operasional";
+
+          return {
+            itemId: it.id,
+            code: it.code,
+            name: it.name,
+            amount: it.amount,
+            category,
+            source: it.isManual
+              ? ("Operasional" as const)
+              : it.category === "JASA"
+              ? ("BiayaLayanan" as const)
+              : ("Kendaraan" as const),
+            isRequired: !it.isManual,
+          };
+        });
+
+      const cetakSkpAmount = r4Result.items.find((i) => i.id === "cetak-skp")?.amount || 0;
+      const jasaAmount = r4Result.items.find((i) => i.id === "jasa")?.amount || 250000;
+
+      const snapshot: any = {
+        serviceId: "perpanjangan-1-tahun",
+        serviceName: "Perpanjangan 1 Tahun",
+        samsatId: resolveSamsatId(formData.wilayahSamsatAsal),
+        samsatName: formData.wilayahSamsatAsal,
+        metodeLayanan: formData.metodeLayanan,
+        biayaJasa: jasaAmount,
+        biayaSamsat: cetakSkpAmount,
+        biayaAntarJemput: 0,
+        pkb: r4Result.totalPkb + r4Result.totalDendaPkb,
+        swdkllj: r4Result.totalSwdkllj,
+        dendaSwdkllj: r4Result.totalDendaSwdkllj + cetakSkpAmount + r4Result.totalInsidental,
+        totalEstimasi: r4Result.totalEstimasi,
+        breakdown,
+        createdAt: new Date().toISOString(),
+      };
+
+      return {
+        biayaJasa: jasaAmount,
+        biayaSamsat: cetakSkpAmount,
+        biayaAntarJemput: 0,
+        subtotalLayanan: r4Result.totalAdminDanJasa + r4Result.totalInsidental,
+        pkb: r4Result.totalPkb + r4Result.totalDendaPkb,
+        swdkllj: r4Result.totalSwdkllj,
+        dendaSwdkllj: r4Result.totalDendaSwdkllj + cetakSkpAmount + r4Result.totalInsidental,
+        total: r4Result.totalEstimasi,
+        breakdown,
+        snapshot,
+        isR4Annual: true,
+        r4Result,
       };
     }
 
@@ -244,6 +354,8 @@ export function BuatOrder({
       total: snapshot.totalEstimasi,
       breakdown: snapshot.breakdown,
       snapshot,
+      isR4Annual: false,
+      r4Result: undefined as EstimationResult | undefined,
     };
   };
 
@@ -382,6 +494,18 @@ export function BuatOrder({
       attached: false,
     });
     setIsSameAddress(true);
+    setR4ProgramSamsat("NORMAL");
+    setR4KondisiBerkas("LENGKAP");
+    setR4WilayahAccId("DKI Jakarta");
+    setR4TanggalEstimasi("");
+    setR4ShowIncidentals(false);
+    setR4ManualValues({
+      jr: 0,
+      etle: 0,
+      "pnbp-nopil": 0,
+      "stnk-hilang": 0,
+      "pemekaran-wilayah": 0,
+    });
   };
 
   // Step 1 Validation
@@ -563,7 +687,7 @@ export function BuatOrder({
           : formData.metodePembayaran || "Cash (Saat Dokumen Diterima)";
 
       // Tambahkan order ke OrderStore (masuk ke Stage 1: VERIFIKASI)
-      const createdOrder = orderStore.addOrder({
+      const createdOrder = await orderStore.addOrderAsync({
         customer: formData.customer.trim(),
         namaPemilik: formData.namaPemilik.trim() || formData.customer.trim(),
         nomorHP: formData.nomorHP.trim(),
@@ -594,6 +718,7 @@ export function BuatOrder({
         createdBy: currentUserName,
         createdById: currentUserId,
         createdByRole: currentUserRole,
+        estimationResult: cost.r4Result,
         payment: {
           tipePembayaran: formData.tipePembayaran,
           metodePembayaran: paymentMethodResolved,
@@ -1121,16 +1246,21 @@ export function BuatOrder({
                             Nonaktif di Master
                           </Badge>
                         )}
+                        {isR4Annual && (
+                          <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/20">
+                            Otomatis R4 (Rp 143.000 + Tunggakan)
+                          </Badge>
+                        )}
                       </div>
                       <Input
                         type="number"
-                        placeholder={isOpsenEnabled ? "143000" : "0"}
-                        disabled={!isOpsenEnabled}
-                        value={isOpsenEnabled ? formData.nominalSwdkllj : "0"}
+                        placeholder={isR4Annual ? "143000 (Otomatis)" : (isOpsenEnabled ? "143000" : "0")}
+                        disabled={!isOpsenEnabled || isR4Annual}
+                        value={isR4Annual ? (cost.r4Result?.totalSwdkllj.toString() || "143000") : (isOpsenEnabled ? formData.nominalSwdkllj : "0")}
                         onChange={(e) => setFormData({ ...formData, nominalSwdkllj: e.target.value })}
                         className={cn(
                           "bg-input-background border-border h-9 text-xs font-mono tabular-nums",
-                          !isOpsenEnabled && "opacity-60 bg-muted cursor-not-allowed"
+                          (!isOpsenEnabled || isR4Annual) && "opacity-60 bg-muted cursor-not-allowed"
                         )}
                       />
                       {!isOpsenEnabled && (
@@ -1138,7 +1268,203 @@ export function BuatOrder({
                           OPSEN PKB dinonaktifkan pada Master Data Biaya Layanan dan tidak dihitung ke estimasi.
                         </p>
                       )}
+                      {isR4Annual && (
+                        <p className="text-[10px] text-blue-600 dark:text-blue-400">
+                          Perpanjangan 1 Tahun Mobil (R4) menggunakan formula resmi: SWDKLLJ Pokok Rp 143.000 + SWDKLLJ Tertunggak ({cost.r4Result?.tahunTunggakan || 0} thn).
+                        </p>
+                      )}
                     </div>
+
+                    {/* R4 ANNUAL TAX ESTIMATOR PARAMETERS */}
+                    {isR4Annual && (
+                      <div className="sm:col-span-2 md:col-span-3 mt-2 p-3.5 rounded-lg border border-primary/30 bg-primary/5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-primary/20">
+                          <div className="flex items-center gap-2">
+                            <span className="p-1.5 rounded-md bg-primary/10 text-primary">
+                              <Calculator className="w-4 h-4" />
+                            </span>
+                            <div>
+                              <h5 className="text-xs font-semibold text-foreground">
+                                Parameter Perhitungan Pajak Tahunan Mobil (R4)
+                              </h5>
+                              <p className="text-[11px] text-muted-foreground">
+                                Menggunakan formula resmi Workbook PAJAK TAHUNAN R4 (DATEDIF & ROUNDUP)
+                              </p>
+                            </div>
+                          </div>
+                          {cost.r4Result && (
+                            <Badge variant="outline" className="text-[11px] font-mono bg-background text-foreground border-border gap-1 py-1 px-2.5">
+                              <Clock className="w-3.5 h-3.5 text-primary" />
+                              Keterlambatan: <strong className="text-primary">{cost.r4Result.durasiKeterlambatan}</strong> ({cost.r4Result.tahunTunggakan} Thn {cost.r4Result.bulanTunggakan} Bln)
+                            </Badge>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {/* Program Samsat */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Program Samsat <span className="text-destructive">*</span>
+                            </Label>
+                            <Select
+                              value={r4ProgramSamsat}
+                              onValueChange={(val: ProgramSamsat) => setR4ProgramSamsat(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="NORMAL" className="text-xs font-medium">
+                                  NORMAL (Denda PKB & SWDKLLJ Aktif)
+                                </SelectItem>
+                                <SelectItem value="FREE Biaya Denda" className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                  FREE Biaya Denda (Denda PKB Bebas)
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Tanggal Estimasi */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Tanggal Estimasi (Default: Hari Ini)
+                            </Label>
+                            <Input
+                              type="date"
+                              value={r4TanggalEstimasi || new Date().toISOString().split("T")[0]}
+                              onChange={(e) => setR4TanggalEstimasi(e.target.value)}
+                              className="bg-background border-border h-9 text-xs font-mono"
+                            />
+                          </div>
+
+                          {/* Kondisi Berkas / KTP */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Kelengkapan Berkas / KTP
+                            </Label>
+                            <Select
+                              value={r4KondisiBerkas}
+                              onValueChange={(val: KondisiBerkas) => setR4KondisiBerkas(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="LENGKAP" className="text-xs">
+                                  LENGKAP (Ada KTP)
+                                </SelectItem>
+                                <SelectItem value="TIDAK ADA KTP" className="text-xs">
+                                  TIDAK ADA KTP (Perlu ACC ID)
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Wilayah ACC ID */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Wilayah ACC ID (Opsional)
+                            </Label>
+                            <Select
+                              value={r4WilayahAccId}
+                              onValueChange={(val: WilayahAccId) => setR4WilayahAccId(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="DKI Jakarta" className="text-xs">DKI Jakarta</SelectItem>
+                                <SelectItem value="Bogor" className="text-xs">Bogor</SelectItem>
+                                <SelectItem value="Tanggerang" className="text-xs">Tangerang</SelectItem>
+                                <SelectItem value="Depok" className="text-xs">Depok</SelectItem>
+                                <SelectItem value="Bekasi" className="text-xs">Bekasi</SelectItem>
+                                <SelectItem value="NON ACC ID" className="text-xs">NON ACC ID</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Toggle Incidentals */}
+                          <div className="space-y-1.5 sm:col-span-2 flex flex-col justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setR4ShowIncidentals(!r4ShowIncidentals)}
+                              className="h-9 text-xs w-full sm:w-auto self-start justify-between gap-2 border-dashed"
+                            >
+                              <span>Biaya Tambahan / Insidental (Opsional)</span>
+                              {r4ShowIncidentals ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Expandable Incidentals */}
+                        {r4ShowIncidentals && (
+                          <div className="p-3 bg-background/60 rounded-md border border-border/60 space-y-2 mt-2">
+                            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              Input Komponen Manual / Insidental (Rp):
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">JR</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r4ManualValues["jr"] || ""}
+                                  onChange={(e) => setR4ManualValues({ ...r4ManualValues, jr: parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">ETLE</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r4ManualValues["etle"] || ""}
+                                  onChange={(e) => setR4ManualValues({ ...r4ManualValues, etle: parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">PNBP Nopil</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r4ManualValues["pnbp-nopil"] || ""}
+                                  onChange={(e) => setR4ManualValues({ ...r4ManualValues, "pnbp-nopil": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">STNK Hilang</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r4ManualValues["stnk-hilang"] || ""}
+                                  onChange={(e) => setR4ManualValues({ ...r4ManualValues, "stnk-hilang": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Pemekaran Wilayah</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={r4ManualValues["pemekaran-wilayah"] || ""}
+                                  onChange={(e) => setR4ManualValues({ ...r4ManualValues, "pemekaran-wilayah": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1830,74 +2156,267 @@ export function BuatOrder({
                     </div>
                   </div>
 
-                  {/* Itemized Cost Breakdown (ONLY ENABLED COMPONENTS) */}
-                  <div className="space-y-2 text-xs">
-                    {cost.breakdown && cost.breakdown.length > 0 ? (
-                      <div className="space-y-1.5 pb-2.5 border-b border-border/60">
-                        <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                          Komponen Biaya Terhitung:
-                        </div>
-                        <div className="space-y-1 pl-1">
-                          {cost.breakdown.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-center text-xs">
-                              <div className="flex items-center gap-2">
-                                <span className="text-foreground">{item.name}</span>
-                                <span className={cn(
-                                  "text-[9px] px-1.5 py-0.5 rounded font-medium",
-                                  item.category === "Samsat" ? "bg-amber-500/10 text-amber-600 border border-amber-500/20" :
-                                  item.category === "Jasa" ? "bg-blue-500/10 text-blue-600 border border-blue-500/20" :
-                                  item.category === "Operasional" ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20" :
-                                  "bg-purple-500/10 text-purple-600 border border-purple-500/20"
-                                )}>
-                                  {item.category === "Samsat" ? "Samsat" :
-                                   item.category === "Jasa" ? "Jasa" :
-                                   item.category === "Operasional" ? "Kurir/Ops" : "Pajak"}
-                                </span>
-                              </div>
-                              <span className="font-mono tabular-nums font-medium text-foreground">
-                                Rp {item.amount.toLocaleString("id-ID")}
+                  {/* Itemized Cost Breakdown */}
+                  <div className="space-y-3 text-xs">
+                    {cost.isR4Annual && cost.r4Result ? (
+                      <div className="space-y-3 pb-2.5 border-b border-border/60">
+                        {/* Header Banner */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-primary" />
+                            <div>
+                              <span className="font-semibold text-foreground">
+                                Durasi Keterlambatan: {cost.r4Result.durasiKeterlambatan}
+                              </span>
+                              <span className="text-muted-foreground text-[11px] block">
+                                {cost.r4Result.tahunTunggakan} Tahun, {cost.r4Result.bulanTunggakan} Bulan • Program Samsat: <strong className="text-foreground">{r4ProgramSamsat}</strong>
                               </span>
                             </div>
-                          ))}
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-mono bg-background">
+                            Template R4 Tahunan
+                          </Badge>
+                        </div>
+
+                        {/* Group 1: Pokok & Denda PKB */}
+                        <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                          <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-blue-500" />
+                              1. Pokok & Denda PKB
+                            </span>
+                            <span className="font-mono tabular-nums text-primary font-bold">
+                              Rp {(cost.r4Result.totalPkb + cost.r4Result.totalDendaPkb).toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-xs pl-2">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">PKB Tertunggak:</span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r4Result.items.find((i) => i.id === "pkb-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Pajak Baru:</span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r4Result.items.find((i) => i.id === "pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Denda PKB Tertunggak:</span>
+                              <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-pkb-tertunggak")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r4Result.items.find((i) => i.id === "denda-pkb-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Denda PKB Pajak Baru:</span>
+                              <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-pkb-pajak-baru")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r4Result.items.find((i) => i.id === "denda-pkb-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Group 2: Pokok & Denda SWDKLLJ */}
+                        <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                          <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-amber-500" />
+                              2. Pokok & Denda SWDKLLJ
+                            </span>
+                            <span className="font-mono tabular-nums text-primary font-bold">
+                              Rp {(cost.r4Result.totalSwdkllj + cost.r4Result.totalDendaSwdkllj).toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-xs pl-2">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">SWDKLLJ Tertunggak:</span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r4Result.items.find((i) => i.id === "swdkllj-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">SWDKLLJ Pajak Baru:</span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r4Result.items.find((i) => i.id === "swdkllj-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Denda SWDKLLJ Tertunggak:</span>
+                              <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-swdkllj-tertunggak")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r4Result.items.find((i) => i.id === "denda-swdkllj-tertunggak")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Denda SWDKLLJ Pajak Baru:</span>
+                              <span className={cn("font-mono tabular-nums", (cost.r4Result.items.find((i) => i.id === "denda-swdkllj-pajak-baru")?.amount || 0) > 0 ? "text-destructive" : "text-muted-foreground")}>
+                                Rp {(cost.r4Result.items.find((i) => i.id === "denda-swdkllj-pajak-baru")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Group 3: Administrasi & Jasa */}
+                        <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                          <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                              3. Administrasi & Jasa
+                            </span>
+                            <span className="font-mono tabular-nums text-primary font-bold">
+                              Rp {cost.r4Result.totalAdminDanJasa.toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-xs pl-2">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Cetak SKP (Samsat):</span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r4Result.items.find((i) => i.id === "cetak-skp")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Jasa Pengurusan Biro:</span>
+                              <span className="font-mono tabular-nums">
+                                Rp {(cost.r4Result.items.find((i) => i.id === "jasa")?.amount || 0).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            {(cost.r4Result.items.find((i) => i.id === "jr")?.amount || 0) > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">JR:</span>
+                                <span className="font-mono tabular-nums">
+                                  Rp {(cost.r4Result.items.find((i) => i.id === "jr")?.amount || 0).toLocaleString("id-ID")}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Group 4: Biaya Insidental (bila ada nilai) */}
+                        {cost.r4Result.totalInsidental > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                                4. Biaya Insidental
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.r4Result.totalInsidental.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.r4Result.items
+                                .filter((i) => i.category === "INSIDENTAL" && i.amount > 0)
+                                .map((item) => (
+                                  <div key={item.id} className="flex justify-between">
+                                    <span className="text-muted-foreground">{item.name}:</span>
+                                    <span className="font-mono tabular-nums">Rp {item.amount.toLocaleString("id-ID")}</span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Group 5: ACC ID Reference Callout Box */}
+                        <div className="rounded-lg border border-amber-500/30 p-2.5 bg-amber-500/5 space-y-1 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                              <FileCheck className="w-3.5 h-3.5" />
+                              5. Biaya ACC ID (Cell I5)
+                            </span>
+                            <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                              Tidak Masuk Total
+                            </Badge>
+                          </div>
+                          <div className="flex justify-between items-baseline pt-1">
+                            <span className="text-[11px] text-muted-foreground">
+                              {r4KondisiBerkas === "LENGKAP"
+                                ? "Berkas Lengkap (Ada KTP)"
+                                : `Tanpa KTP (${r4WilayahAccId})`}
+                            </span>
+                            <span className="font-mono tabular-nums font-semibold text-foreground">
+                              Rp {(cost.r4Result.accIdAmount || 0).toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            * Biaya ACC ID merupakan biaya referensi dokumen dan tidak digabungkan ke total tagihan invoice order.
+                          </p>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-xs text-muted-foreground italic py-1 pb-2 border-b border-border/60">
-                        Pilih jenis pengurusan pada formulir di Step 1 untuk melihat rincian biaya.
-                      </div>
+                      cost.breakdown && cost.breakdown.length > 0 ? (
+                        <div className="space-y-1.5 pb-2.5 border-b border-border/60">
+                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                            Komponen Biaya Terhitung:
+                          </div>
+                          <div className="space-y-1 pl-1">
+                            {cost.breakdown.map((item, idx) => (
+                              <div key={idx} className="flex justify-between items-center text-xs">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-foreground">{item.name}</span>
+                                  <span className={cn(
+                                    "text-[9px] px-1.5 py-0.5 rounded font-medium",
+                                    item.category === "Samsat" ? "bg-amber-500/10 text-amber-600 border border-amber-500/20" :
+                                    item.category === "Jasa" ? "bg-blue-500/10 text-blue-600 border border-blue-500/20" :
+                                    item.category === "Operasional" ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20" :
+                                    "bg-purple-500/10 text-purple-600 border border-purple-500/20"
+                                  )}>
+                                    {item.category === "Samsat" ? "Samsat" :
+                                     item.category === "Jasa" ? "Jasa" :
+                                     item.category === "Operasional" ? "Kurir/Ops" : "Pajak"}
+                                  </span>
+                                </div>
+                                <span className="font-mono tabular-nums font-medium text-foreground">
+                                  Rp {item.amount.toLocaleString("id-ID")}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground italic py-1 pb-2 border-b border-border/60">
+                          Pilih jenis pengurusan pada formulir di Step 1 untuk melihat rincian biaya.
+                        </div>
+                      )
                     )}
 
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Subtotal Biaya Layanan:</span>
-                      <span className="font-mono tabular-nums font-semibold text-foreground">
-                        Rp {(cost.subtotalLayanan || 0).toLocaleString("id-ID")}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Estimasi Pokok PKB:</span>
-                      <span className="font-mono tabular-nums font-medium text-foreground">
-                        Rp {cost.pkb.toLocaleString("id-ID")}
-                      </span>
-                    </div>
-                    {isOpsenEnabled && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">OPSEN PKB:</span>
-                        <span className="font-mono tabular-nums font-medium text-foreground">
-                          {cost.swdkllj > 0 ? `Rp ${cost.swdkllj.toLocaleString("id-ID")}` : "Rp 0 (Nonaktif)"}
-                        </span>
-                      </div>
+                    {!cost.isR4Annual && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Subtotal Biaya Layanan:</span>
+                          <span className="font-mono tabular-nums font-semibold text-foreground">
+                            Rp {(cost.subtotalLayanan || 0).toLocaleString("id-ID")}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Estimasi Pokok PKB:</span>
+                          <span className="font-mono tabular-nums font-medium text-foreground">
+                            Rp {cost.pkb.toLocaleString("id-ID")}
+                          </span>
+                        </div>
+                        {isOpsenEnabled && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">OPSEN PKB:</span>
+                            <span className="font-mono tabular-nums font-medium text-foreground">
+                              {cost.swdkllj > 0 ? `Rp ${cost.swdkllj.toLocaleString("id-ID")}` : "Rp 0 (Nonaktif)"}
+                            </span>
+                          </div>
+                        )}
+                        {cost.dendaSwdkllj > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Denda Pajak/OPSEN PKB:</span>
+                            <span className="font-mono tabular-nums font-medium text-destructive">
+                              Rp {cost.dendaSwdkllj.toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                        )}
+                      </>
                     )}
-                    {cost.dendaSwdkllj > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Denda Pajak/OPSEN PKB:</span>
-                        <span className="font-mono tabular-nums font-medium text-destructive">
-                          Rp {cost.dendaSwdkllj.toLocaleString("id-ID")}
-                        </span>
-                      </div>
-                    )}
+
                     <div className="border-t border-border/80 pt-2 flex justify-between items-baseline">
                       <div>
-                        <span className="text-sm font-semibold text-foreground">Total Estimasi Awal:</span>
+                        <span className="text-sm font-semibold text-foreground">
+                          {cost.isR4Annual ? "Total Estimasi Akhir (Pajak + Jasa):" : "Total Estimasi Awal:"}
+                        </span>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
                           Skema: <strong className="text-foreground">{formData.tipePembayaran}</strong> • Metode: <strong className="text-foreground">{formData.metodeLayanan}</strong>
                         </p>

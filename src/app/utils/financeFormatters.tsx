@@ -256,7 +256,8 @@ export function PlainTextStatus({ status }: { status: string | null | undefined 
     return <span className="text-muted-foreground">-</span>;
   }
 
-  const s = String(status).trim().toLowerCase();
+  const raw = String(status).trim();
+  const s = raw.toLowerCase();
 
   // Debit / Kredit (Kas Kantor - Requirement 7): Pure neutral text, no bullet, dot, badge, pill, or background
   if (s === "debit" || s === "kredit") {
@@ -267,18 +268,37 @@ export function PlainTextStatus({ status }: { status: string | null | undefined 
     );
   }
 
-  // Tagihan Status (Requirement 8): "Lunas", "Belum lunas" plain text, no badge/pill
-  if (s === "lunas" || s.includes("belum lunas") || s.includes("belum bayar")) {
-    const label = s === "lunas" ? "Lunas" : "Belum lunas";
+  // Phase 9.1: Canonical Dual Status Title Case formatting
+  const CANONICAL_MAP: Record<string, string> = {
+    "dalam proses": "Dalam Proses",
+    "menunggu arsip": "Menunggu Arsip",
+    "selesai": "Selesai",
+    "belum lunas": "Belum Lunas",
+    "kurang bayar": "Kurang Bayar",
+    "lunas": "Lunas",
+    "kelebihan bayar": "Kelebihan Bayar",
+    "tagihan tidak tersedia": "Tagihan Tidak Tersedia",
+  };
+
+  if (CANONICAL_MAP[s]) {
     return (
       <span className="text-xs font-normal text-foreground whitespace-nowrap">
-        {label}
+        {CANONICAL_MAP[s]}
+      </span>
+    );
+  }
+
+  // Tagihan Status (Requirement 8): "Lunas", "Belum Lunas" plain text
+  if (s.includes("belum lunas") || s.includes("belum bayar")) {
+    return (
+      <span className="text-xs font-normal text-foreground whitespace-nowrap">
+        Belum Lunas
       </span>
     );
   }
 
   // General Status (Requirement 6 & 20): Plain regular text
-  const label = status.charAt(0).toUpperCase() + status.slice(1);
+  const label = raw.charAt(0).toUpperCase() + raw.slice(1);
   return (
     <span className="text-xs font-normal text-foreground whitespace-nowrap">
       {label}

@@ -34,28 +34,65 @@ export class DbFinanceRepository {
     return JSON.parse(row.data_json) as InvoiceBillingRecord;
   }
 
-  public saveInvoice(invoice: InvoiceBillingRecord): number {
+  public saveInvoice(invoice: Partial<InvoiceBillingRecord> & { invoiceNo: string; orderNo: string }): number {
+    const existing = this.getInvoiceByNo(invoice.invoiceNo) || this.getInvoiceByOrderNo(invoice.orderNo);
+    if (existing) {
+      const merged: InvoiceBillingRecord = { ...existing, ...invoice };
+      const stmt = db.prepare(`
+        UPDATE finance_invoices SET
+          invoice_no = ?,
+          order_no = ?,
+          customer = ?,
+          layanan = ?,
+          status = ?,
+          total_tagihan = ?,
+          dibayar = ?,
+          sisa = ?,
+          data_json = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `);
+      stmt.run(
+        merged.invoiceNo,
+        merged.orderNo,
+        merged.customer,
+        merged.layanan,
+        merged.status,
+        merged.totalTagihan,
+        merged.dibayar,
+        merged.sisa,
+        JSON.stringify(merged),
+        existing.id
+      );
+      return existing.id;
+    }
+
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO finance_invoices (
-        id, invoice_no, order_no, customer, layanan, status,
+      INSERT INTO finance_invoices (
+        invoice_no, order_no, customer, layanan, status,
         total_tagihan, dibayar, sisa, data_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `);
 
     const res = stmt.run(
-      invoice.id,
       invoice.invoiceNo,
       invoice.orderNo,
-      invoice.customer,
-      invoice.layanan,
-      invoice.status,
-      invoice.totalTagihan,
-      invoice.dibayar,
-      invoice.sisa,
+      invoice.customer || "",
+      invoice.layanan || "",
+      invoice.status || "UNPAID",
+      invoice.totalTagihan || 0,
+      invoice.dibayar || 0,
+      invoice.sisa || 0,
       JSON.stringify(invoice)
     );
 
-    return Number(res.lastInsertRowid);
+    const insertedId = Number(res.lastInsertRowid);
+    const completeRecord = { ...invoice, id: insertedId };
+    db.prepare("UPDATE finance_invoices SET data_json = ? WHERE id = ?").run(
+      JSON.stringify(completeRecord),
+      insertedId
+    );
+    return insertedId;
   }
 
   public updateInvoice(id: number, updates: Partial<InvoiceBillingRecord>): boolean {

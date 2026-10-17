@@ -109,6 +109,7 @@ export interface CustomCostItem {
 
 export interface OperationalOrder {
   orderNo: string;
+  clientRequestId?: string;
   customer: string;
   nomorHP: string;
   layanan: string;
@@ -222,6 +223,7 @@ export interface OperationalOrder {
   metodeLayanan?: "Antar Jemput" | "Datang Langsung";
   costBreakdown?: OrderCostBreakdownItem[];
   costSnapshot?: OrderCostSnapshot;
+  estimationResult?: any;
 
   // Final Cost Reconciliation & Rekap Order
   finalCost?: number;

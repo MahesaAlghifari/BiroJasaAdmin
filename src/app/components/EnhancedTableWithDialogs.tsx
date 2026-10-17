@@ -80,6 +80,8 @@ export interface FieldConfig {
   type: "text" | "number" | "date" | "select";
   options?: string[];
   placeholder?: string;
+  readOnly?: boolean;
+  helpText?: string;
 }
 
 interface EnhancedTableWithDialogsProps {
@@ -534,8 +536,8 @@ export function EnhancedTableWithDialogs({
       return <span className="text-foreground/90">{formatBerkasName(String(value))}</span>;
     }
 
-    // Status as PLAIN TEXT without pill/badge (Requirement 23)
-    if (lowerKey === "status" || lowerKey === "statusbpkb" || lowerKey === "statusprofit" || lowerKey === "statuscashback" || lowerKey === "bpkb") {
+    // Status as PLAIN TEXT without pill/badge (Requirement 23 & Phase 9.1)
+    if (lowerKey.includes("status") || lowerKey === "bpkb") {
       return <PlainTextStatus status={String(value)} />;
     }
 
@@ -586,7 +588,7 @@ export function EnhancedTableWithDialogs({
   const handleEditSubmit = () => {
     if (editFields) {
       for (const field of editFields) {
-        if (!editFormData[field.key] && editFormData[field.key] !== 0) {
+        if (!field.readOnly && !editFormData[field.key] && editFormData[field.key] !== 0) {
           toast.error(`${field.label} wajib diisi`);
           return;
         }
@@ -1075,8 +1077,15 @@ export function EnhancedTableWithDialogs({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
               {editFields.map(field => (
                 <div key={field.key} className="space-y-1">
-                  <Label className="text-xs font-medium text-foreground/80">{field.label}</Label>
-                  {field.type === "select" && field.options ? (
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium text-foreground/80">{field.label}</Label>
+                    {field.readOnly && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 bg-muted text-muted-foreground rounded border border-border">
+                        Read-only
+                      </span>
+                    )}
+                  </div>
+                  {field.type === "select" && field.options && !field.readOnly ? (
                     <Select
                       value={editFormData[field.key] || ""}
                       onValueChange={(value) => setEditFormData({ ...editFormData, [field.key]: value })}
@@ -1092,11 +1101,23 @@ export function EnhancedTableWithDialogs({
                     </Select>
                   ) : (
                     <Input
-                      type={field.type}
-                      className="bg-background border-border h-8 text-xs"
+                      type={field.type === "select" ? "text" : field.type}
+                      readOnly={field.readOnly}
+                      disabled={field.readOnly}
+                      className={cn(
+                        "bg-background border-border h-8 text-xs",
+                        field.readOnly && "bg-muted/40 text-muted-foreground cursor-not-allowed select-none opacity-80"
+                      )}
                       value={editFormData[field.key] !== undefined ? editFormData[field.key] : ""}
-                      onChange={(e) => setEditFormData({ ...editFormData, [field.key]: e.target.value })}
+                      onChange={(e) => {
+                        if (!field.readOnly) {
+                          setEditFormData({ ...editFormData, [field.key]: e.target.value });
+                        }
+                      }}
                     />
+                  )}
+                  {field.helpText && (
+                    <p className="text-[10px] text-muted-foreground leading-tight">{field.helpText}</p>
                   )}
                 </div>
               ))}

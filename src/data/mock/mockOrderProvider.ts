@@ -16,6 +16,7 @@ export interface IOrderDataProvider {
   getOrderByNo(orderNo: string): OperationalOrder | undefined;
   getOrdersByStage(stage: StageName): OperationalOrder[];
   addOrder(order: OperationalOrder): void;
+  addOrderAsync?(order: OperationalOrder): Promise<OperationalOrder>;
   updateOrder(orderNo: string, updates: Partial<OperationalOrder>): boolean;
   advanceOrder(orderNo: string, targetStage: StageName, updates: Partial<OperationalOrder>): boolean;
   rollbackOrder(orderNo: string, targetStage: StageName, updates: Partial<OperationalOrder>): boolean;
@@ -77,6 +78,11 @@ export class MockOrderProvider implements IOrderDataProvider {
     }
     this.activeOrders[targetStage].unshift(order);
     this.notify();
+  }
+
+  public async addOrderAsync(order: OperationalOrder): Promise<OperationalOrder> {
+    this.addOrder(order);
+    return order;
   }
 
   public updateOrder(orderNo: string, updates: Partial<OperationalOrder>): boolean {

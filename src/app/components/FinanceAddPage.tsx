@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { ArrowLeft, Plus, Trash2, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, CheckCircle2, FileSpreadsheet, ExternalLink } from "lucide-react";
 import { Card } from "./ui/card";
 import { toast } from "sonner";
 import { motion } from "motion/react";
@@ -15,6 +16,8 @@ export interface FieldConfig {
   type: "text" | "number" | "date" | "select";
   placeholder?: string;
   options?: string[];
+  readOnly?: boolean;
+  helpText?: string;
 }
 
 interface FinanceAddPageProps {
@@ -34,6 +37,7 @@ export function FinanceAddPage({
   onBack,
   onSubmit,
 }: FinanceAddPageProps) {
+  const navigate = useNavigate();
   const getEmptyRow = () => {
     const row: any = {};
     fields.forEach((field) => {
@@ -75,6 +79,7 @@ export function FinanceAddPage({
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       for (const field of fields) {
+        if (field.readOnly) continue;
         let val = row[field.key];
         if (field.type === "number" && (val === undefined || val === null || String(val).trim() === "")) {
           row[field.key] = "0";
@@ -102,6 +107,24 @@ export function FinanceAddPage({
   };
 
   const renderFieldInput = (row: any, rowIndex: number, field: FieldConfig) => {
+    if (field.readOnly) {
+      return (
+        <div className="space-y-1">
+          <Input
+            type="text"
+            disabled
+            readOnly
+            className="w-full bg-muted/40 text-muted-foreground border-border text-xs sm:text-sm cursor-not-allowed select-none opacity-80"
+            value={row[field.key] || ""}
+            placeholder={field.helpText || "Diturunkan otomatis secara kanonis (read-only)"}
+          />
+          {field.helpText && (
+            <p className="text-[10px] text-muted-foreground leading-tight">{field.helpText}</p>
+          )}
+        </div>
+      );
+    }
+
     if (field.type === "select" && field.options) {
       return (
         <Select
@@ -150,6 +173,29 @@ export function FinanceAddPage({
         <span>/</span>
         <span className="text-foreground font-medium">Tambah transaksi</span>
       </nav>
+
+      {/* Banner linking to canonical Buat Order for full workflow */}
+      <div className="rounded-lg border border-primary/25 bg-primary/5 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+        <div className="space-y-0.5">
+          <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            <FileSpreadsheet className="w-4 h-4 text-primary" />
+            <span>Formulir Buat Order Lengkap</span>
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            Ingin membuat order lengkap dengan kalkulasi biaya otomatis, alamat penjemputan berkas, dan persyaratan dokumen lengkap?
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => navigate("/order/buat")}
+          className="h-8 text-xs border-primary/30 text-primary hover:bg-primary/10 font-medium shrink-0 gap-1.5"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          <span>Buka Form Buat Order</span>
+        </Button>
+      </div>
 
       {/* Top Bar with Kembali Button & Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">

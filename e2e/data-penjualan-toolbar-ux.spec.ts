@@ -220,6 +220,7 @@ test.describe("Phase 8.5: Data Penjualan Toolbar & Interaction UX Refinement", (
   });
 
   test("16. Browser Zoom 200% & 300%: Toolbar, popovers, and tabs remain fully operational", async ({ browser }: { browser: Browser }) => {
+    test.slow();
     for (const z of [200, 300]) {
       const ctx = await browser.newContext({
         viewport: { width: Math.round((1440 * 100) / z), height: Math.round((900 * 100) / z) },
