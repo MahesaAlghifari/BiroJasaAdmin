@@ -11,28 +11,19 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import {
   Calculator,
-  HelpCircle,
   Clock,
   Search,
   CheckCircle2,
-  AlertCircle,
-  FileCheck,
-  ShieldCheck,
-  Building,
-  Info,
-  Car,
-  ChevronRight,
-  ArrowRight,
-  Sparkles,
-  Percent,
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import {
   EstimationResult,
+  EstimationTemplateConfig,
   ProgramSamsat,
   KondisiBerkas,
   WilayahAccId,
 } from "../../../domain/estimation/types";
+import { estimationStore } from "../../data/estimationStore";
 
 export interface ExplanationItem {
   id: string;
@@ -41,10 +32,9 @@ export interface ExplanationItem {
   currentAmount: number;
   includesInTotal: boolean;
   shortDesc: string;
-  excelFormula: string;
-  mathFormula: string;
-  calculationSteps: { label: string; formula: string; result: string }[];
-  rulesAndNotes: string[];
+  humanFormula: string;
+  formulaCondition?: string;
+  roundingRule?: string;
   vehicleTag?: "R4" | "R2" | "Semua";
 }
 
@@ -53,6 +43,7 @@ export interface CalculationExplanationModalProps {
   onOpenChange: (open: boolean) => void;
   initialItemId?: string | null;
   estimationResult?: EstimationResult | null;
+  template?: EstimationTemplateConfig | null;
   vehicleType?: "Mobil" | "Motor" | "R4" | "R2" | string;
   serviceType?: string;
   pkbDasar?: number;
@@ -68,6 +59,7 @@ export function CalculationExplanationModal({
   onOpenChange,
   initialItemId,
   estimationResult,
+  template,
   vehicleType = "Mobil",
   serviceType = "Perpanjangan 1 Tahun",
   pkbDasar = 0,
@@ -79,21 +71,37 @@ export function CalculationExplanationModal({
 }: CalculationExplanationModalProps) {
   const isR2 = vehicleType.toLowerCase().includes("motor") || vehicleType.toUpperCase().includes("R2");
   const isR4 = !isR2;
+  const isTahunanOr5Tahunan = serviceType.toLowerCase().includes("tahun") || serviceType.toLowerCase().includes("tahunan");
+  const isBbn = serviceType.toLowerCase().includes("balik") || serviceType.toLowerCase().includes("bbn");
+  const isMutasi = serviceType.toLowerCase().includes("mutasi");
+  const isMutasiLuar = serviceType.toLowerCase().includes("luar") || serviceType.toLowerCase().includes("ld");
 
   const [selectedItemId, setSelectedItemId] = useState<string>("denda-pkb-pajak-baru");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Semua");
 
-  // When opened with a specific initialItemId, auto-select it
-  useEffect(() => {
-    if (initialItemId) {
-      setSelectedItemId(initialItemId);
-    } else if (isR2) {
-      setSelectedItemId("denda-pkb-pajak-baru");
-    } else {
-      setSelectedItemId("denda-pkb-pajak-baru");
-    }
-  }, [initialItemId, open, isR2]);
+  // Dynamic template resolution
+  const activeTemplate = useMemo(() => {
+    if (template) return template;
+    let tid = "template-pajak-tahunan-r4";
+    if (isR2 && serviceType.includes("1 Tahun")) tid = "template-pajak-tahunan-r2";
+    else if (!isR2 && serviceType.includes("1 Tahun")) tid = "template-pajak-tahunan-r4";
+    else if (isR2 && serviceType.includes("5 Tahun")) tid = "template-pajak-5-tahunan-r2";
+    else if (!isR2 && serviceType.includes("5 Tahun")) tid = "template-pajak-5-tahunan-r4";
+    else if (isR2 && (serviceType.includes("Balik") || serviceType.includes("BBN"))) tid = "template-bbn-r2";
+    else if (!isR2 && (serviceType.includes("Balik") || serviceType.includes("BBN"))) tid = "template-bbn-r4";
+    else if (isR2 && serviceType.includes("Antar Samsat")) tid = "template-mutasi-antar-samsat-r2";
+    else if (!isR2 && serviceType.includes("Antar Samsat")) tid = "template-mutasi-antar-samsat-r4";
+    else if (isR2 && serviceType.includes("Luar")) tid = "template-mutasi-luar-daerah-r2";
+    else if (!isR2 && serviceType.includes("Luar")) tid = "template-mutasi-luar-daerah-r4";
+    return estimationStore.getTemplate(tid);
+  }, [template, isR2, serviceType]);
+
+  const koefDenda = activeTemplate?.koefisienDenda ?? 0.48;
+  const koefPct = `${Math.round(koefDenda * 100)}%`;
+  const pembagiBulan = activeTemplate?.pembagiBulan ?? 12;
+  const pembulatan = activeTemplate?.kelipatanPembulatan ?? 1000;
+  const roundingText = `Hasil dibulatkan ke atas ke kelipatan Rp ${pembulatan.toLocaleString("id-ID")} terdekat.`;
 
   // Safe parameters extraction
   const pkb = Number(pkbDasar) || 0;
@@ -102,10 +110,14 @@ export function CalculationExplanationModal({
   const calendarMonths = estimationResult?.bulanKalender ?? overdueMonths;
   const durasiText = estimationResult?.durasiKeterlambatan || "0 Tahun 0 Bulan";
   const isFreeDenda = programSamsat === "FREE Biaya Denda";
+  const totalEstimasi = estimationResult?.totalEstimasi ?? 0;
 
   // Build the list of explanations dynamically with live values
   const explanationItems = useMemo<ExplanationItem[]>(() => {
     const list: ExplanationItem[] = [];
+
+    const swdklljRate = activeTemplate?.swdklljPokok ?? (isR2 ? 35000 : 143000);
+    const dendaSwdklljRate = activeTemplate?.dendaSwdklljPokok ?? (isR2 ? 32000 : 100000);
 
     // Helper to find amount in estimationResult
     const getAmount = (id: string, fallback = 0) => {
@@ -121,152 +133,97 @@ export function CalculationExplanationModal({
       category: "Pokok Pajak",
       currentAmount: pkbTertunggakAmount,
       includesInTotal: true,
-      shortDesc: "Pajak pokok kendaraan bermotor untuk tahun-tahun sebelumnya yang belum dibayarkan.",
-      excelFormula: "=B15 * G11 (PKB Dasar × Tahun Tunggakan)",
-      mathFormula: "PKB Dasar × Tahun Keterlambatan",
-      calculationSteps: [
-        { label: "PKB Dasar Tahunan", formula: "Dari lembar STNK", result: `Rp ${pkb.toLocaleString("id-ID")}` },
-        { label: "Tahun Tunggakan", formula: "Selisih tahun penuh (DATEDIF)", result: `${overdueYears} Tahun` },
-        {
-          label: "Perhitungan",
-          formula: `Rp ${pkb.toLocaleString("id-ID")} × ${overdueYears}`,
-          result: `Rp ${pkbTertunggakAmount.toLocaleString("id-ID")}`,
-        },
-      ],
-      rulesAndNotes: [
-        "Jika keterlambatan kurang dari 1 tahun penuh (0 tahun), maka PKB Tertunggak bernilai Rp 0.",
-        "Setiap 1 tahun penuh keterlambatan menambah 1 kali lipat PKB dasar.",
-      ],
+      shortDesc: "Pajak pokok kendaraan bermotor untuk masa pajak tahun-tahun sebelumnya yang belum dibayarkan.",
+      humanFormula: "PKB Tertunggak = PKB Dasar × Jumlah Tahun Menunggak",
+      formulaCondition: overdueYears === 0 ? "Keterlambatan kurang dari 1 tahun penuh, sehingga bernilai Rp 0." : undefined,
     });
 
-    // 2. PAJAK BARU
+    // 2. PAJAK BARU / PKB POKOK
     const pajakBaruAmount = getAmount("pajak-baru", pkb);
+    const isPajakBaruPenuh = !isBbn && !isMutasi;
+    const isJabarPkb = (isBbn || isMutasi) && Math.abs(pajakBaruAmount - Math.round(pkb * 0.6 * 1.2)) <= 1000;
+
     list.push({
       id: "pajak-baru",
-      name: "Pajak Baru",
+      name: isBbn || isMutasi ? "PKB Pokok" : "Pajak Baru",
       category: "Pokok Pajak",
       currentAmount: pajakBaruAmount,
       includesInTotal: true,
-      shortDesc: "Pajak pokok kendaraan bermotor untuk masa 1 tahun ke depan yang sedang diperpanjang.",
-      excelFormula: "=B16 (Nilai PKB Dasar dari STNK)",
-      mathFormula: "PKB Dasar (1 Tahun Berjalan)",
-      calculationSteps: [
-        { label: "PKB Dasar Tahunan", formula: "Nilai pokok pada STNK / SKPD", result: `Rp ${pkb.toLocaleString("id-ID")}` },
-        { label: "Periode Pajak Baru", formula: "1 Tahun ke depan", result: "1 Periode Pajak" },
-        { label: "Total Pajak Baru", formula: "1 × PKB Dasar", result: `Rp ${pajakBaruAmount.toLocaleString("id-ID")}` },
-      ],
-      rulesAndNotes: [
-        "Pajak Baru selalu wajib dibayarkan saat melakukan perpanjangan pajak tahunan.",
-        "Nilai ini tidak dipengaruhi oleh ada atau tidaknya keterlambatan.",
-      ],
+      shortDesc: isBbn || isMutasi
+        ? "Pajak pokok kendaraan bermotor untuk masa 1 tahun ke depan di Samsat tujuan."
+        : "Pajak pokok kendaraan bermotor untuk masa 1 tahun ke depan.",
+      humanFormula: isPajakBaruPenuh
+        ? "Pajak Baru = PKB Dasar (1 Tahun Berjalan)"
+        : isJabarPkb
+        ? "PKB Pokok = PKB Dasar × 60% × 1.2"
+        : "PKB Pokok = PKB Dasar (100% DKI Jakarta)",
     });
 
-    // 3. DENDA PKB TERTUNGGAK
+    // 3. OPSEN PKB (BBN & MUTASI JABAR)
+    const opsenAmount = getAmount("opsen-pkb", 0);
+    if (isBbn || isMutasi || opsenAmount > 0) {
+      list.push({
+        id: "opsen-pkb",
+        name: "Opsen PKB",
+        category: "Pokok Pajak",
+        currentAmount: opsenAmount,
+        includesInTotal: true,
+        shortDesc: "Pungutan tambahan PKB yang dialokasikan langsung untuk kas daerah kabupaten/kota.",
+        humanFormula: opsenAmount > 0
+          ? "Opsen PKB = PKB Dasar × 40% × 1.2"
+          : "Opsen PKB = Rp 0",
+        formulaCondition: opsenAmount > 0
+          ? "Diterapkan untuk pendaftaran wilayah Jawa Barat sesuai ketentuan UU HKPD."
+          : "Wilayah DKI Jakarta tidak mengenakan opsen kabupaten/kota.",
+      });
+    }
+
+    // 4. DENDA PKB TERTUNGGAK
     const dendaPkbTertunggakAmount = getAmount(
       "denda-pkb-tertunggak",
-      isFreeDenda ? 0 : Math.ceil((pkb * 0.48 * overdueYears) / 1000) * 1000
+      isFreeDenda ? 0 : Math.ceil((pkb * koefDenda * overdueYears) / pembulatan) * pembulatan
     );
-    const rawDendaTertunggak = pkb * 0.48 * overdueYears;
     list.push({
       id: "denda-pkb-tertunggak",
       name: "Denda PKB Tertunggak",
       category: "Denda Pajak",
       currentAmount: dendaPkbTertunggakAmount,
       includesInTotal: true,
-      shortDesc: "Denda keterlambatan atas pokok PKB tahun-tahun lalu yang menunggak.",
-      excelFormula: isFreeDenda
-        ? "=0 (Dibebaskan oleh Program FREE Biaya Denda)"
-        : "=ROUNDUP(C15 * $I$9 * G11, -3) atau ROUNDUP(PKB * 48% * Tahun, -3)",
-      mathFormula: isFreeDenda ? "Rp 0 (Pemutihan)" : "ROUNDUP(PKB Dasar × 48% × Tahun Tunggakan, -3)",
-      calculationSteps: isFreeDenda
-        ? [
-            { label: "Program Samsat Aktif", formula: "FREE Biaya Denda", result: "Denda PKB Dibebaskan (0%)" },
-            { label: "Hasil Akhir", formula: "Otomatis Rp 0", result: "Rp 0" },
-          ]
-        : [
-            { label: "PKB Dasar", formula: "Nilai pokok STNK", result: `Rp ${pkb.toLocaleString("id-ID")}` },
-            { label: "Tarif Denda Tahunan", formula: "Koefisien Denda Workbook (48%)", result: "48% per tahun" },
-            { label: "Tahun Tunggakan", formula: "Tahun penuh terlambat", result: `${overdueYears} Tahun` },
-            {
-              label: "Hitungan Dasar",
-              formula: `Rp ${pkb.toLocaleString("id-ID")} × 48% × ${overdueYears}`,
-              result: `Rp ${Math.round(rawDendaTertunggak).toLocaleString("id-ID")}`,
-            },
-            {
-              label: "Pembulatan ROUNDUP(-3)",
-              formula: "Dibulatkan ke atas ke kelipatan Rp 1.000 terdekat",
-              result: `Rp ${dendaPkbTertunggakAmount.toLocaleString("id-ID")}`,
-            },
-          ],
-      rulesAndNotes: [
-        "Jika Program Samsat disetel ke 'FREE Biaya Denda', maka denda ini otomatis menjadi Rp 0.",
-        "Workbook resmi menggunakan koefisien 48% per tahun tunggakan penuh.",
-        "Hasil selalu dibulatkan ke atas ke kelipatan seribu (ROUNDUP -3), misal Rp 24.480 menjadi Rp 25.000.",
-      ],
+      shortDesc: "Denda keterlambatan atas pokok PKB tahun-tahun sebelumnya yang menunggak.",
+      humanFormula: isFreeDenda
+        ? "Denda = Rp 0 (Program Bebas Denda Aktif)"
+        : `Denda = PKB Dasar × ${koefPct} × Jumlah Tahun Menunggak`,
+      formulaCondition: isFreeDenda ? "Denda menjadi Rp 0 karena program FREE Biaya Denda aktif." : undefined,
+      roundingRule: isFreeDenda ? undefined : roundingText,
     });
 
-    // 4. DENDA PKB PAJAK BARU
-    const dendaPkbPajakBaruAmount = getAmount(
-      "denda-pkb-pajak-baru",
-      isFreeDenda ? 0 : Math.ceil(((pkb * 0.48) / 12 * overdueMonths) / 1000) * 1000
+    // 5. DENDA PKB PAJAK BARU / BERJALAN
+    const dendaPkbPajakBaruAmount = getAmount("denda-pkb-pajak-baru") || getAmount("denda-pkb") || (
+      isFreeDenda ? 0 : Math.ceil(((pkb * koefDenda) / pembagiBulan * overdueMonths) / pembulatan) * pembulatan
     );
-    const monthlyRate = (pkb * 0.48) / 12;
-    const rawDendaBaru = monthlyRate * overdueMonths;
+
+    const humanFormulaDenda = isFreeDenda
+      ? "Denda = Rp 0 (Program Bebas Denda Aktif)"
+      : isR4
+      ? `Denda = PKB Dasar × ${koefPct} ÷ ${pembagiBulan} × Jumlah Bulan Keterlambatan`
+      : isTahunanOr5Tahunan
+      ? `Denda = PKB Dasar × ${koefPct} ÷ ${pembagiBulan} × (Jumlah Bulan Kalender + 5 Bulan Penyesuaian)`
+      : `Denda = PKB Dasar × ${koefPct} ÷ ${pembagiBulan} × Jumlah Bulan Keterlambatan`;
+
     list.push({
       id: "denda-pkb-pajak-baru",
-      name: "Denda PKB Pajak Baru",
+      name: isBbn || isMutasi ? "Denda PKB" : "Denda PKB Pajak Baru",
       category: "Denda Pajak",
       currentAmount: dendaPkbPajakBaruAmount,
       includesInTotal: true,
-      shortDesc: "Denda keterlambatan untuk bulan berjalan pada masa perpanjangan pajak baru.",
-      excelFormula: isR2
-        ? '=ROUNDUP(IF(I11="free biaya denda";0;IF(I11="normal";SUM(I14*I6/12*I13);""));-3)'
-        : '=ROUNDUP(IF(I11="free biaya denda";0;IF(I11="normal";SUM(I14*I6/12*I12);""));-3)',
-      mathFormula: isFreeDenda ? "Rp 0 (Pemutihan)" : "ROUNDUP((PKB Dasar × 48% ÷ 12) × Bulan Denda, -3)",
-      calculationSteps: isFreeDenda
-        ? [
-            { label: "Program Samsat Aktif (I11)", formula: 'I11 = "free biaya denda"', result: "Denda PKB Dibebaskan (Rp 0)" },
-            { label: "Hasil Akhir", formula: "Otomatis Rp 0", result: "Rp 0" },
-          ]
-        : [
-            { label: "1. PKB Dasar (I14)", formula: "Pokok pajak STNK (Cell I14)", result: `Rp ${pkb.toLocaleString("id-ID")}` },
-            { label: "2. Koefisien Denda Pertahun (I6)", formula: "Cell I6 (0.48 / 48%)", result: "48% per tahun" },
-            { label: "3. Denda Per Bulan (I14 × I6 ÷ 12)", formula: `Rp ${pkb.toLocaleString("id-ID")} × 0.48 ÷ 12`, result: `Rp ${monthlyRate.toFixed(2)} / bln` },
-            {
-              label: isR2 ? "4. Bulan Denda R2 (I13)" : "4. Bulan Keterlambatan (I12)",
-              formula: isR2 ? `Bulan kalender (${calendarMonths}) + 5 bulan (Rumus Excel R2 Sel I13)` : `Bulan kalender keterlambatan (Sel I12)`,
-              result: `${overdueMonths} Bulan`,
-            },
-            {
-              label: "5. Nilai Sebelum Pembulatan (SUM(I14*I6/12*I13))",
-              formula: `Rp ${monthlyRate.toFixed(2)} × ${overdueMonths} Bulan`,
-              result: `Rp ${Math.round(rawDendaBaru).toLocaleString("id-ID")}`,
-            },
-            {
-              label: "6. Pembulatan ROUNDUP(-3)",
-              formula: "Dibulatkan ke atas ke kelipatan Rp 1.000 terdekat",
-              result: `Rp ${dendaPkbPajakBaruAmount.toLocaleString("id-ID")}`,
-            },
-          ],
-      rulesAndNotes: [
-        'RUMUS RESMI WORKBOOK EXCEL (Sheet R2 Sel F16): =ROUNDUP(IF(I11="free biaya denda";0;IF(I11="normal";SUM(I14*I6/12*I13);""));-3)',
-        'Keterangan Sel:',
-        '• I11 = Program Samsat ("free biaya denda" atau "normal")',
-        '• I14 = PKB Dasar dari STNK',
-        '• I6 = Koefisien Denda (0.48 atau 48%)',
-        '• 12 = 12 Bulan dalam setahun',
-        '• I13 = Bulan Denda Motor R2 (Bulan Kalender + 5 Bulan)',
-        '• ROUNDUP(..., -3) = Pembulatan ke atas ke kelipatan Rp 1.000 terdekat.',
-        isR2
-          ? "UNTUK MOTOR (R2): Sesuai formula sel I13 sheet Excel 'PAJAK TAHUNAN R2 ', bulan denda dihitung dari sisa bulan kalender ditambah 5 bulan (+5 bulan), sehingga jika telat 2 bulan kalender, bulan dendanya menjadi 7 bulan."
-          : "UNTUK MOBIL (R4): Bulan denda dihitung murni dari bulan kalender keterlambatan (1-12 bulan).",
-        "Jika Program Samsat disetel ke 'FREE Biaya Denda', maka denda ini otomatis menjadi Rp 0.",
-      ],
+      shortDesc: "Denda keterlambatan pembayaran pajak untuk periode tahun berjalan.",
+      humanFormula: humanFormulaDenda,
+      formulaCondition: isFreeDenda ? "Denda menjadi Rp 0 karena program FREE Biaya Denda aktif." : undefined,
+      roundingRule: isFreeDenda ? undefined : roundingText,
       vehicleTag: isR2 ? "R2" : "R4",
     });
 
-    // 5. SWDKLLJ TERTUNGGAK
-    const swdklljRate = isR2 ? 35000 : 143000;
+    // 6. SWDKLLJ TERTUNGGAK
     const swdklljTertunggakAmount = getAmount("swdkllj-tertunggak", swdklljRate * overdueYears);
     list.push({
       id: "swdkllj-tertunggak",
@@ -275,46 +232,28 @@ export function CalculationExplanationModal({
       currentAmount: swdklljTertunggakAmount,
       includesInTotal: true,
       shortDesc: "Sumbangan Wajib Dana Kecelakaan Lalu Lintas Jalan (Jasa Raharja) tahun-tahun sebelumnya yang belum dibayarkan.",
-      excelFormula: isR2 ? "=35.000 * G11 (Tarif R2)" : "=143.000 * G11 (Tarif R4)",
-      mathFormula: `Tarif SWDKLLJ (${isR2 ? "Motor: Rp 35.000" : "Mobil: Rp 143.000"}) × Tahun Tunggakan`,
-      calculationSteps: [
-        { label: "Tarif Pokok SWDKLLJ", formula: isR2 ? "Tarif Motor Gol C1" : "Tarif Mobil Gol DP", result: `Rp ${swdklljRate.toLocaleString("id-ID")} / tahun` },
-        { label: "Tahun Tunggakan", formula: "Tahun keterlambatan", result: `${overdueYears} Tahun` },
-        {
-          label: "Total SWDKLLJ Tertunggak",
-          formula: `Rp ${swdklljRate.toLocaleString("id-ID")} × ${overdueYears}`,
-          result: `Rp ${swdklljTertunggakAmount.toLocaleString("id-ID")}`,
-        },
-      ],
-      rulesAndNotes: [
-        `Tarif pokok SWDKLLJ ditetapkan oleh Jasa Raharja: Mobil (R4) = Rp 143.000/tahun, Motor (R2) = Rp 35.000/tahun.`,
-        "Komponen ini tidak dipengaruhi oleh denda ataupun program pemutihan daerah.",
-      ],
+      humanFormula: `SWDKLLJ Tertunggak = Tarif Pokok (Rp ${swdklljRate.toLocaleString("id-ID")}) × Jumlah Tahun Menunggak`,
     });
 
-    // 6. SWDKLLJ PAJAK BARU
-    const swdklljBaruAmount = getAmount("swdkllj-pajak-baru", swdklljRate);
+    // 7. SWDKLLJ PAJAK BARU / MASUK
+    const swdklljBaruRate = (isBbn || isMutasi)
+      ? (isR2 ? 97000 : 205000)
+      : swdklljRate;
+    const swdklljBaruAmount = getAmount("swdkllj-pajak-baru") || getAmount("swdkllj") || swdklljBaruRate;
+
     list.push({
       id: "swdkllj-pajak-baru",
-      name: "SWDKLLJ Pajak Baru",
+      name: isBbn || isMutasi ? "SWDKLLJ Pendaftaran Baru" : "SWDKLLJ Pajak Baru",
       category: "SWDKLLJ",
       currentAmount: swdklljBaruAmount,
       includesInTotal: true,
-      shortDesc: "Sumbangan Wajib Dana Kecelakaan Lalu Lintas Jalan untuk masa 1 tahun ke depan.",
-      excelFormula: isR2 ? "=35.000 (Tarif Motor R2)" : "=143.000 (Tarif Mobil R4)",
-      mathFormula: `Tarif SWDKLLJ (${isR2 ? "Rp 35.000" : "Rp 143.000"})`,
-      calculationSteps: [
-        { label: "Tarif Pokok SWDKLLJ", formula: isR2 ? "Motor (R2)" : "Mobil (R4)", result: `Rp ${swdklljRate.toLocaleString("id-ID")}` },
-        { label: "Periode Baru", formula: "1 Tahun ke depan", result: "1 Tahun" },
-        { label: "Total", formula: `1 × Rp ${swdklljRate.toLocaleString("id-ID")}`, result: `Rp ${swdklljBaruAmount.toLocaleString("id-ID")}` },
-      ],
-      rulesAndNotes: [
-        "Wajib dibayarkan pada setiap perpanjangan STNK tahunan sebagai asuransi perlindungan kecelakaan korban lalu lintas jalan.",
-      ],
+      shortDesc: isBbn || isMutasi
+        ? "Sumbangan Wajib Dana Kecelakaan Lalu Lintas Jalan pendaftaran baru di Samsat tujuan."
+        : "Sumbangan Wajib Dana Kecelakaan Lalu Lintas Jalan untuk masa 1 tahun ke depan.",
+      humanFormula: `Biaya tetap: Rp ${swdklljBaruAmount.toLocaleString("id-ID")}`,
     });
 
-    // 7. DENDA SWDKLLJ TERTUNGGAK
-    const dendaSwdklljRate = isR2 ? 32000 : 100000;
+    // 8. DENDA SWDKLLJ TERTUNGGAK
     const dendaSwdklljTertunggakAmount = getAmount("denda-swdkllj-tertunggak", dendaSwdklljRate * overdueYears);
     list.push({
       id: "denda-swdkllj-tertunggak",
@@ -323,26 +262,15 @@ export function CalculationExplanationModal({
       currentAmount: dendaSwdklljTertunggakAmount,
       includesInTotal: true,
       shortDesc: "Denda keterlambatan pembayaran SWDKLLJ untuk tahun-tahun masa lalu.",
-      excelFormula: isR2 ? "=32.000 * G11 (Tarif Denda R2)" : "=100.000 * G11 (Tarif Denda R4)",
-      mathFormula: `Tarif Denda SWDKLLJ (${isR2 ? "Rp 32.000" : "Rp 100.000"}) × Tahun Tunggakan`,
-      calculationSteps: [
-        { label: "Tarif Denda SWDKLLJ", formula: isR2 ? "Motor (Rp 32.000)" : "Mobil (Rp 100.000)", result: `Rp ${dendaSwdklljRate.toLocaleString("id-ID")} / thn` },
-        { label: "Tahun Tunggakan", formula: "Tahun keterlambatan", result: `${overdueYears} Tahun` },
-        {
-          label: "Total Denda SWDKLLJ Tertunggak",
-          formula: `Rp ${dendaSwdklljRate.toLocaleString("id-ID")} × ${overdueYears}`,
-          result: `Rp ${dendaSwdklljTertunggakAmount.toLocaleString("id-ID")}`,
-        },
-      ],
-      rulesAndNotes: [
-        "PERHATIAN: Denda SWDKLLJ TETAP BERLAKU meskipun Program Samsat disetel ke 'FREE Biaya Denda'.",
-        "Alasannya: Program pemutihan Samsat daerah hanya menggratiskan Denda PKB (Pajak Daerah), sedangkan SWDKLLJ dikelola oleh PT Jasa Raharja (BUMN Pusat).",
-      ],
+      humanFormula: isR2
+        ? "Denda SWDKLLJ = Tarif Denda (Rp 32.000) × Jumlah Tahun Menunggak"
+        : "Denda SWDKLLJ = Tarif Denda (Rp 100.000) × Jumlah Tahun Menunggak",
+      formulaCondition: "Denda SWDKLLJ tetap berlaku dan tidak dihapus oleh program pemutihan denda pajak daerah.",
     });
 
-    // 8. DENDA SWDKLLJ PAJAK BARU
+    // 9. DENDA SWDKLLJ PAJAK BARU
     const isOverdue = overdueYears > 0 || overdueMonths > 0 || (estimationResult?.durasiKeterlambatan && estimationResult.durasiKeterlambatan !== "0 Tahun 0 Bulan");
-    const dendaSwdklljBaruAmount = getAmount("denda-swdkllj-pajak-baru", isOverdue ? dendaSwdklljRate : 0);
+    const dendaSwdklljBaruAmount = getAmount("denda-swdkllj-pajak-baru") || getAmount("denda-swdkllj") || (isOverdue ? dendaSwdklljRate : 0);
     list.push({
       id: "denda-swdkllj-pajak-baru",
       name: "Denda SWDKLLJ Pajak Baru",
@@ -350,27 +278,16 @@ export function CalculationExplanationModal({
       currentAmount: dendaSwdklljBaruAmount,
       includesInTotal: true,
       shortDesc: "Denda keterlambatan SWDKLLJ untuk periode tahun berjalan.",
-      excelFormula: isR2
-        ? "=IF(OR(G11>0, I12>0, J12>0), 32000, 0)"
-        : "=IF(OR(G11>0, I12>0, J12>0), 100000, 0)",
-      mathFormula: isOverdue ? `Tarif Flat (${isR2 ? "Rp 32.000" : "Rp 100.000"})` : "Rp 0 (Tepat Waktu)",
-      calculationSteps: [
-        { label: "Status Keterlambatan", formula: "Apakah terlambat > 0 hari?", result: isOverdue ? "Terlambat" : "Tepat Waktu (0 Hari)" },
-        {
-          label: "Denda Dikenakan",
-          formula: isOverdue ? `Dikenakan flat tarif denda ${isR2 ? "R2 (Rp 32.000)" : "R4 (Rp 100.000)"}` : "Tidak kena denda",
-          result: `Rp ${dendaSwdklljBaruAmount.toLocaleString("id-ID")}`,
-        },
-      ],
-      rulesAndNotes: [
-        "Dikenakan flat sebesar Rp 32.000 (Motor) atau Rp 100.000 (Mobil) apabila melewati tanggal jatuh tempo walau hanya 1 hari.",
-        "Jika pembayaran dilakukan tepat waktu atau sebelum jatuh tempo, nilainya adalah Rp 0.",
-        "Sama seperti denda tertunggak, denda SWDKLLJ ini tidak dihapus oleh pemutihan denda PKB.",
-      ],
+      humanFormula: isOverdue
+        ? (isR2 ? "Biaya tetap: Rp 32.000 (Denda Keterlambatan Flat)" : "Biaya tetap: Rp 100.000 (Denda Keterlambatan Flat)")
+        : "Biaya: Rp 0 (Tepat Waktu / Sebelum Jatuh Tempo)",
+      formulaCondition: isOverdue
+        ? "Dikenakan karena masa berlaku telah melewati tanggal jatuh tempo."
+        : "Pembayaran dilakukan tepat waktu sebelum jatuh tempo.",
     });
 
-    // 9. PROSES DAN ACC ID (R2 ONLY)
-    if (isR2) {
+    // 10. PROSES DAN ACC ID (R2 ONLY)
+    if (isR2 && (isTahunanOr5Tahunan || getAmount("proses-dan-acc-id") > 0)) {
       const prosesAccAmount = getAmount("proses-dan-acc-id", kondisiBerkas === "LENGKAP" ? 0 : wilayahAccId === "Bogor" ? 200000 : 350000);
       list.push({
         id: "proses-dan-acc-id",
@@ -378,143 +295,177 @@ export function CalculationExplanationModal({
         category: "Admin & Jasa",
         currentAmount: prosesAccAmount,
         includesInTotal: true,
-        shortDesc: "Biaya proses verifikasi dokumen dan penembakan/ACC KTP pemilik terdaftar untuk Motor (R2).",
-        excelFormula: "=350000 (Default DKI/Tangerang/Depok/Bekasi) / 200000 (Bogor) [Sheet R2 Sel C27]",
-        mathFormula: kondisiBerkas === "LENGKAP" ? "Rp 0 (Berkas Lengkap)" : `Tarif Wilayah ${wilayahAccId}`,
-        calculationSteps: [
-          { label: "Kelengkapan Berkas", formula: "Input form KTP", result: kondisiBerkas },
-          { label: "Wilayah Samsat", formula: "Lookup tarif wilayah", result: wilayahAccId || "Default DKI" },
-          {
-            label: "Biaya Proses & ACC ID",
-            formula: kondisiBerkas === "LENGKAP" ? "Ada KTP = Rp 0" : `Tanpa KTP ${wilayahAccId}`,
-            result: `Rp ${prosesAccAmount.toLocaleString("id-ID")}`,
-          },
-        ],
-        rulesAndNotes: [
-          "KHUSUS MOTOR (R2): Sesuai Sheet R2 Excel sel C27, biaya Proses & ACC ID MASUK ke dalam Total Tagihan Order (SUM C15:C29).",
-          "Jika klien membawa KTP Asli pemilik kendaraan (LENGKAP), biaya ini bernilai Rp 0.",
-          "Jika Tanpa KTP: Wilayah DKI, Tangerang, Bekasi, Depok = Rp 350.000; Wilayah Bogor = Rp 200.000.",
-        ],
+        shortDesc: "Biaya proses verifikasi dokumen dan pengurusan ACC ID identitas pemilik untuk Motor (R2).",
+        humanFormula: kondisiBerkas === "LENGKAP"
+          ? "Biaya: Rp 0 (Berkas Ada KTP)"
+          : `Biaya tetap: Rp ${prosesAccAmount.toLocaleString("id-ID")}`,
+        formulaCondition: kondisiBerkas === "LENGKAP"
+          ? "Tidak dikenakan biaya karena melampirkan KTP Asli pemilik."
+          : "Biaya masuk ke total tagihan sesuai ketentuan pengurusan tanpa KTP.",
         vehicleTag: "R2",
       });
     }
 
-    // 10. CETAK SKP
-    const cetakSkpAmount = getAmount("cetak-skp", isOverdue ? 50000 : 0);
-    list.push({
-      id: "cetak-skp",
-      name: "Cetak SKP (Surat Ketetapan Pajak)",
-      category: "Admin & Jasa",
-      currentAmount: cetakSkpAmount,
-      includesInTotal: true,
-      shortDesc: "Biaya pencetakan ulang notice pajak / lembar SKPD di Samsat karena ada keterlambatan.",
-      excelFormula: "=IF(OR(G11>0, I12>0, J12>0), 50000, 0) [Sel C28]",
-      mathFormula: isOverdue ? "Rp 50.000 (Terlambat)" : "Rp 0 (Tepat Waktu)",
-      calculationSteps: [
-        { label: "Kondisi Keterlambatan", formula: "Telat hari/bulan/tahun > 0", result: isOverdue ? "Terlambat" : "Tepat Waktu" },
-        { label: "Biaya Cetak SKP", formula: isOverdue ? "Tarif resmi cetak SKP Samsat" : "Tidak dicetak ulang", result: `Rp ${cetakSkpAmount.toLocaleString("id-ID")}` },
-      ],
-      rulesAndNotes: [
-        "Jika ada keterlambatan pembayaran pajak (walau 1 hari), Samsat mengenakan biaya cetak SKP sebesar Rp 50.000.",
-        "Jika perpanjangan tepat waktu sebelum tanggal jatuh tempo, biaya ini otomatis Rp 0.",
-      ],
-    });
-
-    // 11. JASA PENGURUSAN BIRO
-    const jasaAmount = getAmount("jasa", isR2 ? 200000 : 250000);
-    list.push({
-      id: "jasa",
-      name: "Jasa Pengurusan Biro (SUN89)",
-      category: "Admin & Jasa",
-      currentAmount: jasaAmount,
-      includesInTotal: true,
-      shortDesc: "Biaya jasa penanganan berkas dan antrean loket oleh petugas Biro Jasa SUN89.",
-      excelFormula: isR2 ? "=200000 (Tarif Standar Motor R2) [Sel C29]" : "=250000 (Tarif Standar Mobil R4) [Sel C29]",
-      mathFormula: `Tarif Jasa Layanan (${isR2 ? "Motor: Rp 200.000" : "Mobil: Rp 250.000"})`,
-      calculationSteps: [
-        { label: "Jenis Kendaraan", formula: isR2 ? "Motor (R2)" : "Mobil (R4)", result: vehicleType },
-        { label: "Biaya Jasa", formula: "Sesuai master template layanan", result: `Rp ${jasaAmount.toLocaleString("id-ID")}` },
-      ],
-      rulesAndNotes: [
-        "Tarif jasa default: Rp 200.000 untuk Motor (R2) dan Rp 250.000 untuk Mobil (R4).",
-        "Biaya jasa ini sudah mencakup pengurusan antrean, pengecekan berkas, dan pengesahan di Samsat.",
-      ],
-    });
-
-    // 12. BIAYA ACC ID (R4 ONLY)
-    if (isR4) {
+    // 11. BIAYA ACC ID (R4 ONLY)
+    if (isR4 && (isTahunanOr5Tahunan || estimationResult?.accIdAmount !== undefined)) {
       const accIdAmount = estimationResult?.accIdAmount ?? (kondisiBerkas === "LENGKAP" ? 0 : 350000);
       list.push({
         id: "acc-id",
-        name: "Biaya ACC ID (Penembakan KTP)",
+        name: "Biaya ACC ID",
         category: "Admin & Jasa",
         currentAmount: accIdAmount,
         includesInTotal: false,
-        shortDesc: "Biaya referensi penembakan/ACC KTP apabila pengurusan tanpa membawa KTP Asli pemilik.",
-        excelFormula: "=Lookup Wilayah (DKI: 350k, Jabar: 400k, dll) [Sheet R4 Sel I5]",
-        mathFormula: kondisiBerkas === "LENGKAP" ? "Rp 0 (Ada KTP)" : `Lookup Tarif (${wilayahAccId})`,
-        calculationSteps: [
-          { label: "Kelengkapan Berkas", formula: "Status KTP", result: kondisiBerkas },
-          { label: "Wilayah Samsat", formula: "Pilihan Wilayah ACC ID", result: wilayahAccId || "DKI Jakarta" },
-          { label: "Estimasi ACC ID", formula: "Biaya referensi ACC ID", result: `Rp ${accIdAmount.toLocaleString("id-ID")}` },
-          { label: "Status Masuk Total", formula: "Aturan Bisnis R4", result: "TIDAK MASUK TOTAL ESTIMASI" },
-        ],
-        rulesAndNotes: [
-          "PENTING UNTUK MOBIL (R4): Sesuai keputusan bisnis dan workbook R4, Biaya ACC ID ditampilkan hanya sebagai REFERENSI DOKUMEN dan TIDAK DIGABUNGKAN ke Total Tagihan Order.",
-          "Jika berkas LENGKAP (Ada KTP), biaya ini Rp 0.",
-        ],
+        shortDesc: "Biaya referensi penembakan/ACC KTP untuk Mobil (R4) apabila tanpa KTP Asli pemilik.",
+        humanFormula: kondisiBerkas === "LENGKAP"
+          ? "Biaya: Rp 0 (Berkas Ada KTP)"
+          : `Biaya referensi: Rp ${accIdAmount.toLocaleString("id-ID")}`,
+        formulaCondition: "Khusus Mobil (R4), biaya ini hanya sebagai referensi dokumen dan tidak masuk ke total tagihan.",
         vehicleTag: "R4",
       });
     }
 
-    // 13. INSIDENTAL & OVERRIDES
+    // 12. CETAK SKP
+    const cetakSkpAmount = getAmount("cetak-skp", isOverdue ? (isR2 ? 50000 : 100000) : 0);
     list.push({
-      id: "insidental",
-      name: "Biaya Tambahan / Insidental",
-      category: "Insidental",
-      currentAmount: estimationResult?.totalInsidental ?? 0,
+      id: "cetak-skp",
+      name: "Cetak SKP",
+      category: "Admin & Jasa",
+      currentAmount: cetakSkpAmount,
       includesInTotal: true,
-      shortDesc: "Biaya insidental opsional (ETLE, REQ NOPOL, STNK Hilang, Pemekaran Wilayah, JR).",
-      excelFormula: "=SUM(ETLE, PNBP_NOPIL, STNK_HILANG, PEMEKARAN, JR)",
-      mathFormula: "Input Manual oleh Admin / Petugas (Default Rp 0)",
-      calculationSteps: [
-        { label: "Nilai Awal", formula: "Komponen default", result: "Rp 0" },
-        { label: "Nilai Input Saat Ini", formula: "Diisi hanya jika ada kasus khusus", result: `Rp ${(estimationResult?.totalInsidental ?? 0).toLocaleString("id-ID")}` },
-      ],
-      rulesAndNotes: [
-        "ETLE: Tilang elektronik yang harus dilunasi sebelum STNK bisa disahkan.",
-        "REQ NOPOL / PNBP Nopil: Biaya resmi penerbitan nomor polisi khusus/pilihan.",
-        "STNK Hilang: Biaya proses administrasi laporan polisi dan surat keterangan hilang.",
-        "Pemekaran Wilayah: Biaya mutasi administrasi perpindahan kode wilayah Samsat.",
-        "JR: Jasa Raharja insidental jika ada penyesuaian khusus.",
-      ],
+      shortDesc: "Biaya pencetakan ulang surat penetapan pajak di Samsat apabila terjadi keterlambatan.",
+      humanFormula: cetakSkpAmount > 0
+        ? `Biaya tetap: Rp ${cetakSkpAmount.toLocaleString("id-ID")}`
+        : "Biaya: Rp 0 (Tepat Waktu / Sebelum Jatuh Tempo)",
+      formulaCondition: cetakSkpAmount > 0
+        ? "Dikenakan oleh pihak Samsat karena ada keterlambatan pembayaran."
+        : "Tidak dikenakan jika perpanjangan tepat waktu.",
     });
 
-    // 14. TOTAL ESTIMASI & PEMBULATAN
-    const totalRaw = estimationResult?.items
-      ? estimationResult.items.filter((i) => i.includesInTotal).reduce((sum, i) => sum + i.amount, 0)
-      : 0;
-    const totalEstimasi = estimationResult?.totalEstimasi ?? Math.ceil(totalRaw / 1000) * 1000;
+    // 13. ADMIN STNK (5 TAHUNAN, BBN, MUTASI)
+    const adminStnkAmount = getAmount("admin-stnk", isR2 ? 100000 : 200000);
+    if (!isTahunanOr5Tahunan || serviceType.includes("5") || adminStnkAmount > 0) {
+      list.push({
+        id: "admin-stnk",
+        name: "Administrasi STNK",
+        category: "Admin & Jasa",
+        currentAmount: adminStnkAmount,
+        includesInTotal: true,
+        shortDesc: "Biaya resmi penerbitan STNK baru (PNBP sesuai PP No. 76 Tahun 2020).",
+        humanFormula: `Biaya tetap: Rp ${adminStnkAmount.toLocaleString("id-ID")}`,
+      });
+    }
 
+    // 14. ADMIN TNKB / PLAT NOMOR
+    const adminTnkbAmount = getAmount("admin-tnkb", isR2 ? 60000 : 100000);
+    if (!isTahunanOr5Tahunan || serviceType.includes("5") || adminTnkbAmount > 0) {
+      list.push({
+        id: "admin-tnkb",
+        name: "Administrasi TNKB",
+        category: "Admin & Jasa",
+        currentAmount: adminTnkbAmount,
+        includesInTotal: true,
+        shortDesc: "Biaya resmi pencetakan sepasang plat nomor baru (PNBP sesuai PP No. 76 Tahun 2020).",
+        humanFormula: `Biaya tetap: Rp ${adminTnkbAmount.toLocaleString("id-ID")}`,
+      });
+    }
+
+    // 15. TARIK BERKAS (MUTASI)
+    const tarikBerkasAmount = getAmount("tarik-berkas", isMutasiLuar ? 1500000 : 1000000);
+    if (isMutasi || tarikBerkasAmount > 0) {
+      list.push({
+        id: "tarik-berkas",
+        name: "Tarik Berkas",
+        category: "Admin & Jasa",
+        currentAmount: tarikBerkasAmount,
+        includesInTotal: true,
+        shortDesc: "Biaya penarikan berkas arsip kendaraan dari Samsat asal (Mutasi Keluar).",
+        humanFormula: `Biaya tetap: Rp ${tarikBerkasAmount.toLocaleString("id-ID")}`,
+      });
+    }
+
+    // 16. MUTASI MASUK BPKB
+    const mutasiBpkbAmount = getAmount("mutasi-masuk-bpkb", isMutasiLuar ? 1500000 : 1000000);
+    if (isMutasi || mutasiBpkbAmount > 0) {
+      list.push({
+        id: "mutasi-masuk-bpkb",
+        name: "Mutasi Masuk BPKB",
+        category: "Admin & Jasa",
+        currentAmount: mutasiBpkbAmount,
+        includesInTotal: true,
+        shortDesc: "Biaya pendaftaran arsip mutasi masuk dan penerbitan buku BPKB baru di Samsat/Polda tujuan.",
+        humanFormula: `Biaya tetap: Rp ${mutasiBpkbAmount.toLocaleString("id-ID")}`,
+      });
+    }
+
+    // 17. BIAYA PROSES BBN
+    const biayaProsesBbnAmount = getAmount("biaya-proses", 1000000);
+    if (isBbn || biayaProsesBbnAmount > 0) {
+      list.push({
+        id: "biaya-proses",
+        name: "Biaya Proses (Cek Fisik, Daftar & BPKB)",
+        category: "Admin & Jasa",
+        currentAmount: biayaProsesBbnAmount,
+        includesInTotal: true,
+        shortDesc: "Biaya cek fisik resmi Polda, pendaftaran loket, dan penerbitan BPKB baru atas nama pemilik baru.",
+        humanFormula: `Biaya tetap: Rp ${biayaProsesBbnAmount.toLocaleString("id-ID")}`,
+      });
+    }
+
+    // 18. JASA PENGURUSAN BIRO
+    const jasaAmount = getAmount("jasa", isR2 ? 200000 : 250000);
+    list.push({
+      id: "jasa",
+      name: "Jasa Layanan Biro",
+      category: "Admin & Jasa",
+      currentAmount: jasaAmount,
+      includesInTotal: true,
+      shortDesc: "Biaya jasa penanganan berkas dan pengurusan loket oleh petugas Biro Jasa SUN89.",
+      humanFormula: `Tarif jasa: Rp ${jasaAmount.toLocaleString("id-ID")}`,
+    });
+
+    // 19. KOMPONEN MANUAL / INSIDENTAL DARI ESTIMATION RESULT
+    const incidentalItems = estimationResult?.items?.filter(
+      (it) => it.category === "INSIDENTAL" && it.amount > 0
+    ) || [];
+
+    if (incidentalItems.length > 0) {
+      incidentalItems.forEach((inc) => {
+        list.push({
+          id: inc.id,
+          name: inc.name,
+          category: "Insidental",
+          currentAmount: inc.amount,
+          includesInTotal: inc.includesInTotal,
+          shortDesc: "Biaya insidental tambahan yang diinput sesuai kebutuhan kasus kendaraan.",
+          humanFormula: `Nilai diinput secara manual: Rp ${inc.amount.toLocaleString("id-ID")}`,
+        });
+      });
+    } else {
+      const totalInsidental = estimationResult?.totalInsidental ?? 0;
+      list.push({
+        id: "insidental",
+        name: "Biaya Tambahan / Insidental",
+        category: "Insidental",
+        currentAmount: totalInsidental,
+        includesInTotal: true,
+        shortDesc: "Biaya insidental tambahan (seperti Uji KIR, Buka Blokir, ETLE, Plat Pilihan, atau STNK Hilang).",
+        humanFormula: totalInsidental > 0
+          ? `Nilai diinput secara manual: Rp ${totalInsidental.toLocaleString("id-ID")}`
+          : "Nilai diinput secara manual: Rp 0",
+        formulaCondition: "Diisi hanya apabila ada kebutuhan khusus pada kendaraan.",
+      });
+    }
+
+    // 20. TOTAL ESTIMASI & PEMBULATAN
     list.push({
       id: "total-estimasi",
-      name: "Total Tagihan Estimasi (ROUNDUP)",
+      name: "Total Tagihan Estimasi",
       category: "Total & Aturan",
       currentAmount: totalEstimasi,
       includesInTotal: true,
-      shortDesc: "Grand total seluruh komponen biaya yang diikutsertakan dengan pembulatan ke atas ke kelipatan Rp 1.000.",
-      excelFormula: "=ROUNDUP(SUM(Komponen), -3) [Sheet Excel Sel C30]",
-      mathFormula: "ROUNDUP(Total Komponen Masuk Total, -3)",
-      calculationSteps: [
-        { label: "Jumlah Seluruh Komponen", formula: "Penjumlahan item bertanda (Ikut Total)", result: `Rp ${totalRaw.toLocaleString("id-ID")}` },
-        { label: "Formula Pembulatan", formula: "Excel ROUNDUP(..., -3) ke atas kelipatan 1.000", result: "Membulatkan ke Rp 1.000 terdekat" },
-        { label: "Total Akhir Tagihan", formula: `ROUNDUP(${totalRaw}, -3)`, result: `Rp ${totalEstimasi.toLocaleString("id-ID")}` },
-      ],
-      rulesAndNotes: [
-        "Seluruh komponen yang diikutsertakan dijumlahkan secara presisi.",
-        "Untuk kepraktisan pembayaran di loket dan perbankan, angka akhir dibulatkan ke atas ke kelipatan seribu terdekat (contoh: Rp 875.280 dibulatkan menjadi Rp 876.000).",
-        "Angka Total Estimasi ini sinkron 100% antara Ringkasan Order dan Faktur/Invoice Tagihan.",
-      ],
+      shortDesc: "Total seluruh komponen biaya resmi Samsat dan jasa yang diikutsertakan dalam tagihan.",
+      humanFormula: "Total Estimasi = Jumlah Seluruh Komponen Masuk Total",
+      roundingRule: "Hasil dibulatkan ke atas ke kelipatan Rp 1.000 terdekat.",
     });
 
     return list;
@@ -523,15 +474,48 @@ export function CalculationExplanationModal({
     overdueYears,
     overdueMonths,
     calendarMonths,
-    durasiText,
     isFreeDenda,
     isR2,
     isR4,
+    isTahunanOr5Tahunan,
+    isBbn,
+    isMutasi,
+    isMutasiLuar,
     estimationResult,
-    vehicleType,
+    serviceType,
     kondisiBerkas,
     wilayahAccId,
+    totalEstimasi,
   ]);
+
+  // When opened with a specific initialItemId, auto-select it or its alias
+  useEffect(() => {
+    if (!open) return;
+    const target = initialItemId || "denda-pkb-pajak-baru";
+    const found = explanationItems.find((i) => i.id === target);
+    if (found) {
+      setSelectedItemId(found.id);
+      return;
+    }
+    // Check aliases
+    if (target === "denda-pkb" || target === "denda-pkb-pajak-baru") {
+      const match = explanationItems.find((i) => i.id === "denda-pkb" || i.id === "denda-pkb-pajak-baru");
+      if (match) { setSelectedItemId(match.id); return; }
+    }
+    if (target === "denda-swdkllj" || target === "denda-swdkllj-pajak-baru") {
+      const match = explanationItems.find((i) => i.id === "denda-swdkllj" || i.id === "denda-swdkllj-pajak-baru");
+      if (match) { setSelectedItemId(match.id); return; }
+    }
+    if (target === "swdkllj" || target === "swdkllj-pajak-baru") {
+      const match = explanationItems.find((i) => i.id === "swdkllj-pajak-baru" || i.id === "swdkllj");
+      if (match) { setSelectedItemId(match.id); return; }
+    }
+    if (target === "proses-dan-acc-id" || target === "acc-id") {
+      const match = explanationItems.find((i) => i.id === "proses-dan-acc-id" || i.id === "acc-id");
+      if (match) { setSelectedItemId(match.id); return; }
+    }
+    setSelectedItemId(explanationItems[0]?.id || "denda-pkb-pajak-baru");
+  }, [initialItemId, open, explanationItems]);
 
   // Filter items based on search and category
   const filteredItems = useMemo(() => {
@@ -578,11 +562,11 @@ export function CalculationExplanationModal({
               </div>
               <div>
                 <DialogTitle className="text-base sm:text-lg font-bold text-foreground flex items-center gap-2">
-                  Detail Rumus & Penjelasan Perhitungan Pajak
+                  Cara Perhitungan & Penjelasan Pajak
                   <Badge
                     variant="outline"
                     className={cn(
-                      "text-[11px] font-mono",
+                      "text-[11px] font-medium",
                       isR2
                         ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
                         : "bg-blue-500/10 text-blue-600 border-blue-500/30"
@@ -590,9 +574,12 @@ export function CalculationExplanationModal({
                   >
                     {isR2 ? "Motor (R2)" : "Mobil (R4)"}
                   </Badge>
+                  <Badge variant="outline" className="text-[11px] font-medium bg-muted text-muted-foreground">
+                    {serviceType}
+                  </Badge>
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                  Panduan transparan cara hitung angka estimasi sesuai Workbook resmi Samsat (DATEDIF & ROUNDUP)
+                  Panduan transparan cara perhitungan estimasi pajak dan rincian biaya layanan Samsat
                 </DialogDescription>
               </div>
             </div>
@@ -630,16 +617,16 @@ export function CalculationExplanationModal({
             </div>
             <div>
               <span className="text-[10px] text-muted-foreground block">
-                {isR2 ? "Bulan Denda R2 (I13)" : "Bulan Keterlambatan"}
+                {isR2 && isTahunanOr5Tahunan ? "Bulan Denda Motor" : "Bulan Keterlambatan"}
               </span>
               <span className="font-mono text-foreground font-semibold text-xs">
-                {overdueMonths} Bulan {isR2 && <span className="text-[10px] text-emerald-600 font-normal">(+5 Bln)</span>}
+                {isR2 && isTahunanOr5Tahunan ? `${overdueMonths} Bulan (+5 Penyesuaian)` : `${overdueMonths} Bulan`}
               </span>
             </div>
             <div>
               <span className="text-[10px] text-muted-foreground block">Total Estimasi</span>
               <strong className="font-mono text-emerald-600 dark:text-emerald-400 text-xs">
-                Rp {(estimationResult?.totalEstimasi ?? 0).toLocaleString("id-ID")}
+                Rp {totalEstimasi.toLocaleString("id-ID")}
               </strong>
             </div>
           </div>
@@ -775,67 +762,30 @@ export function CalculationExplanationModal({
                   </p>
                 </div>
 
-                {/* Formula Section */}
-                <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5 space-y-2 text-xs">
+                {/* Formula & Rule Card */}
+                <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-3 text-xs">
                   <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
-                    <Sparkles className="w-3.5 h-3.5 text-primary" />
-                    Rumus & Aturan Resmi Excel
+                    <Calculator className="w-3.5 h-3.5 text-primary" />
+                    Cara Perhitungan
                   </div>
 
-                  <div className="p-2.5 rounded-md bg-background/80 border border-border/60 font-mono text-xs text-primary font-bold">
-                    {activeItem.excelFormula}
+                  <div className="p-3 rounded-lg bg-background border border-border/70 font-mono text-xs text-primary font-bold leading-relaxed">
+                    {activeItem.humanFormula}
                   </div>
 
-                  <p className="text-[11px] text-muted-foreground">
-                    Format logika: <code className="text-foreground">{activeItem.mathFormula}</code>
-                  </p>
-                </div>
+                  {activeItem.formulaCondition && (
+                    <div className="flex items-start gap-2 pt-1 text-[11px] text-muted-foreground">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 mt-1.5" />
+                      <span>{activeItem.formulaCondition}</span>
+                    </div>
+                  )}
 
-                {/* Step-by-Step Live Calculation Substitution */}
-                <div className="p-4 rounded-xl border border-border bg-card space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <Calculator className="w-3.5 h-3.5 text-primary" />
-                      Langkah Perhitungan dengan Data Saat Ini
-                    </h4>
-                    <span className="text-[10px] text-muted-foreground font-mono">
-                      Substitusi Angka Riil
-                    </span>
-                  </div>
-
-                  <div className="divide-y divide-border/60 rounded-lg border border-border/60 overflow-hidden bg-background">
-                    {activeItem.calculationSteps.map((step, idx) => (
-                      <div
-                        key={idx}
-                        className="p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs hover:bg-muted/30 transition-colors"
-                      >
-                        <div>
-                          <span className="font-medium text-foreground block">
-                            {idx + 1}. {step.label}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground font-mono">
-                            {step.formula}
-                          </span>
-                        </div>
-                        <span className="font-mono font-bold text-foreground text-xs sm:text-right shrink-0">
-                          {step.result}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Notes & Special Rules */}
-                <div className="p-3.5 rounded-xl border border-border/80 bg-muted/20 space-y-2 text-xs">
-                  <h4 className="font-semibold text-foreground flex items-center gap-1.5">
-                    <Info className="w-3.5 h-3.5 text-blue-500" />
-                    Catatan Penting & Penjelasan Bisnis
-                  </h4>
-                  <ul className="space-y-1.5 pl-4 list-disc text-[11px] text-muted-foreground leading-relaxed">
-                    {activeItem.rulesAndNotes.map((note, idx) => (
-                      <li key={idx}>{note}</li>
-                    ))}
-                  </ul>
+                  {activeItem.roundingRule && (
+                    <div className="flex items-start gap-2 pt-0.5 text-[11px] text-muted-foreground">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0 mt-1.5" />
+                      <span>{activeItem.roundingRule}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -846,7 +796,7 @@ export function CalculationExplanationModal({
         <div className="p-3 border-t border-border bg-card/60 flex items-center justify-between text-xs shrink-0">
           <div className="flex items-center gap-1.5 text-muted-foreground text-[11px]">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Formula diverifikasi langsung dengan Workbook Otoritatif Samsat SUN89</span>
+            <span>Perhitungan diverifikasi sesuai ketentuan tarif dan regulasi Samsat terkini</span>
           </div>
 
           <Button

@@ -8,7 +8,28 @@
       <title>Admin SUN89</title>
       <meta name="description" content="Streamline the samsat process by providing detailed order information, mutation tracking, and checklist features for efficient management." />
       <meta name="robots" content="noindex, nofollow" />
-      <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
+      <style>
+        html, body { 
+          height: 100%; 
+          margin: 0; 
+          overflow: hidden; 
+          overscroll-behavior: none; 
+        } 
+        #root { 
+          height: 100%; 
+          overflow: hidden; 
+        }
+        /* Global Number Input Spinner Removal */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+          -webkit-appearance: none !important;
+          margin: 0 !important;
+        }
+        input[type="number"] {
+          -moz-appearance: textfield !important;
+          appearance: textfield !important;
+        }
+      </style>
     </head>
 
     <body class="notranslate" translate="no">

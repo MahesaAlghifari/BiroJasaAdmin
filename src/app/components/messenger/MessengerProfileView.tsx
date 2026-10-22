@@ -42,8 +42,8 @@ export function MessengerProfileView({
 
   // Operational stats for current messenger
   const myTasks = useMemo(() => {
-    return getMessengerTasksForEmployee(activeOrders, currentUser.employeeId || "");
-  }, [activeOrders, currentUser.employeeId]);
+    return getMessengerTasksForEmployee(activeOrders, currentUser);
+  }, [activeOrders, currentUser]);
 
   const completedTasksCount = useMemo(() => {
     return myTasks.filter((t) => t.status === "Selesai" || t.statusCode === "COMPLETED").length;

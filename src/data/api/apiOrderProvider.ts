@@ -18,16 +18,64 @@ export class ApiOrderProvider implements IOrderDataProvider {
   private archivedOrders: OperationalOrder[] = [];
   private listeners: Set<() => void> = new Set();
   private isInitialized = false;
+  private isLoading = false;
+  private error: string | null = null;
 
   constructor(baseUrl = APP_CONFIG.apiBaseUrl) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.initFromApi();
+    if (typeof window === "undefined" || (typeof window !== "undefined" && window.localStorage?.getItem("auth_token"))) {
+      this.initFromApi();
+    }
+  }
+
+  public getIsLoading(): boolean {
+    return this.isLoading;
+  }
+
+  public getError(): string | null {
+    return this.error;
+  }
+
+  public getIsInitialized(): boolean {
+    return this.isInitialized;
+  }
+
+  public async refresh(silent = false): Promise<void> {
+    if (silent) {
+      const authHeaders = this.getAuthHeader();
+      if (!authHeaders.Authorization) return;
+      try {
+        const res = await fetch(`${this.baseUrl}/orders`, {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+        });
+        if (res.ok) {
+          const payload = await res.json();
+          if (payload.success && payload.data) {
+            this.activeOrders = payload.data;
+          }
+        }
+        const archRes = await fetch(`${this.baseUrl}/orders/archived`, {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+        });
+        if (archRes.ok) {
+          const archPayload = await archRes.json();
+          if (archPayload.success && Array.isArray(archPayload.data)) {
+            this.archivedOrders = archPayload.data;
+          }
+        }
+        this.notify();
+      } catch {
+        // Silent background sync error safe fallback
+      }
+    } else {
+      await this.initFromApi();
+    }
   }
 
   private getAuthHeader(): Record<string, string> {
     try {
       if (typeof window !== "undefined" && window.localStorage) {
-        const token = window.localStorage.getItem("auth_token");
+        const token = window.localStorage.getItem("auth_token") || window.localStorage.getItem("sun89_auth_token");
         if (token) {
           return { Authorization: `Bearer ${token}` };
         }
@@ -42,31 +90,62 @@ export class ApiOrderProvider implements IOrderDataProvider {
   }
 
   public async initFromApi(): Promise<void> {
+    const authHeaders = this.getAuthHeader();
+    if (!authHeaders.Authorization) {
+      this.isInitialized = true;
+      this.notify();
+      return;
+    }
+
+    this.isLoading = true;
+    this.error = null;
+    this.notify();
+
     try {
       const res = await fetch(`${this.baseUrl}/orders`, {
-        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+        headers: { "Content-Type": "application/json", ...authHeaders },
       });
-      if (res.ok) {
-        const payload = await res.json();
-        if (payload.success && payload.data) {
-          this.activeOrders = payload.data;
-          this.isInitialized = true;
-          this.notify();
-        }
+      if (res.status === 401 && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sun89_auth_unauthorized"));
+        this.isLoading = false;
+        this.error = "Sesi telah berakhir. Silakan login kembali.";
+        this.notify();
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Gagal memuat data order (HTTP ${res.status})`);
+      }
+
+      const payload = await res.json();
+      if (payload.success && payload.data) {
+        this.activeOrders = payload.data;
+        this.isInitialized = true;
       }
 
       const archRes = await fetch(`${this.baseUrl}/orders/archived`, {
-        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+        headers: { "Content-Type": "application/json", ...authHeaders },
       });
+      if (archRes.status === 401 && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sun89_auth_unauthorized"));
+        this.isLoading = false;
+        this.error = "Sesi telah berakhir. Silakan login kembali.";
+        this.notify();
+        return;
+      }
       if (archRes.ok) {
         const archPayload = await archRes.json();
         if (archPayload.success && Array.isArray(archPayload.data)) {
           this.archivedOrders = archPayload.data;
-          this.notify();
         }
       }
-    } catch {
-      // Offline fallback: retains initial orders safely
+
+      this.isLoading = false;
+      this.error = null;
+      this.notify();
+    } catch (err: any) {
+      this.isLoading = false;
+      this.error = err?.message || "Gagal terhubung ke server backend.";
+      this.notify();
     }
   }
 
@@ -133,6 +212,9 @@ export class ApiOrderProvider implements IOrderDataProvider {
       });
 
       if (!res.ok) {
+        if (res.status === 401 && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("sun89_auth_unauthorized"));
+        }
         let errMessage = `HTTP ${res.status}`;
         try {
           const errPayload = await res.json();
@@ -348,30 +430,209 @@ export class ApiOrderProvider implements IOrderDataProvider {
     return true;
   }
 
-  public verifyPayment(orderNo: string, verifierName: string = "Admin"): boolean {
+  public deleteArchivedOrder(orderNo: string): boolean {
+    const idx = this.archivedOrders.findIndex((o) => o.orderNo === orderNo);
+    if (idx !== -1) {
+      this.archivedOrders.splice(idx, 1);
+      this.notify();
+
+      fetch(`${this.baseUrl}/orders/${encodeURIComponent(orderNo)}/archive`, {
+        method: "DELETE",
+        headers: { ...this.getAuthHeader() },
+      }).catch(() => {
+        // background sync fallback
+      });
+
+      return true;
+    }
+    return false;
+  }
+
+  public clearArchivedOrders(): boolean {
+    this.archivedOrders = [];
+    this.notify();
+
+    fetch(`${this.baseUrl}/orders/archive/clear-all`, {
+      method: "DELETE",
+      headers: { ...this.getAuthHeader() },
+    }).catch(() => {
+      // background sync fallback
+    });
+
+    return true;
+  }
+
+  public async cancelOrder(orderNo: string, reason?: string): Promise<boolean> {
+    const cleanNo = (orderNo || "").trim().toUpperCase();
+    const reasonText = (reason || "").trim() || "Pembatalan melalui Admin";
+
+    // Optimistic update
+    for (const stage of STAGES) {
+      const idx = this.activeOrders[stage]?.findIndex((o) => o.orderNo.toUpperCase() === cleanNo) ?? -1;
+      if (idx !== -1) {
+        const ord = this.activeOrders[stage][idx];
+        this.activeOrders[stage][idx] = {
+          ...ord,
+          currentStageName: "Dibatalkan" as any,
+          stageBeforeCancel: (ord as any).stageBeforeCancel || stage,
+          catatanOrder: `${ord.catatanOrder ? ord.catatanOrder + " | " : ""}Dibatalkan: ${reasonText}`,
+        };
+        (this.activeOrders[stage][idx] as any).isCancelled = true;
+        (this.activeOrders[stage][idx] as any).status = "Dibatalkan";
+        (this.activeOrders[stage][idx] as any).cancellationReason = reasonText;
+        break;
+      }
+    }
+
+    const archIdx = this.archivedOrders.findIndex((o) => o.orderNo.toUpperCase() === cleanNo);
+    if (archIdx !== -1) {
+      const ord = this.archivedOrders[archIdx];
+      this.archivedOrders[archIdx] = {
+        ...ord,
+        currentStageName: "Dibatalkan" as any,
+        catatanOrder: `${ord.catatanOrder ? ord.catatanOrder + " | " : ""}Dibatalkan: ${reasonText}`,
+      };
+      (this.archivedOrders[archIdx] as any).isCancelled = true;
+      (this.archivedOrders[archIdx] as any).status = "Dibatalkan";
+      (this.archivedOrders[archIdx] as any).cancellationReason = reasonText;
+    }
+
+    this.notify();
+
+    try {
+      const res = await fetch(`${this.baseUrl}/orders/${encodeURIComponent(cleanNo)}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+        body: JSON.stringify({ reason: reasonText }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const errorMsg = errData.error?.message || errData.message || `Gagal membatalkan order (HTTP ${res.status})`;
+        throw new Error(errorMsg);
+      }
+
+      const resJson = await res.json().catch(() => ({}));
+      const updatedOrder: OperationalOrder | undefined = resJson.data;
+
+      if (updatedOrder) {
+        let placed = false;
+        for (const stage of STAGES) {
+          const idx = this.activeOrders[stage]?.findIndex((o) => o.orderNo.toUpperCase() === cleanNo) ?? -1;
+          if (idx !== -1) {
+            this.activeOrders[stage][idx] = {
+              ...this.activeOrders[stage][idx],
+              ...updatedOrder,
+              currentStageName: "Dibatalkan" as any,
+              stageBeforeCancel: (this.activeOrders[stage][idx] as any).stageBeforeCancel || stage,
+            };
+            (this.activeOrders[stage][idx] as any).isCancelled = true;
+            (this.activeOrders[stage][idx] as any).status = "Dibatalkan";
+            (this.activeOrders[stage][idx] as any).cancellationReason = reasonText;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          const aIdx = this.archivedOrders.findIndex((o) => o.orderNo.toUpperCase() === cleanNo);
+          if (aIdx !== -1) {
+            this.archivedOrders[aIdx] = {
+              ...this.archivedOrders[aIdx],
+              ...updatedOrder,
+              currentStageName: "Dibatalkan" as any,
+            };
+            (this.archivedOrders[aIdx] as any).isCancelled = true;
+            (this.archivedOrders[aIdx] as any).status = "Dibatalkan";
+            (this.archivedOrders[aIdx] as any).cancellationReason = reasonText;
+            placed = true;
+          }
+        }
+        if (!placed) {
+          this.archivedOrders.unshift({
+            ...updatedOrder,
+            currentStageName: "Dibatalkan" as any,
+            isCancelled: true,
+            status: "Dibatalkan",
+            cancellationReason: reasonText,
+          });
+        }
+      }
+
+      this.notify();
+      return true;
+    } catch (err) {
+      console.error("Failed to cancel order on backend:", err);
+      throw err;
+    }
+  }
+
+  public verifyPayment(orderNo: string, verifierName: string = "Admin", confirmedAmount?: number, notes?: string, proofPayload?: any): boolean {
     const targetOrder = this.getOrderByNo(orderNo);
     if (!targetOrder) return false;
 
     const nowStr = new Date().toISOString();
+    const totalBiaya = targetOrder.payment?.totalBiaya || targetOrder.totalEstimasi || 0;
+    const paid = confirmedAmount !== undefined
+      ? Math.max(0, confirmedAmount)
+      : (targetOrder.payment?.nominalDibayarAwal !== undefined
+          ? targetOrder.payment.nominalDibayarAwal
+          : (targetOrder.payment?.dibayar && targetOrder.payment.dibayar > 0 ? targetOrder.payment.dibayar : totalBiaya));
+    const sisa = Math.max(0, totalBiaya - paid);
+    const overpayment = Math.max(0, paid - totalBiaya);
+    const statusPembayaran = paid >= totalBiaya ? "Lunas" : paid > 0 ? "Kurang Bayar" : "Belum Bayar";
+
+    const prev = targetOrder.payment?.nominalPembayaranAwalTerkonfirmasi ?? targetOrder.payment?.nominalDibayarAwal ?? targetOrder.payment?.dibayar ?? 0;
+    const riwayat = [...(targetOrder.payment?.riwayatKoreksiPembayaran || [])];
+    if (prev !== paid || notes) {
+      riwayat.push({
+        nominalLama: prev,
+        nominalBaru: paid,
+        tanggal: nowStr,
+        admin: verifierName,
+        catatan: notes,
+      });
+    }
+
     const updatedPayment = {
       ...targetOrder.payment,
       isPaymentVerified: true,
       paymentVerifiedAt: nowStr,
       paymentVerifiedBy: verifierName,
-      statusPembayaran: "Lunas" as const,
-      dibayar: targetOrder.payment.totalBiaya,
-      kurang: 0,
+      nominalPembayaranAwalTerkonfirmasi: paid,
+      statusPembayaran: statusPembayaran as any,
+      dibayar: paid,
+      kurang: sisa,
+      overpayment,
       tanggalBayar: nowStr.split("T")[0],
+      riwayatKoreksiPembayaran: riwayat,
     };
 
     // Update in-memory state
     this.updateOrder(orderNo, { payment: updatedPayment });
 
     // Persist to dedicated Express endpoint /api/orders/:orderNo/verify-payment
+    const effectiveProof = proofPayload || targetOrder.payment?.buktiPembayaran;
+    const existingRecords = targetOrder.payment?.paymentRecords || [];
+    const newRecord: any = {
+      id: `pay-verif-${Date.now()}`,
+      nominal: paid,
+      tanggal: nowStr,
+      metodePembayaran: targetOrder.payment?.metodePembayaran || "Transfer Bank",
+      namaBank: targetOrder.payment?.namaBank,
+      namaRekening: targetOrder.payment?.namaRekening,
+      noRekening: targetOrder.payment?.noRekening,
+      buktiPembayaran: effectiveProof,
+      statusVerifikasi: "TERVERIFIKASI",
+      verifiedAt: nowStr,
+      verifiedBy: verifierName,
+      catatan: notes,
+    };
+    updatedPayment.buktiPembayaran = effectiveProof;
+    updatedPayment.paymentRecords = [...existingRecords, newRecord];
+
     fetch(`${this.baseUrl}/orders/${encodeURIComponent(orderNo)}/verify-payment`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
-      body: JSON.stringify({ verifierName }),
+      body: JSON.stringify({ verifierName, confirmedAmount: paid, notes, buktiPembayaran: effectiveProof }),
     }).catch(() => {
       // background sync fallback
     });

@@ -14,6 +14,7 @@ import { MessengerTasksView } from "./MessengerTasksView";
 import { MessengerSamsatView } from "./MessengerSamsatView";
 import { MessengerReimbursementView } from "./MessengerReimbursementView";
 import { MessengerProfileView } from "./MessengerProfileView";
+import { HeaderReloadButton } from "../../utils/useLiveSync";
 import { cn } from "../ui/utils";
 
 interface MessengerWorkspaceProps {
@@ -51,7 +52,7 @@ export function MessengerWorkspace({ onLogout, currentUser }: MessengerWorkspace
   };
 
   return (
-    <div className="min-h-screen w-full bg-background flex flex-col text-left">
+    <div className="h-full w-full bg-background flex flex-col text-left overflow-y-auto overscroll-contain">
       {/* Top Navbar Header (Clean & Readable, No Theme Toggle) */}
       <header className="sticky top-0 z-30 w-full border-b border-border/80 bg-card/95 backdrop-blur-md shadow-2xs">
         <div className="w-full max-w-xl md:max-w-4xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
@@ -78,8 +79,12 @@ export function MessengerWorkspace({ onLogout, currentUser }: MessengerWorkspace
             </div>
           </div>
 
-          {/* User Profile Chip (Navigates to Profile Tab) */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Realtime Live Sync & Reload + User Profile Chip */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <HeaderReloadButton
+              variant="messenger"
+              toastMessage="Kondisi tugas terkini diperbarui"
+            />
             <button
               onClick={() => setCurrentTab("profil")}
               className={cn(
@@ -106,8 +111,8 @@ export function MessengerWorkspace({ onLogout, currentUser }: MessengerWorkspace
         </div>
       </header>
 
-      {/* Main Workspace Content Area (Mobile-First max-w-xl, safe padding pb-28) */}
-      <main className="flex-1 w-full max-w-xl md:max-w-4xl mx-auto px-4 py-4 pb-28 overflow-x-hidden">
+      {/* Main Workspace Content Area (Mobile-First max-w-xl, safe padding pb-32 to clear bottom bar) */}
+      <main className="flex-1 w-full max-w-xl md:max-w-4xl mx-auto px-4 py-4 pb-32 overflow-x-hidden">
         <ErrorBoundary fallbackTitle="Terjadi kesalahan pada Workspace Messenger">
           <div className="w-full animate-in fade-in duration-150">
             {currentTab === "tugas" && (

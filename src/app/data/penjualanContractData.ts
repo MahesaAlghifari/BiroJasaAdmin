@@ -3,6 +3,8 @@ import { FieldConfig } from "../components/FinanceAddPage";
 import { formatDateDDMMYYYY } from "../utils/financeFormatters";
 import type { OperationalOrder } from "../../domain/order/types";
 import type { InvoiceBillingRecord, PenjualanContractCategory } from "../../domain/finance/types";
+import { pricingStore } from "./pricingStore";
+import { paymentMethodStore } from "./paymentMethodStore";
 
 /**
  * EXACT DATA PENJUALAN COLUMN CONTRACT (Requirements 11 & 12)
@@ -11,18 +13,20 @@ import type { InvoiceBillingRecord, PenjualanContractCategory } from "../../doma
 
 export const MUTASI_LD_COLUMNS_CONTRACT = [
   "Tanggal Masuk Berkas",
+  "Nomor Order",
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
+  "Sisa Tagihan",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Uang Keluar Biro Jasa",
   "Profit",
   "Status Pengerjaan",
   "Status Pembayaran",
@@ -36,18 +40,22 @@ export const MUTASI_LD_COLUMNS_CONTRACT = [
 
 export const MUTASI_AS_COLUMNS_CONTRACT = [
   "Tanggal Masuk Berkas",
+  "Nomor Order",
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
+  "Sisa Tagihan",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Biaya Pokok Samsat",
+  "Biaya Jasa",
+  "Biaya Antar Jemput",
   "Profit",
   "Status Pengerjaan",
   "Status Pembayaran",
@@ -61,18 +69,22 @@ export const MUTASI_AS_COLUMNS_CONTRACT = [
 
 export const BBN_COLUMNS_CONTRACT = [
   "Tanggal Masuk Berkas",
+  "Nomor Order",
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
+  "Sisa Tagihan",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Biaya Pokok Samsat",
+  "Biaya Jasa",
+  "Biaya Antar Jemput",
   "Profit",
   "Status Pengerjaan",
   "Status Pembayaran",
@@ -85,18 +97,22 @@ export const BBN_COLUMNS_CONTRACT = [
 
 export const PERPANJANGAN_PAJAK_COLUMNS_CONTRACT = [
   "Tanggal Masuk Berkas",
+  "Nomor Order",
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
+  "Sisa Tagihan",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Biaya Pokok Samsat",
+  "Biaya Jasa",
+  "Biaya Antar Jemput",
   "Profit",
   "Status Pengerjaan",
   "Status Pembayaran",
@@ -107,18 +123,22 @@ export const PERPANJANGAN_PAJAK_COLUMNS_CONTRACT = [
 
 export const LAIN_LAIN_COLUMNS_CONTRACT = [
   "Tanggal Masuk Berkas",
+  "Nomor Order",
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
+  "Sisa Tagihan",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Biaya Pokok Samsat",
+  "Biaya Jasa",
+  "Biaya Antar Jemput",
   "Profit",
   "Status Pengerjaan",
   "Status Pembayaran",
@@ -132,17 +152,19 @@ export const BELUM_KURANG_BAYAR_COLUMNS_CONTRACT = [
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Biaya Pokok Samsat",
+  "Biaya Jasa",
+  "Biaya Antar Jemput",
   "Profit",
-  "Status",
+  "Status Pembayaran",
   "No Invoice",
   "Tanggal Invoice",
   "Tanda Terima",
@@ -155,17 +177,19 @@ export const PROFIT_TERPENDING_COLUMNS_CONTRACT = [
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Biaya Pokok Samsat",
+  "Biaya Jasa",
+  "Biaya Antar Jemput",
   "Profit",
-  "Status",
+  "Status Pembayaran",
   "No Invoice",
   "Tanggal Invoice",
   "Tanda Terima",
@@ -176,17 +200,19 @@ export const CASHBACK_TERPENDING_COLUMNS_CONTRACT = [
   "R4 / R2",
   "Plat No",
   "Nama Customer",
-  "Nama",
+  "Nama Pemilik (STNK/BPKB)",
   "Jenis Pengurusan",
   "Samsat",
-  "Jenis Bayar",
+  "Skema Pembayaran",
   "Tanggal Uang Masuk",
   "Uang Masuk dari Konsumen",
   "Bank Uang Keluar",
   "Tanggal Uang Keluar",
-  "Uang Keluar dari Biro Jasa",
+  "Biaya Pokok Samsat",
+  "Biaya Jasa",
+  "Biaya Antar Jemput",
   "Profit",
-  "Status",
+  "Status Pembayaran",
   "No Invoice",
   "Tanggal Invoice",
   "Tanda Terima",
@@ -202,6 +228,7 @@ export function buildTableColumnsFromContract(columnList: readonly string[]): Co
     const isFilterableText =
       colName === "Plat No" ||
       colName === "Nama Customer" ||
+      colName === "Nama Pemilik (STNK/BPKB)" ||
       colName === "Nama" ||
       colName === "Jenis Pengurusan" ||
       colName === "No Invoice" ||
@@ -209,10 +236,11 @@ export function buildTableColumnsFromContract(columnList: readonly string[]): Co
       colName === "TTB BPKB";
 
     const isR4R2 = colName === "R4 / R2";
-    const isJenisBayar = colName === "Jenis Bayar";
+    const isSkemaBayar = colName === "Skema Pembayaran" || colName === "Jenis Bayar";
+    const isMetodeBayar = colName === "Metode Pembayaran";
+    const isPhone = colName === "No HP" || colName === "Nomor HP";
     const isStatusPengerjaan = colName === "Status Pengerjaan";
-    const isStatusPembayaran = colName === "Status Pembayaran";
-    const isStatus = colName === "Status";
+    const isStatusPembayaran = colName === "Status Pembayaran" || colName === "Status";
     const isStatusBPKB = colName === "Status BPKB";
     const isBPKB = colName === "BPKB";
 
@@ -230,22 +258,25 @@ export function buildTableColumnsFromContract(columnList: readonly string[]): Co
       baseCol.filterable = true;
       baseCol.filterType = "select";
       baseCol.filterOptions = ["R4", "R2"];
-    } else if (isJenisBayar) {
+    } else if (isPhone) {
+      baseCol.filterable = true;
+      baseCol.filterType = "text";
+    } else if (isSkemaBayar) {
       baseCol.filterable = true;
       baseCol.filterType = "select";
-      baseCol.filterOptions = ["Transfer", "Cash", "Tempo"];
+      baseCol.filterOptions = ["Bayar di Awal", "Bayar di Akhir", "Tempo"];
+    } else if (isMetodeBayar) {
+      baseCol.filterable = true;
+      baseCol.filterType = "select";
+      baseCol.filterOptions = ["Transfer Bank BCA", "Transfer BCA", "Transfer Mandiri", "Transfer BRI", "Cash", "QRIS", "-"];
     } else if (isStatusPengerjaan) {
       baseCol.filterable = true;
       baseCol.filterType = "select";
-      baseCol.filterOptions = ["Dalam Proses", "Menunggu Arsip", "Selesai", "-"];
+      baseCol.filterOptions = ["Dalam Proses", "Menunggu Arsip", "Selesai", "Pending", "-"];
     } else if (isStatusPembayaran) {
       baseCol.filterable = true;
       baseCol.filterType = "select";
-      baseCol.filterOptions = ["Belum Lunas", "Kurang Bayar", "Lunas", "Kelebihan Bayar", "Tagihan Tidak Tersedia"];
-    } else if (isStatus) {
-      baseCol.filterable = true;
-      baseCol.filterType = "select";
-      baseCol.filterOptions = ["Selesai", "Proses", "Pending", "Belum Bayar", "Kurang Bayar", "Dalam Proses", "Menunggu Arsip", "Lunas", "Tagihan Tidak Tersedia"];
+      baseCol.filterOptions = ["Belum Bayar", "Kurang Bayar", "Lunas", "Kelebihan Bayar"];
     } else if (isStatusBPKB) {
       baseCol.filterable = true;
       baseCol.filterType = "select";
@@ -266,44 +297,188 @@ export function buildTableColumnsFromContract(columnList: readonly string[]): Co
 /**
  * Helper to build FieldConfig for add/edit pages matching exact contract
  */
-export function buildFieldsFromContract(columnList: readonly string[]): FieldConfig[] {
-  return columnList.map((colName) => {
+export function buildFieldsFromContract(
+  columnList: readonly string[],
+  category?: PenjualanContractCategory | string
+): FieldConfig[] {
+  const fields: FieldConfig[] = columnList.map((colName) => {
     const isDate = colName.toLowerCase().includes("tanggal");
     const isNumber =
       colName.toLowerCase().includes("uang") ||
       colName.toLowerCase().includes("profit") ||
-      colName.toLowerCase().includes("cashback");
+      colName.toLowerCase().includes("cashback") ||
+      colName.toLowerCase().includes("kekurangan") ||
+      colName.toLowerCase().includes("biaya");
     const label = colName === "Plat No" ? "Nomor Polisi" : colName;
 
-    // Phase 9.2: Canonical derived fields are strictly read-only in table edit/add forms
+    if (colName === "Plat No" || colName === "Nomor Polisi") {
+      return {
+        key: colName,
+        label,
+        type: "plate-number" as any,
+        placeholder: "B 1234 ABC",
+        helpText: "Nomor polisi standar 3 kotak: [Plat Depan] [Nomor] [Plat Belakang]",
+      };
+    }
+    if (colName === "Samsat" || colName === "Samsat Asal" || colName === "Wilayah Samsat") {
+      const samsatLabel = (category === "mutasi-ld" && colName === "Samsat") ? "Samsat Asal" : label;
+      return {
+        key: colName,
+        label: samsatLabel,
+        type: "samsat-select" as any,
+        placeholder: "Pilih kantor Samsat asal...",
+        helpText: "Kantor Samsat asal sesuai STNK/BPKB (data master resmi)",
+      };
+    }
+    if (colName === "Samsat Tujuan") {
+      return {
+        key: colName,
+        label,
+        type: "samsat-select" as any,
+        placeholder: "Pilih kantor Samsat tujuan...",
+        helpText: "Kantor Samsat tujuan untuk berkas mutasi (data master resmi)",
+      };
+    }
+    if (colName === "Jenis Pengurusan" || colName === "Layanan") {
+      const availServices = typeof pricingStore.getAvailableServices === "function"
+        ? pricingStore.getAvailableServices()
+        : [];
+      return {
+        key: colName,
+        label,
+        type: "select",
+        options: availServices.length > 0 ? availServices : ["Perpanjangan 1 Tahun", "Perpanjangan 5 Tahun", "Balik Nama", "Mutasi Antar Samsat", "Mutasi Luar Daerah"],
+        placeholder: "Pilih jenis pengurusan",
+        helpText: "Pilih jenis layanan resmi biro jasa",
+      };
+    }
+
+    if (colName === "Nomor Order" || colName === "No Order") {
+      return {
+        key: colName,
+        label,
+        type: "text",
+        readOnly: true,
+        placeholder: "(Dibuat otomatis oleh sistem saat simpan)",
+        helpText: "Nomor order kanonis terhubung dengan Order Tracking (otomatis dibuat oleh sistem)",
+      };
+    }
+    if (colName === "Sisa Tagihan" || colName === "Kekurangan") {
+      return {
+        key: colName,
+        label,
+        type: "number",
+        readOnly: true,
+        helpText: "Dihitung otomatis dari Total Tagihan - Uang Masuk Terverifikasi (read-only)",
+      };
+    }
+    if (colName === "Jenis Pengurusan") {
+      const isMutasiLD = category === "mutasi-ld";
+      return {
+        key: colName,
+        label,
+        type: isMutasiLD ? "text" : "select",
+        readOnly: isMutasiLD ? true : false,
+        placeholder: "Mutasi Luar Daerah",
+        helpText: isMutasiLD
+          ? "Otomatis Mutasi Luar Daerah untuk halaman Mutasi LD (read-only)"
+          : "Jenis layanan pengurusan berkas",
+        options: ["Mutasi Luar Daerah", "Mutasi Antar Samsat", "Balik Nama", "Perpanjangan Pajak", "Lain-Lain"],
+      };
+    }
+    if (colName === "Uang Masuk dari Konsumen") {
+      const isMutasiLD = category === "mutasi-ld";
+      return {
+        key: colName,
+        label,
+        type: "number",
+        readOnly: isMutasiLD ? false : true,
+        placeholder: "0",
+        helpText: isMutasiLD
+          ? "Nominal uang yang diterima dari konsumen (dapat diisi manual)"
+          : "Dikelola melalui pencatatan pembayaran terverifikasi dengan bukti transfer (read-only)",
+      };
+    }
+    if (colName === "Nama Pemilik (STNK/BPKB)" || colName === "Nama") {
+      return {
+        key: colName,
+        label,
+        type: "text",
+        placeholder: "Nama pemilik kendaraan sesuai STNK/BPKB",
+        helpText: "Nama wajib pajak yang tertera pada dokumen legal kendaraan",
+      };
+    }
+    if (colName === "Biaya Pokok Samsat" || colName === "Uang Keluar Biro Jasa" || colName === "Uang Keluar dari Biro Jasa") {
+      const isMutasiLD = category === "mutasi-ld";
+      return {
+        key: colName,
+        label,
+        type: "number",
+        readOnly: isMutasiLD ? false : true,
+        placeholder: "0",
+        helpText: isMutasiLD
+          ? "Uang keluar biro jasa untuk biaya pokok pengurusan Samsat (dapat diisi manual sesuai kebutuhan transaksi)"
+          : "Dikelola melalui biaya riil Samsat / Kas Kantor (read-only)",
+      };
+    }
+    if (colName === "Jumlah Cashback") {
+      return {
+        key: colName,
+        label,
+        type: "number",
+        readOnly: true,
+        placeholder: "0",
+        helpText: "Dihitung otomatis dari kelebihan uang masuk terhadap total tagihan konsumen (read-only)",
+      };
+    }
+    if (colName === "Profit") {
+      return {
+        key: colName,
+        label,
+        type: "number",
+        readOnly: true,
+        helpText: "Dihitung otomatis dari selisih penerimaan dan biaya riil (read-only)",
+      };
+    }
+    if (colName === "No HP" || colName === "Nomor HP") {
+      return {
+        key: colName,
+        label,
+        type: "text",
+        placeholder: "Contoh: 081289123456",
+        helpText: "Nomor kontak / WhatsApp pelanggan",
+      };
+    }
+    if (colName === "Metode Pembayaran") {
+      return {
+        key: colName,
+        label,
+        type: "select",
+        options: ["Transfer Bank BCA", "Transfer Bank Mandiri", "Transfer Bank BRI", "Cash", "QRIS"],
+        helpText: "Metode atau rekening pembayaran",
+      };
+    }
     if (colName === "Status Pengerjaan") {
+      const isMutasiLD = category === "mutasi-ld";
       return {
         key: colName,
         label,
         type: "select",
-        options: ["Dalam Proses", "Menunggu Arsip", "Selesai", "-"],
         readOnly: true,
-        helpText: "Diturunkan dari tahapan order kanonis (read-only)",
+        options: ["Selesai", "Dalam Proses", "Menunggu Arsip", "Dibatalkan", "-"],
+        helpText: isMutasiLD
+          ? "Otomatis diset Selesai khusus registrasi transaksi Mutasi LD (read-only)"
+          : "Status tahapan pemrosesan berkas ditentukan oleh Order Tracking (read-only)",
       };
     }
-    if (colName === "Status Pembayaran") {
+    if (colName === "Status Pembayaran" || colName === "Status") {
       return {
         key: colName,
         label,
         type: "select",
-        options: ["Belum Lunas", "Kurang Bayar", "Lunas", "Kelebihan Bayar", "Tagihan Tidak Tersedia"],
         readOnly: true,
-        helpText: "Diturunkan dari invoice & mutasi pembayaran kanonis (read-only)",
-      };
-    }
-    if (colName === "Status") {
-      return {
-        key: colName,
-        label,
-        type: "select",
-        options: ["Selesai", "Proses", "Pending", "Belum Bayar", "Kurang Bayar", "Dalam Proses", "Menunggu Arsip", "Lunas", "Tagihan Tidak Tersedia"],
-        readOnly: true,
-        helpText: "Diturunkan secara kanonis (read-only)",
+        options: ["Belum Bayar", "Kurang Bayar", "Lunas", "Kelebihan Bayar"],
+        helpText: "Status pelunasan pembayaran customer ditentukan oleh kas masuk (read-only)",
       };
     }
     if (colName === "No Invoice") {
@@ -312,7 +487,8 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
         label,
         type: "text",
         readOnly: true,
-        helpText: "Nomor invoice kanonis terdaftar",
+        placeholder: "Contoh: INV/2024/001",
+        helpText: "Nomor faktur invoice penjualan kanonis (read-only)",
       };
     }
     if (colName === "Tanggal Invoice") {
@@ -320,8 +496,7 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
         key: colName,
         label,
         type: "date",
-        readOnly: true,
-        helpText: "Diturunkan dari tanggal invoice kanonis",
+        helpText: "Tanggal terbit invoice",
       };
     }
     if (colName === "Tanda Terima") {
@@ -329,8 +504,8 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
         key: colName,
         label,
         type: "text",
-        readOnly: true,
-        helpText: "Nomor tanda terima kanonis",
+        placeholder: "Nomor tanda terima berkas",
+        helpText: "Nomor tanda terima invoice/dokumen",
       };
     }
     if (colName === "Profit") {
@@ -339,18 +514,16 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
         label,
         type: "number",
         placeholder: "0",
-        readOnly: true,
-        helpText: "Dihitung otomatis: Uang Masuk - Uang Keluar",
+        helpText: "Margin profit / keuntungan bersih",
       };
     }
-    if (colName === "Uang Keluar dari Biro Jasa") {
+    if (colName === "Biaya Pokok Samsat" || colName === "Uang Keluar Biro Jasa" || colName === "Uang Keluar dari Biro Jasa") {
       return {
         key: colName,
         label,
         type: "number",
         placeholder: "0",
-        readOnly: true,
-        helpText: "Total biaya pokok pengerjaan biro jasa",
+        helpText: "Modal / uang keluar pengurusan resmi Samsat (PKB, SWDKLLJ, PNBP)",
       };
     }
     if (colName === "Status BPKB") {
@@ -358,9 +531,8 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
         key: colName,
         label,
         type: "select",
-        options: ["Selesai", "Proses"],
-        readOnly: true,
-        helpText: "Diturunkan dari dokumen order",
+        options: ["Selesai", "Proses", "Sudah Diambil", "Belum Diambil"],
+        helpText: "Status dokumen BPKB",
       };
     }
     if (colName === "TTB BPKB") {
@@ -368,8 +540,8 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
         key: colName,
         label,
         type: "text",
-        readOnly: true,
-        helpText: "Nomor tanda terima berkas BPKB",
+        placeholder: "Nomor tanda terima berkas BPKB",
+        helpText: "Nomor tanda terima BPKB",
       };
     }
 
@@ -379,11 +551,22 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
     if (colName === "R4 / R2") {
       return { key: colName, label, type: "select", options: ["R4", "R2"] };
     }
-    if (colName === "Jenis Bayar") {
-      return { key: colName, label, type: "select", options: ["Transfer", "Cash", "Tempo"] };
+    if (colName === "Skema Pembayaran" || colName === "Jenis Bayar") {
+      return { key: colName, label, type: "select", options: ["Bayar di Awal", "Bayar di Akhir", "Tempo"] };
     }
     if (colName === "Bank Uang Keluar") {
-      return { key: colName, label, type: "select", options: ["BCA", "Mandiri", "BRI", "BNI", "Kas Kantor", "Kas Messenger", "Cash"] };
+      const activeMethods = paymentMethodStore.getActive().map((m) => m.nama_metode);
+      const defaultBankList = ["Transfer BCA", "Transfer Mandiri", "Transfer BRI", "Cash", "QRIS"];
+      const baseOptions = activeMethods.length > 0 ? activeMethods : defaultBankList;
+      const options = Array.from(new Set([...baseOptions, "Kas Kantor", "Kas Messenger", "Lainnya"]));
+      return {
+        key: colName,
+        label,
+        type: "select",
+        options,
+        placeholder: "Pilih metode pembayaran / kas...",
+        helpText: "Metode pembayaran atau kas perbankan keluar",
+      };
     }
     if (colName === "BPKB") {
       return { key: colName, label, type: "select", options: ["Ada", "Belum"] };
@@ -393,6 +576,46 @@ export function buildFieldsFromContract(columnList: readonly string[]): FieldCon
     }
     return { key: colName, label, type: "text" };
   });
+
+  // Complete historical fields: ensure contact, destination, and cashback are accessible
+  if (!columnList.includes("Jumlah Cashback" as any)) {
+    fields.push({
+      key: "Jumlah Cashback",
+      label: "Jumlah Cashback (Rp)",
+      type: "number",
+      placeholder: "0",
+      helpText: "Nilai cashback yang dijanjikan/terpending (jika ada)",
+    });
+  }
+  if (!columnList.some(c => c.toLowerCase().includes("telepon") || c.toLowerCase().includes("hp"))) {
+    fields.push({
+      key: "Nomor HP",
+      label: "Nomor HP / WhatsApp Customer",
+      type: "text",
+      placeholder: "0812...",
+      helpText: "Kontak customer untuk konfirmasi & tagihan (wajib)",
+    });
+  }
+  if (!columnList.some(c => c.toLowerCase().includes("alamat"))) {
+    fields.push({
+      key: "Alamat",
+      label: "Alamat Lengkap Customer",
+      type: "text",
+      placeholder: "Contoh: Jl. Pajajaran No. 12, Bogor",
+      helpText: "Alamat aktual domisili/kantor customer (wajib)",
+    });
+  }
+  if (!columnList.includes("Samsat Tujuan" as any)) {
+    fields.push({
+      key: "Samsat Tujuan",
+      label: "Samsat Tujuan (Mutasi)",
+      type: "samsat-select" as any,
+      placeholder: "Pilih kantor Samsat tujuan (jika mutasi)...",
+      helpText: "Kantor Samsat tujuan untuk mutasi berkas (data master resmi)",
+    });
+  }
+
+  return fields;
 }
 
 /**
@@ -450,7 +673,13 @@ export function deriveStatusPengerjaan(
   order?: Partial<OperationalOrder> | null,
   isArchived: boolean = false
 ): string {
-  if (!order || typeof order.currentStep !== "number" || isNaN(order.currentStep)) {
+  if (!order) {
+    return "-";
+  }
+  if ((order as any).isCancelled || order.currentStageName === "Dibatalkan" || (order as any).status === "Dibatalkan") {
+    return "Dibatalkan";
+  }
+  if (typeof order.currentStep !== "number" || isNaN(order.currentStep)) {
     return "-";
   }
   const step = order.currentStep;
@@ -466,58 +695,84 @@ export function deriveStatusPengerjaan(
 
 /**
  * Authoritatively derives Status Pembayaran from a linked invoice and optional order context.
- * - "Tagihan Tidak Tersedia": No verified linked invoice, missing totals, or NaN
- * - "Kelebihan Bayar": Overpayment with refundStatus === "PENDING" (NEVER show "Lunas" while refund is pending)
- * - "Lunas": Fully paid (terbayar >= totalTagihan) and refund is not pending (or refundStatus === "PROCESSED")
- * - "Kurang Bayar": Partially paid (0 < terbayar < totalTagihan)
- * - "Belum Lunas": Unpaid invoice (terbayar === 0 && totalTagihan > 0)
- * Phase 9.1 Dual Status Integration.
+ * Strict Accounting Rule:
+ * Status Pembayaran ONLY reflects payment received vs. total obligation:
+ * - "Belum Bayar": 0 paid, total > 0
+ * - "Kurang Bayar": 0 < paid < total
+ * - "Lunas": paid >= total (or explicitly marked Lunas)
+ * - "Kelebihan Bayar": Overpayment with refund pending
+ * - "Tagihan Tidak Tersedia": Missing totals or unlinked
+ *
+ * NOTE: Status pengerjaan, Profit Terpending, and Cashback Terpending are strictly separated!
+ * Transactions paid in full MUST remain "Lunas" even if Samsat work is not yet finished.
  */
 export function deriveStatusPembayaran(
   invoice?: InvoiceBillingRecord | null,
   order?: Partial<OperationalOrder> | null
-): string {
-  if (!invoice) {
+): "Belum Bayar" | "Kurang Bayar" | "Lunas" | "Kelebihan Bayar" | "Tagihan Tidak Tersedia" {
+  if (!invoice && !order) {
     return "Tagihan Tidak Tersedia";
   }
 
-  const total = typeof invoice.totalTagihan === "number" ? invoice.totalTagihan : NaN;
-  const paid =
-    typeof invoice.terbayar === "number"
-      ? invoice.terbayar
-      : typeof invoice.dibayar === "number"
-      ? invoice.dibayar
-      : invoice.status === "Lunas" && typeof invoice.totalTagihan === "number"
+  const total =
+    typeof invoice?.totalTagihan === "number" && !isNaN(invoice.totalTagihan)
       ? invoice.totalTagihan
+      : typeof order?.payment?.totalBiaya === "number" && !isNaN(order.payment.totalBiaya)
+      ? order.payment.totalBiaya
+      : typeof order?.totalEstimasi === "number" && !isNaN(order.totalEstimasi)
+      ? order.totalEstimasi
+      : NaN;
+
+  const paid =
+    typeof invoice?.terbayar === "number" && !isNaN(invoice.terbayar)
+      ? invoice.terbayar
+      : typeof invoice?.dibayar === "number" && !isNaN(invoice.dibayar)
+      ? invoice.dibayar
+      : typeof order?.payment?.dibayar === "number" && !isNaN(order.payment.dibayar)
+      ? order.payment.dibayar
+      : invoice?.status === "Lunas" && typeof total === "number" && !isNaN(total) && total > 0
+      ? total
       : 0;
 
-  if (isNaN(total) || total <= 0 || isNaN(paid) || paid < 0) {
+  if (
+    order?.currentStageName === "Dibatalkan" ||
+    (order as any)?.isCancelled ||
+    (order as any)?.status === "Dibatalkan" ||
+    invoice?.billingStatus === "CANCELLED" ||
+    (invoice?.status as any) === "CANCELLED" ||
+    (invoice as any)?.isCancelled
+  ) {
+    return "Dibatalkan" as any;
+  }
+
+  if (isNaN(total) || total < 0 || isNaN(paid) || paid < 0) {
     return "Tagihan Tidak Tersedia";
   }
 
-  const refundStatus = invoice.refundStatus || order?.refundStatus || order?.payment?.refundStatus;
-  const settlementCondition = invoice.settlementCondition || order?.settlementCondition || order?.payment?.settlementCondition;
-
-  // Overpayment with pending refund (Never show "Lunas" while refund is pending)
-  if (paid > total || settlementCondition === "OVERPAID" || refundStatus === "PENDING") {
-    if (refundStatus === "PENDING") {
-      return "Kelebihan Bayar";
-    }
+  // Decision 5: Canonical 4 payment statuses (refund status is separated)
+  // 1. Kelebihan Bayar: pembayaran terverifikasi melebihi total tagihan
+  if (paid > total || (invoice as any)?.settlementCondition === "OVERPAID") {
+    return "Kelebihan Bayar";
   }
 
-  // Fully paid
-  if (paid >= total) {
+  // 2. Lunas: pembayaran terverifikasi sama dengan total tagihan
+  if (paid === total && total > 0) {
     return "Lunas";
   }
 
-  // Partially paid
+  // If explicit Lunas status
+  if (invoice?.status === "Lunas" || (order?.payment?.status && order.payment.status.toLowerCase() === "lunas")) {
+    return "Lunas";
+  }
+
+  // 3. Kurang Bayar: pembayaran terverifikasi lebih dari nol tetapi masih kurang dari total tagihan
   if (paid > 0 && paid < total) {
     return "Kurang Bayar";
   }
 
-  // Unpaid
+  // 4. Belum Bayar: belum ada pembayaran terverifikasi
   if (paid === 0) {
-    return "Belum Lunas";
+    return "Belum Bayar";
   }
 
   return "Tagihan Tidak Tersedia";
@@ -533,8 +788,6 @@ export function projectOrderToContractRow(
   invoice?: InvoiceBillingRecord,
   isArchived: boolean = false
 ): Record<string, any> {
-  const tanggalBerkas = formatDateDDMMYYYY(order.createdAt);
-
   // R4 / R2 classification
   let r4r2: "R4" | "R2" = "R4";
   if (invoice?.r4r2) {
@@ -570,16 +823,45 @@ export function projectOrderToContractRow(
   }
 
   // Financial calculations
+  // Tanggal Masuk Berkas: actual document intake date, NOT order creation date
+  let tanggalBerkas = "-";
+  if (order.tanggalMasukBerkas) {
+    tanggalBerkas = formatDateDDMMYYYY(order.tanggalMasukBerkas);
+  } else if (order.metodeLayanan === "Datang Langsung") {
+    tanggalBerkas = formatDateDDMMYYYY(order.createdAt);
+  } else if (order.currentStep >= 3) {
+    tanggalBerkas = formatDateDDMMYYYY(order.pickupCompletedAt || (order as any).updatedAt || order.createdAt);
+  }
+
+  // Financial calculations
   const totalBiaya = order.payment?.totalBiaya ?? invoice?.totalTagihan ?? order.totalEstimasi ?? 0;
   const uangMasuk = order.payment?.dibayar ?? invoice?.terbayar ?? 0;
-  const jenisBayar = order.payment?.metodePembayaran || invoice?.metodePembayaran || "Transfer";
+  
+  // Distinguish payment scheme (Jenis Bayar) from payment method (Metode Pembayaran)
+  const jenisBayar = order.payment?.tipePembayaran || (invoice as any)?.tipePembayaran || (invoice?.metodePembayaran === "Tempo" ? "Tempo" : "Bayar di Akhir");
+  const metodePembayaran = order.payment?.metodePembayaran || invoice?.metodePembayaran || "-";
+  const noHp = order.nomorHP || (invoice as any)?.phone || "-";
 
+  // Tanggal Uang Masuk: based on actual payment timestamp, never order creation date if unpaid
   const tanggalUangMasuk = uangMasuk > 0
-    ? formatDateDDMMYYYY(order.payment?.tanggalBayar || (invoice as any)?.tanggalBayar || invoice?.tanggal || order.createdAt)
+    ? formatDateDDMMYYYY(
+        order.payment?.paymentVerifiedAt ||
+        order.payment?.tanggalBayar ||
+        (invoice as any)?.tanggalBayar ||
+        (invoice?.status === "Lunas" ? invoice?.tanggal : null) ||
+        order.createdAt
+      )
     : "-";
 
   const bankUangKeluar = order.payment?.namaBank || invoice?.bank || "BCA";
-  const tanggalUangKeluar = formatDateDDMMYYYY(invoice?.tanggal || order.createdAt);
+  
+  // Tanggal Uang Keluar: based on actual Samsat / kas disbursement expenditure ONLY
+  let tanggalUangKeluar = "-";
+  if (order.tanggalPengeluaranSamsat) {
+    tanggalUangKeluar = formatDateDDMMYYYY(order.tanggalPengeluaranSamsat);
+  } else if ((order as any).tanggalUangKeluar) {
+    tanggalUangKeluar = formatDateDDMMYYYY((order as any).tanggalUangKeluar);
+  }
 
   // Uang Keluar dari Biro Jasa (biaya samsat)
   let uangKeluar = 0;
@@ -600,38 +882,113 @@ export function projectOrderToContractRow(
   }
 
   // Phase 9.1: Authoritative dual statuses
-  const statusPengerjaan = deriveStatusPengerjaan(order, isArchived);
-  const statusPembayaran = deriveStatusPembayaran(invoice, order);
+  const isOrderCancelled = Boolean(
+    (order as any).isCancelled ||
+    order.currentStageName === "Dibatalkan" ||
+    (order as any).status === "Dibatalkan" ||
+    invoice?.billingStatus === "CANCELLED" ||
+    (invoice?.status as any) === "CANCELLED" ||
+    (invoice as any)?.isCancelled
+  );
+  const statusPengerjaan = isOrderCancelled
+    ? "Dibatalkan"
+    : ((order as any).salesSnapshotStatus || (order as any).statusPengerjaan || deriveStatusPengerjaan(order, isArchived));
+  const statusPembayaran = isOrderCancelled
+    ? "Dibatalkan"
+    : ((order as any).statusPembayaran || deriveStatusPembayaran(invoice, order));
 
-  const noInvoice = order.payment?.invoiceNo || invoice?.invoice || (invoice as any)?.invoiceNo || `INV-${order.orderNo}`;
+  // Requirement 8: Honor explicit manual values without forced fallback generation for newly added rows
+  const noInvoice = (order as any).noInvoice !== undefined
+    ? ((order as any).noInvoice || "-")
+    : (order.payment?.invoiceNo || invoice?.invoice || (invoice as any)?.invoiceNo || "-");
+
   // Phase 9.4 Finding 3: Tanggal Invoice strictly prioritizes invoice issuance date, NEVER payment date
   const rawInvoiceDate = (invoice as any)?.tanggalInvoice || invoice?.tanggal || order.createdAt;
   const tanggalInvoice = formatDateDDMMYYYY(rawInvoiceDate);
-  const tandaTerima = invoice?.tandaTerima || `TT-${order.orderNo}`;
 
-  // BPKB fields
+  const tandaTerima = (order as any).tandaTerima !== undefined
+    ? ((order as any).tandaTerima || "-")
+    : (invoice?.tandaTerima || "-");
+
+  // BPKB fields: honor explicit manual values, never force fake defaults
   const bpkbDoc = order.clientDocuments?.["BPKB"];
-  const bpkb = bpkbDoc?.status === "Sudah Tersedia" ? "Ada" : (order.currentStep >= 5 ? "Ada" : "Belum");
-  const statusBPKB = order.currentStep >= 7 ? "Selesai" : "Proses";
-  const ttbBPKB = invoice?.ttbBPKB || "-";
+  const bpkb = (order as any).bpkb !== undefined
+    ? ((order as any).bpkb || "-")
+    : (bpkbDoc?.status === "Sudah Tersedia" ? "Ada" : (order.currentStep >= 5 ? "Ada" : "-"));
+
+  const statusBPKB = (order as any).statusBPKB !== undefined
+    ? ((order as any).statusBPKB || "-")
+    : (order.currentStep >= 7 ? "Selesai" : "-");
+
+  const ttbBPKB = (order as any).ttbBPKB !== undefined
+    ? ((order as any).ttbBPKB || "-")
+    : (invoice?.ttbBPKB || "-");
+
+  // Real digital documents count
+  let attachedDocsCount = 0;
+  if (order.clientDocuments) {
+    Object.values(order.clientDocuments).forEach((d: any) => {
+      if (d && (d.fileUrl || (d.name && !d.name.toLowerCase().includes("belum")))) {
+        attachedDocsCount++;
+      }
+    });
+  }
+  if (order.rekapDocuments) {
+    attachedDocsCount += order.rekapDocuments.length;
+  }
+  if (order.uploadedDocs) {
+    attachedDocsCount += order.uploadedDocs.length;
+  }
+  if (order.deliveryHandover?.photoProofUrl) {
+    attachedDocsCount++;
+  }
+
+  // Decision 2: Nama Pemilik (STNK/BPKB) strictly from vehicle document, NEVER falling back to customer name!
+  const namaPemilik = (order.namaPemilik && order.namaPemilik.trim()) ? order.namaPemilik.trim() : "-";
+  const cashback = Math.max(0, uangMasuk - totalBiaya);
+  const formattedAlamat = (order as any).alamat || (order.alamatPenjemputan?.detail ? [order.alamatPenjemputan.detail, order.alamatPenjemputan.nomor ? `No. ${order.alamatPenjemputan.nomor}` : '', order.alamatPenjemputan.rtRw ? `RT/RW ${order.alamatPenjemputan.rtRw}` : '', order.alamatPenjemputan.kelurahan ? `Kel. ${order.alamatPenjemputan.kelurahan}` : '', order.alamatPenjemputan.kecamatan ? `Kec. ${order.alamatPenjemputan.kecamatan}` : '', order.alamatPenjemputan.kota].filter(Boolean).join(', ') : "-");
 
   return {
     id: `ord:${order.orderNo}`,
     orderNo: order.orderNo,
+    "Nomor Order": order.orderNo,
     "Tanggal Masuk Berkas": tanggalBerkas,
     "R4 / R2": r4r2,
     "Plat No": order.nopol,
     "Nama Customer": order.customer,
-    "Nama": order.namaPemilik || order.customer,
+    "No HP": noHp,
+    "Nomor HP": noHp,
+    "Nama Pemilik (STNK/BPKB)": namaPemilik,
+    "Nama": namaPemilik,
     "Jenis Pengurusan": order.layanan,
     "Samsat": samsat,
+    "Samsat Asal": samsat,
+    "Samsat Tujuan": order.wilayahSamsatTujuan || "-",
+    "Alamat": formattedAlamat,
+    alamatPenjemputan: order.alamatPenjemputan,
+    alamatPengantaran: order.alamatPengantaran,
+    "Skema Pembayaran": jenisBayar,
     "Jenis Bayar": jenisBayar,
+    "Metode Pembayaran": metodePembayaran,
     "Tanggal Uang Masuk": tanggalUangMasuk,
     "Uang Masuk dari Konsumen": uangMasuk,
+    "Total Tagihan Konsumen": totalBiaya,
+    "Sisa Tagihan": Math.max(0, totalBiaya - uangMasuk),
     "Bank Uang Keluar": bankUangKeluar,
     "Tanggal Uang Keluar": tanggalUangKeluar,
+    "Biaya Pokok Samsat": uangKeluar,
+    "Uang Keluar Biro Jasa": uangKeluar,
     "Uang Keluar dari Biro Jasa": uangKeluar,
+    "Biaya Jasa": (order as any).biayaJasa || profit,
+    "Biaya Antar Jemput": (order as any).biayaAntarJemput || 0,
+    "Nama Rekening/Penerima": (order as any).namaPenerimaKeluar || (order as any).namaPemilikRekeningKeluar || "-",
+    "Nama Rekening / Penerima": (order as any).namaPenerimaKeluar || (order as any).namaPemilikRekeningKeluar || "-",
+    biayaJasa: (order as any).biayaJasa || profit,
+    biayaAntarJemput: (order as any).biayaAntarJemput || 0,
+    namaPenerimaKeluar: (order as any).namaPenerimaKeluar || (order as any).namaPemilikRekeningKeluar || "-",
+    metodePembayaranKeluar: (order as any).metodePembayaranKeluar || "",
     "Profit": profit,
+    "Jumlah Cashback": cashback,
     "Status Pengerjaan": statusPengerjaan,
     "Status Pembayaran": statusPembayaran,
     "Status": statusPengerjaan,
@@ -641,781 +998,19 @@ export function projectOrderToContractRow(
     "BPKB": bpkb,
     "Status BPKB": statusBPKB,
     "TTB BPKB": ttbBPKB,
+    "Dokumen": attachedDocsCount > 0 ? `${attachedDocsCount} Berkas` : "Belum Ada",
+    attachedDocsCount,
   };
 }
 
 /**
- * Initial Contract Datasets
+ * Initial Contract Datasets (Clean Initial State - Transactions Derived from Canonical Orders)
  */
-export const initialMutasiLDContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "01/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "B 1234 ABC",
-    "Nama Customer": "PT. MAJU JAYA",
-    "Nama": "BUDI SANTOSO",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Jakarta Selatan",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "02/11/2024",
-    "Uang Masuk dari Konsumen": 5000000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "03/11/2024",
-    "Uang Keluar dari Biro Jasa": 3500000,
-    "Profit": 1500000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LD-001",
-    "Tanggal Invoice": "01/11/2024",
-    "Tanda Terima": "TT-001",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-001",
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "02/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "D 5678 EFG",
-    "Nama Customer": "TOKO SEJAHTERA",
-    "Nama": "AHMAD WIJAYA",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Bandung Barat",
-    "Jenis Bayar": "Cash",
-    "Tanggal Uang Masuk": "03/11/2024",
-    "Uang Masuk dari Konsumen": 4800000,
-    "Bank Uang Keluar": "Cash",
-    "Tanggal Uang Keluar": "04/11/2024",
-    "Uang Keluar dari Biro Jasa": 3300000,
-    "Profit": 1500000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LD-002",
-    "Tanggal Invoice": "02/11/2024",
-    "Tanda Terima": "TT-002",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-002",
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "03/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "F 9012 HIJ",
-    "Nama Customer": "CV. MANDIRI",
-    "Nama": "SUSAN TAN",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Bogor Kota",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "04/11/2024",
-    "Uang Masuk dari Konsumen": 5200000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "05/11/2024",
-    "Uang Keluar dari Biro Jasa": 3600000,
-    "Profit": 1600000,
-    "Status": "Proses",
-    "No Invoice": "INV-LD-003",
-    "Tanggal Invoice": "03/11/2024",
-    "Tanda Terima": "-",
-    "BPKB": "Belum",
-    "Status BPKB": "Proses",
-    "TTB BPKB": "-",
-  },
-  {
-    id: 4,
-    "Tanggal Masuk Berkas": "04/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "B 3456 KLM",
-    "Nama Customer": "WARUNG MAKAN",
-    "Nama": "SLAMET RIYADI",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Jakarta Timur",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "05/11/2024",
-    "Uang Masuk dari Konsumen": 4700000,
-    "Bank Uang Keluar": "BRI",
-    "Tanggal Uang Keluar": "06/11/2024",
-    "Uang Keluar dari Biro Jasa": 3200000,
-    "Profit": 1500000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LD-004",
-    "Tanggal Invoice": "04/11/2024",
-    "Tanda Terima": "TT-004",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-004",
-  },
-  {
-    id: 5,
-    "Tanggal Masuk Berkas": "05/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 7890 NOP",
-    "Nama Customer": "SALON CANTIK",
-    "Nama": "RATNA SARI",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Bandung Timur",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "06/11/2024",
-    "Uang Masuk dari Konsumen": 5100000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "07/11/2024",
-    "Uang Keluar dari Biro Jasa": 3450000,
-    "Profit": 1650000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LD-005",
-    "Tanggal Invoice": "05/11/2024",
-    "Tanda Terima": "TT-005",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-005",
-  },
-  {
-    id: 6,
-    "Tanggal Masuk Berkas": "06/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 2468 QRS",
-    "Nama Customer": "BENGKEL MOTOR",
-    "Nama": "JOKO SANTOSO",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Sukabumi",
-    "Jenis Bayar": "Cash",
-    "Tanggal Uang Masuk": "07/11/2024",
-    "Uang Masuk dari Konsumen": 4900000,
-    "Bank Uang Keluar": "Cash",
-    "Tanggal Uang Keluar": "08/11/2024",
-    "Uang Keluar dari Biro Jasa": 3400000,
-    "Profit": 1500000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LD-006",
-    "Tanggal Invoice": "06/11/2024",
-    "Tanda Terima": "TT-006",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-006",
-  },
-  {
-    id: 7,
-    "Tanggal Masuk Berkas": "07/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "B 1357 TUV",
-    "Nama Customer": "TOKO BANGUNAN",
-    "Nama": "BAMBANG W",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Bekasi",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "08/11/2024",
-    "Uang Masuk dari Konsumen": 5300000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "09/11/2024",
-    "Uang Keluar dari Biro Jasa": 3700000,
-    "Profit": 1600000,
-    "Status": "Proses",
-    "No Invoice": "INV-LD-007",
-    "Tanggal Invoice": "07/11/2024",
-    "Tanda Terima": "-",
-    "BPKB": "Belum",
-    "Status BPKB": "Proses",
-    "TTB BPKB": "-",
-  },
-  {
-    id: 8,
-    "Tanggal Masuk Berkas": "08/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "D 9753 WXY",
-    "Nama Customer": "FOTOCOPY 24 JAM",
-    "Nama": "DEDI SURYADI",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Cimahi",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "09/11/2024",
-    "Uang Masuk dari Konsumen": 4850000,
-    "Bank Uang Keluar": "BRI",
-    "Tanggal Uang Keluar": "10/11/2024",
-    "Uang Keluar dari Biro Jasa": 3350000,
-    "Profit": 1500000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LD-008",
-    "Tanggal Invoice": "08/11/2024",
-    "Tanda Terima": "TT-008",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-008",
-  },
-];
-
-export const initialMutasiASContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "01/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "D 1111 ASA",
-    "Nama Customer": "TOKO BAJU",
-    "Nama": "SANTI DEWI",
-    "Jenis Pengurusan": "Mutasi AS",
-    "Samsat": "Bandung Tengah",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "02/11/2024",
-    "Uang Masuk dari Konsumen": 4800000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "03/11/2024",
-    "Uang Keluar dari Biro Jasa": 3200000,
-    "Profit": 1600000,
-    "Status": "Selesai",
-    "No Invoice": "INV-AS-001",
-    "Tanggal Invoice": "01/11/2024",
-    "Tanda Terima": "TT-AS-001",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-AS-001",
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "02/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "F 2222 ASB",
-    "Nama Customer": "RESTORAN PADANG",
-    "Nama": "YUSUF HAKIM",
-    "Jenis Pengurusan": "Mutasi AS",
-    "Samsat": "Bogor",
-    "Jenis Bayar": "Cash",
-    "Tanggal Uang Masuk": "03/11/2024",
-    "Uang Masuk dari Konsumen": 4600000,
-    "Bank Uang Keluar": "Cash",
-    "Tanggal Uang Keluar": "04/11/2024",
-    "Uang Keluar dari Biro Jasa": 3100000,
-    "Profit": 1500000,
-    "Status": "Selesai",
-    "No Invoice": "INV-AS-002",
-    "Tanggal Invoice": "02/11/2024",
-    "Tanda Terima": "TT-AS-002",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-AS-002",
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "03/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "B 3333 ASC",
-    "Nama Customer": "MINIMARKET",
-    "Nama": "RINA OKTAVIA",
-    "Jenis Pengurusan": "Mutasi AS",
-    "Samsat": "Depok",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "04/11/2024",
-    "Uang Masuk dari Konsumen": 4900000,
-    "Bank Uang Keluar": "BRI",
-    "Tanggal Uang Keluar": "05/11/2024",
-    "Uang Keluar dari Biro Jasa": 3300000,
-    "Profit": 1600000,
-    "Status": "Proses",
-    "No Invoice": "INV-AS-003",
-    "Tanggal Invoice": "03/11/2024",
-    "Tanda Terima": "-",
-    "BPKB": "Belum",
-    "Status BPKB": "Proses",
-    "TTB BPKB": "-",
-  },
-  {
-    id: 4,
-    "Tanggal Masuk Berkas": "04/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 4444 ASD",
-    "Nama Customer": "COUNTER HP",
-    "Nama": "IWAN SETIAWAN",
-    "Jenis Pengurusan": "Mutasi AS",
-    "Samsat": "Soreang",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "05/11/2024",
-    "Uang Masuk dari Konsumen": 4700000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "06/11/2024",
-    "Uang Keluar dari Biro Jasa": 3150000,
-    "Profit": 1550000,
-    "Status": "Selesai",
-    "No Invoice": "INV-AS-004",
-    "Tanggal Invoice": "04/11/2024",
-    "Tanda Terima": "TT-AS-004",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-AS-004",
-  },
-  {
-    id: 5,
-    "Tanggal Masuk Berkas": "05/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 5555 ASE",
-    "Nama Customer": "APOTEK SEHAT",
-    "Nama": "DWI ANGGRAENI",
-    "Jenis Pengurusan": "Mutasi AS",
-    "Samsat": "Cianjur",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "06/11/2024",
-    "Uang Masuk dari Konsumen": 4850000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "07/11/2024",
-    "Uang Keluar dari Biro Jasa": 3250000,
-    "Profit": 1600000,
-    "Status": "Selesai",
-    "No Invoice": "INV-AS-005",
-    "Tanggal Invoice": "05/11/2024",
-    "Tanda Terima": "TT-AS-005",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-    "TTB BPKB": "TTB-AS-005",
-  },
-];
-
-export const initialBBNContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "01/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "F 1111 BBN",
-    "Nama Customer": "SITI RAHAYU",
-    "Nama": "SITI RAHAYU",
-    "Jenis Pengurusan": "BBN 1",
-    "Samsat": "Bogor",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "02/11/2024",
-    "Uang Masuk dari Konsumen": 6000000,
-    "Bank Uang Keluar": "BRI",
-    "Tanggal Uang Keluar": "03/11/2024",
-    "Uang Keluar dari Biro Jasa": 4200000,
-    "Profit": 1800000,
-    "Status": "Selesai",
-    "No Invoice": "INV-BBN-001",
-    "Tanggal Invoice": "01/11/2024",
-    "Tanda Terima": "TT-BBN-001",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "02/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "B 2222 BBN",
-    "Nama Customer": "LINDA PERMATA",
-    "Nama": "LINDA PERMATA",
-    "Jenis Pengurusan": "BBN 1",
-    "Samsat": "Jakarta Barat",
-    "Jenis Bayar": "Cash",
-    "Tanggal Uang Masuk": "03/11/2024",
-    "Uang Masuk dari Konsumen": 5800000,
-    "Bank Uang Keluar": "Cash",
-    "Tanggal Uang Keluar": "04/11/2024",
-    "Uang Keluar dari Biro Jasa": 4000000,
-    "Profit": 1800000,
-    "Status": "Selesai",
-    "No Invoice": "INV-BBN-002",
-    "Tanggal Invoice": "02/11/2024",
-    "Tanda Terima": "TT-BBN-002",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "03/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 3333 BBN",
-    "Nama Customer": "HENDRA WIJAYA",
-    "Nama": "HENDRA WIJAYA",
-    "Jenis Pengurusan": "BBN 2",
-    "Samsat": "Bandung",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "04/11/2024",
-    "Uang Masuk dari Konsumen": 5500000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "05/11/2024",
-    "Uang Keluar dari Biro Jasa": 3800000,
-    "Profit": 1700000,
-    "Status": "Proses",
-    "No Invoice": "INV-BBN-003",
-    "Tanggal Invoice": "03/11/2024",
-    "Tanda Terima": "-",
-    "BPKB": "Belum",
-    "Status BPKB": "Proses",
-  },
-  {
-    id: 4,
-    "Tanggal Masuk Berkas": "04/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 4444 BBN",
-    "Nama Customer": "PUTRI AMANDA",
-    "Nama": "PUTRI AMANDA",
-    "Jenis Pengurusan": "BBN 1",
-    "Samsat": "Sukabumi",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "05/11/2024",
-    "Uang Masuk dari Konsumen": 6100000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "06/11/2024",
-    "Uang Keluar dari Biro Jasa": 4250000,
-    "Profit": 1850000,
-    "Status": "Selesai",
-    "No Invoice": "INV-BBN-004",
-    "Tanggal Invoice": "04/11/2024",
-    "Tanda Terima": "TT-BBN-004",
-    "BPKB": "Ada",
-    "Status BPKB": "Selesai",
-  },
-];
-
-export const initialPerpanjanganPajakContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "01/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "B 1111 PJK",
-    "Nama Customer": "AHMAD RIZKI",
-    "Nama": "AHMAD RIZKI",
-    "Jenis Pengurusan": "Pajak tahunan",
-    "Samsat": "Jakarta Selatan",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "02/11/2024",
-    "Uang Masuk dari Konsumen": 1500000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "03/11/2024",
-    "Uang Keluar dari Biro Jasa": 800000,
-    "Profit": 700000,
-    "Status": "Selesai",
-    "No Invoice": "INV-PJK-001",
-    "Tanggal Invoice": "01/11/2024",
-    "Tanda Terima": "TT-PJK-001",
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "02/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 2222 PJK",
-    "Nama Customer": "RUDI HARTONO",
-    "Nama": "RUDI HARTONO",
-    "Jenis Pengurusan": "Pajak tahunan",
-    "Samsat": "Bandung",
-    "Jenis Bayar": "Cash",
-    "Tanggal Uang Masuk": "03/11/2024",
-    "Uang Masuk dari Konsumen": 1200000,
-    "Bank Uang Keluar": "Cash",
-    "Tanggal Uang Keluar": "04/11/2024",
-    "Uang Keluar dari Biro Jasa": 600000,
-    "Profit": 600000,
-    "Status": "Selesai",
-    "No Invoice": "INV-PJK-002",
-    "Tanggal Invoice": "02/11/2024",
-    "Tanda Terima": "TT-PJK-002",
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "03/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 3333 PJK",
-    "Nama Customer": "MAYA SARI",
-    "Nama": "MAYA SARI",
-    "Jenis Pengurusan": "Pajak 5 tahunan",
-    "Samsat": "Bogor",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "04/11/2024",
-    "Uang Masuk dari Konsumen": 2500000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "05/11/2024",
-    "Uang Keluar dari Biro Jasa": 1800000,
-    "Profit": 700000,
-    "Status": "Proses",
-    "No Invoice": "INV-PJK-003",
-    "Tanggal Invoice": "03/11/2024",
-    "Tanda Terima": "-",
-  },
-  {
-    id: 4,
-    "Tanggal Masuk Berkas": "04/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "B 4444 PJK",
-    "Nama Customer": "LINDA PERMATA",
-    "Nama": "LINDA PERMATA",
-    "Jenis Pengurusan": "Perpanjangan STNK",
-    "Samsat": "Jakarta Barat",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "05/11/2024",
-    "Uang Masuk dari Konsumen": 1400000,
-    "Bank Uang Keluar": "BRI",
-    "Tanggal Uang Keluar": "06/11/2024",
-    "Uang Keluar dari Biro Jasa": 750000,
-    "Profit": 650000,
-    "Status": "Selesai",
-    "No Invoice": "INV-PJK-004",
-    "Tanggal Invoice": "04/11/2024",
-    "Tanda Terima": "TT-PJK-004",
-  },
-];
-
-export const initialLainLainContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "01/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 1111 LLL",
-    "Nama Customer": "DEWI LESTARI",
-    "Nama": "DEWI LESTARI",
-    "Jenis Pengurusan": "Duplikat STNK",
-    "Samsat": "Bandung Timur",
-    "Jenis Bayar": "Cash",
-    "Tanggal Uang Masuk": "02/11/2024",
-    "Uang Masuk dari Konsumen": 800000,
-    "Bank Uang Keluar": "Cash",
-    "Tanggal Uang Keluar": "03/11/2024",
-    "Uang Keluar dari Biro Jasa": 500000,
-    "Profit": 300000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LLL-001",
-    "Tanggal Invoice": "01/11/2024",
-    "Tanda Terima": "TT-LLL-001",
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "02/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 2222 LLL",
-    "Nama Customer": "TONO SUSANTO",
-    "Nama": "TONO SUSANTO",
-    "Jenis Pengurusan": "Ganti plat",
-    "Samsat": "Bogor",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "03/11/2024",
-    "Uang Masuk dari Konsumen": 900000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "04/11/2024",
-    "Uang Keluar dari Biro Jasa": 550000,
-    "Profit": 350000,
-    "Status": "Selesai",
-    "No Invoice": "INV-LLL-002",
-    "Tanggal Invoice": "02/11/2024",
-    "Tanda Terima": "TT-LLL-002",
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "03/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "B 3333 LLL",
-    "Nama Customer": "LINDA PERMATA",
-    "Nama": "LINDA PERMATA",
-    "Jenis Pengurusan": "Duplikat BPKB",
-    "Samsat": "Jakarta Utara",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "04/11/2024",
-    "Uang Masuk dari Konsumen": 1200000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "05/11/2024",
-    "Uang Keluar dari Biro Jasa": 850000,
-    "Profit": 350000,
-    "Status": "Proses",
-    "No Invoice": "INV-LLL-003",
-    "Tanggal Invoice": "03/11/2024",
-    "Tanda Terima": "-",
-  },
-];
-
-export const initialBelumKurangBayarContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "15/10/2024",
-    "R4 / R2": "R4",
-    "Plat No": "B 1111 AAA",
-    "Nama Customer": "TOKO SEJAHTERA",
-    "Nama": "BAMBANG S",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Jakarta Selatan",
-    "Jenis Bayar": "Tempo",
-    "Tanggal Uang Masuk": "15/10/2024",
-    "Uang Masuk dari Konsumen": 3000000,
-    "Bank Uang Keluar": "Kas Kantor",
-    "Tanggal Uang Keluar": "16/10/2024",
-    "Uang Keluar dari Biro Jasa": 3500000,
-    "Profit": -500000,
-    "Status": "Kurang Bayar",
-    "No Invoice": "BJ_24-10_1500",
-    "Tanggal Invoice": "15/10/2024",
-    "Tanda Terima": "TT-BKB-001",
-    "BPKB": "Ada",
-    "TTB BPKB": "TTB-BKB-001",
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "18/10/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 2222 BBB",
-    "Nama Customer": "CV. MANDIRI",
-    "Nama": "SUSAN TAN",
-    "Jenis Pengurusan": "BBN 1",
-    "Samsat": "Bandung",
-    "Jenis Bayar": "Tempo",
-    "Tanggal Uang Masuk": "-",
-    "Uang Masuk dari Konsumen": 0,
-    "Bank Uang Keluar": "Kas Kantor",
-    "Tanggal Uang Keluar": "19/10/2024",
-    "Uang Keluar dari Biro Jasa": 4200000,
-    "Profit": -4200000,
-    "Status": "Belum Bayar",
-    "No Invoice": "BJ_24-10_1523",
-    "Tanggal Invoice": "18/10/2024",
-    "Tanda Terima": "TT-BKB-002",
-    "BPKB": "Belum",
-    "TTB BPKB": "-",
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "20/10/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 3333 CCC",
-    "Nama Customer": "PT. SENTOSA",
-    "Nama": "AGUS SALIM",
-    "Jenis Pengurusan": "Pajak 5 tahunan",
-    "Samsat": "Bogor",
-    "Jenis Bayar": "Tempo",
-    "Tanggal Uang Masuk": "20/10/2024",
-    "Uang Masuk dari Konsumen": 2000000,
-    "Bank Uang Keluar": "Kas Messenger",
-    "Tanggal Uang Keluar": "21/10/2024",
-    "Uang Keluar dari Biro Jasa": 2300000,
-    "Profit": -300000,
-    "Status": "Kurang Bayar",
-    "No Invoice": "BJ_24-10_1545",
-    "Tanggal Invoice": "20/10/2024",
-    "Tanda Terima": "TT-BKB-003",
-    "BPKB": "Ada",
-    "TTB BPKB": "TTB-BKB-003",
-  },
-];
-
-export const initialProfitTerpendingContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "05/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "B 1234 PPP",
-    "Nama Customer": "TOKO BAJU",
-    "Nama": "SANTI DEWI",
-    "Jenis Pengurusan": "Balik nama",
-    "Samsat": "Jakarta Selatan",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "05/11/2024",
-    "Uang Masuk dari Konsumen": 4000000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "06/11/2024",
-    "Uang Keluar dari Biro Jasa": 2800000,
-    "Profit": 1200000,
-    "Status": "Pending",
-    "No Invoice": "BJ_24-11_1700",
-    "Tanggal Invoice": "05/11/2024",
-    "Tanda Terima": "TT-PRP-001",
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "06/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 5678 QQQ",
-    "Nama Customer": "RESTORAN PADANG",
-    "Nama": "YUSUF HAKIM",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Bandung",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "06/11/2024",
-    "Uang Masuk dari Konsumen": 5200000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "07/11/2024",
-    "Uang Keluar dari Biro Jasa": 3600000,
-    "Profit": 1600000,
-    "Status": "Pending",
-    "No Invoice": "BJ_24-11_1711",
-    "Tanggal Invoice": "06/11/2024",
-    "Tanda Terima": "TT-PRP-002",
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "07/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 9012 RRR",
-    "Nama Customer": "MINIMARKET",
-    "Nama": "RINA OKTAVIA",
-    "Jenis Pengurusan": "BBN 1",
-    "Samsat": "Bogor",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "07/11/2024",
-    "Uang Masuk dari Konsumen": 6200000,
-    "Bank Uang Keluar": "BRI",
-    "Tanggal Uang Keluar": "08/11/2024",
-    "Uang Keluar dari Biro Jasa": 4400000,
-    "Profit": 1800000,
-    "Status": "Pending",
-    "No Invoice": "BJ_24-11_1722",
-    "Tanggal Invoice": "07/11/2024",
-    "Tanda Terima": "TT-PRP-003",
-  },
-];
-
-export const initialCashbackTerpendingContract = [
-  {
-    id: 1,
-    "Tanggal Masuk Berkas": "01/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "B 1111 CBA",
-    "Nama Customer": "PT. BERKAH JAYA",
-    "Nama": "DIREKTUR UTAMA",
-    "Jenis Pengurusan": "Mutasi LD",
-    "Samsat": "Jakarta Pusat",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "01/11/2024",
-    "Uang Masuk dari Konsumen": 5500000,
-    "Bank Uang Keluar": "BCA",
-    "Tanggal Uang Keluar": "02/11/2024",
-    "Uang Keluar dari Biro Jasa": 3700000,
-    "Profit": 1800000,
-    "Status": "Pending",
-    "No Invoice": "BJ_24-11_1800",
-    "Tanggal Invoice": "01/11/2024",
-    "Tanda Terima": "TT-CBK-001",
-    "Jumlah Cashback": 200000,
-  },
-  {
-    id: 2,
-    "Tanggal Masuk Berkas": "02/11/2024",
-    "R4 / R2": "R4",
-    "Plat No": "D 2222 CBA",
-    "Nama Customer": "CV. SENTOSA",
-    "Nama": "PEMILIK CV",
-    "Jenis Pengurusan": "BBN 1",
-    "Samsat": "Bandung",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "02/11/2024",
-    "Uang Masuk dari Konsumen": 6800000,
-    "Bank Uang Keluar": "Mandiri",
-    "Tanggal Uang Keluar": "03/11/2024",
-    "Uang Keluar dari Biro Jasa": 4600000,
-    "Profit": 2200000,
-    "Status": "Pending",
-    "No Invoice": "BJ_24-11_1811",
-    "Tanggal Invoice": "02/11/2024",
-    "Tanda Terima": "TT-CBK-002",
-    "Jumlah Cashback": 250000,
-  },
-  {
-    id: 3,
-    "Tanggal Masuk Berkas": "03/11/2024",
-    "R4 / R2": "R2",
-    "Plat No": "F 3333 CBA",
-    "Nama Customer": "TOKO BANGUNAN",
-    "Nama": "BAMBANG W",
-    "Jenis Pengurusan": "Pajak 5 tahunan",
-    "Samsat": "Bogor",
-    "Jenis Bayar": "Transfer",
-    "Tanggal Uang Masuk": "03/11/2024",
-    "Uang Masuk dari Konsumen": 2900000,
-    "Bank Uang Keluar": "BRI",
-    "Tanggal Uang Keluar": "04/11/2024",
-    "Uang Keluar dari Biro Jasa": 2000000,
-    "Profit": 900000,
-    "Status": "Pending",
-    "No Invoice": "BJ_24-11_1822",
-    "Tanggal Invoice": "03/11/2024",
-    "Tanda Terima": "TT-CBK-003",
-    "Jumlah Cashback": 100000,
-  },
-];
+export const initialMutasiLDContract: any[] = [];
+export const initialMutasiASContract: any[] = [];
+export const initialBBNContract: any[] = [];
+export const initialPerpanjanganPajakContract: any[] = [];
+export const initialLainLainContract: any[] = [];
+export const initialBelumKurangBayarContract: any[] = [];
+export const initialProfitTerpendingContract: any[] = [];
+export const initialCashbackTerpendingContract: any[] = [];

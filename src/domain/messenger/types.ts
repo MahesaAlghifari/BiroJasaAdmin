@@ -5,7 +5,7 @@
 
 import type { OperationalOrder } from "../order/types";
 
-export type MessengerTaskType = "Jemput Dokumen" | "Proses Samsat" | "Pengantaran Dokumen";
+export type MessengerTaskType = "Jemput Dokumen" | "Proses Samsat" | "Jemput Hasil Samsat" | "Pengantaran Dokumen";
 
 // Canonical Task Status Codes
 export type MessengerTaskStatusCode =
@@ -16,7 +16,7 @@ export type MessengerTaskStatusCode =
   | "COMPLETED";
 
 // Legacy Display Status (for backwards compatibility with existing views)
-export type MessengerTaskStatus = "Belum Diambil" | "Dalam Proses" | "Selesai" | "Pending" | "Dibatalkan";
+export type MessengerTaskStatus = "Belum Diambil" | "Dalam Proses" | "Selesai" | "Pending" | "Dibatalkan" | "Dokumen Sudah Tersedia" | "Sedang Dijemput" | "Terjadwal Jemput";
 
 // Task Priority
 export type TaskPriority = "NORMAL" | "IMPORTANT" | "URGENT";
@@ -86,6 +86,7 @@ export interface MessengerComponentProgress {
   note?: string;
   evidence?: ComponentEvidence[];
   isCustom?: boolean; // Tambahan Lapangan (bukan dari Master Data)
+  addedManually?: boolean; // Ditambahkan secara manual oleh messenger / admin
   createdBy?: string;
   createdAt?: string;
 }
@@ -102,6 +103,8 @@ export interface ChecklistSebelumBerangkat {
 export interface PickupProof {
   photoProofUrl?: string;
   notes?: string;
+  catatanKendala?: string;
+  pickupChecklist?: Record<string, boolean>;
   completedAt: string;
 }
 
@@ -110,6 +113,9 @@ export interface DeliveryHandoverProof {
   recipientName: string;
   relationship: string;
   photoProofUrl?: string;
+  fileName?: string;
+  fileType?: "image" | "pdf";
+  fileSize?: number;
   notes?: string;
   completedAt?: string;
 }
@@ -142,6 +148,14 @@ export type ReimbursementStatus =
   | "Ditolak"
   | "Dibayar";
 
+export interface ReimbursementItemDetail {
+  id?: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
 export interface ReimbursementRequest {
   id: string;
   employeeId: string;
@@ -149,6 +163,9 @@ export interface ReimbursementRequest {
   orderNo?: string;
   category: ReimbursementCategory;
   amount: number;
+  approvedAmount?: number;
+  rejectedAmount?: number;
+  items?: ReimbursementItemDetail[];
   date: string; // "YYYY-MM-DD"
   note?: string;
   receiptUrl?: string;
@@ -160,7 +177,11 @@ export interface ReimbursementRequest {
   reviewNotes?: string;
   paidAt?: string;
   paidBy?: string;
+  paymentMethod?: string;
+  transactionRef?: string;
   pengeluaranId?: number;
+  kasMessengerId?: number;
+  channel?: string;
 }
 
 // Full Operational Task Item
@@ -194,6 +215,31 @@ export interface MessengerTaskItem {
   checklist?: ChecklistSebelumBerangkat;
   pickupProof?: PickupProof;
   componentProgress?: MessengerComponentProgress[];
+}
+
+// Completed Messenger Task History Record for Admin Dashboard & Messenger Auditing
+export interface MessengerHistoryItem {
+  id: string;
+  orderNo: string;
+  taskType: MessengerTaskType;
+  messenger: string;
+  messengerEmployeeId?: string;
+  customer: string;
+  phone?: string;
+  nopol: string;
+  jenisKendaraan?: string;
+  layanan: string;
+  wilayah: string;
+  completedAt: string;
+  totalTagihan: number;
+  terbayar?: number;
+  statusBayar?: string;
+  status: "Selesai";
+  keterangan?: string;
+  receiverName?: string;
+  relationship?: string;
+  photoProofUrl?: string;
+  rawOrder: OperationalOrder;
 }
 
 export const KNOWN_MESSENGERS = [

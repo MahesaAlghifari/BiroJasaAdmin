@@ -15,75 +15,17 @@ import { Plus, Search, Eye, FileText, Car, Clock, CheckCircle, MapPin, Calendar,
 
 // Generate completed order data (history)
 const generateOrderData = () => {
-  const customers = ["PT. Maju Jaya", "John Doe", "Siti Rahayu", "Ahmad Yani", "Budi Santoso", "Dewi Lestari", "Eko Prasetyo", "Rina Susanti", "CV. Berkah", "PT. Sejahtera"];
-  const layanan = ["Perpanjangan STNK 1 Tahun", "Perpanjangan STNK 5 Tahun", "Balik Nama", "Mutasi Antar Samsat", "Mutasi Luar Daerah", "Tarik Berkas", "Duplikat STNK"];
-  const wilayah = ["Jakarta Timur", "Jakarta Barat", "Jakarta Selatan", "Jakarta Utara", "Depok", "Bekasi", "Tangerang"];
-  const messenger = ["Andi", "Budi", "Citra", "Doni", "Eko"];
-  
-  const orders = [];
-  for (let i = 1; i <= 50; i++) {
-    const randomCustomer = customers[Math.floor(Math.random() * customers.length)];
-    const randomLayanan = layanan[Math.floor(Math.random() * layanan.length)];
-    const randomWilayah = wilayah[Math.floor(Math.random() * wilayah.length)];
-    const randomMessenger = messenger[Math.floor(Math.random() * messenger.length)];
-    const biayaJasa = Math.floor(Math.random() * 500000) + 250000;
-    const biayaSamsat = Math.floor(Math.random() * 1000000) + 500000;
-    const totalBiaya = biayaJasa + biayaSamsat;
-    
-    const day = Math.floor(Math.random() * 30) + 1;
-    const month = Math.floor(Math.random() * 3) + 9; // Sept, Oct, Nov
-    
-    const tanggalOrder = `2024-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const tanggalVerifikasi = `2024-${String(month).padStart(2, '0')}-${String(Math.min(day + 1, 30)).padStart(2, '0')}`;
-    const tanggalPenjadwalan = `2024-${String(month).padStart(2, '0')}-${String(Math.min(day + 2, 30)).padStart(2, '0')}`;
-    const tanggalProsesSamsat = `2024-${String(month).padStart(2, '0')}-${String(Math.min(day + 3, 30)).padStart(2, '0')}`;
-    const tanggalPengantaran = `2024-${String(month).padStart(2, '0')}-${String(Math.min(day + 4, 30)).padStart(2, '0')}`;
-    const tanggalSelesai = `2024-${String(month).padStart(2, '0')}-${String(Math.min(day + 5, 30)).padStart(2, '0')}`;
-    
-    orders.push({
-      id: i,
-      noOrder: `ORD-${String(i).padStart(4, '0')}`,
-      invoice: `INV-2024-${String(i).padStart(5, '0')}`,
-      customer: randomCustomer,
-      nopol: `B${Math.floor(Math.random() * 9999)}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}`,
-      layanan: randomLayanan,
-      wilayah: randomWilayah,
-      messenger: randomMessenger,
-      tanggalOrder,
-      tanggalSelesai,
-      status: "Selesai",
-      biayaJasa,
-      biayaSamsat,
-      totalBiaya,
-      // Timeline history
-      timeline: [
-        { status: "Order Dibuat", tanggal: tanggalOrder, waktu: "09:30", keterangan: "Order diterima dan dicatat dalam sistem" },
-        { status: "Verifikasi", tanggal: tanggalVerifikasi, waktu: "10:15", keterangan: "Dokumen diverifikasi oleh admin" },
-        { status: "Penjadwalan", tanggal: tanggalPenjadwalan, waktu: "11:00", keterangan: `Dijadwalkan ke messenger ${randomMessenger}` },
-        { status: "Proses Samsat", tanggal: tanggalProsesSamsat, waktu: "14:30", keterangan: "Dalam proses di Samsat " + randomWilayah },
-        { status: "Pengantaran", tanggal: tanggalPengantaran, waktu: "16:45", keterangan: "Dokumen dalam perjalanan ke customer" },
-        { status: "Selesai", tanggal: tanggalSelesai, waktu: "17:30", keterangan: "Dokumen telah diterima customer" },
-      ],
-      // Detail lengkap
-      namaBerkas: randomCustomer,
-      alamat: "Jl. Sudirman No. 123, " + randomWilayah,
-      telepon: "08" + Math.floor(Math.random() * 900000000 + 100000000),
-      email: randomCustomer.toLowerCase().replace(/[.\s]/g, '') + "@email.com",
-      metodePembayaran: ["Transfer BCA", "Transfer Mandiri", "Cash"][Math.floor(Math.random() * 3)],
-      catatan: "Pengantaran pada hari kerja jam 9-17",
-    });
-  }
-  return orders;
+  return [];
 };
 
 const initialOrderData = generateOrderData();
 
 export function Order() {
-  const [orderData] = useState(initialOrderData);
+  const [orderData] = useState<any[]>(initialOrderData);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterLayanan, setFilterLayanan] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 

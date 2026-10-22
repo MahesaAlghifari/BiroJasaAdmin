@@ -8,9 +8,13 @@ import {
   getSamsatItems,
   getSamsatItemById,
   updateSamsatItem,
+  getAllServicePricing,
+  updateServicePricing,
+  createServicePricing,
+  deleteServicePricing,
 } from "../controllers/pricingController";
 import { requireAuth, requireRoles } from "../middleware/auth";
-import { validatePricingUpdatePayload } from "../middleware/validation";
+import { validatePricingUpdatePayload, validateServicePricingPayload } from "../middleware/validation";
 
 export const pricingRouter = Router();
 
@@ -25,4 +29,27 @@ pricingRouter.put(
   requireRoles("administrator", "admin"),
   validatePricingUpdatePayload,
   updateSamsatItem
+);
+
+// Service Pricing / Biaya Layanan CRUD
+pricingRouter.get("/services", requireAuth, getAllServicePricing);
+pricingRouter.post(
+  "/services",
+  requireAuth,
+  requireRoles("administrator", "admin"),
+  validateServicePricingPayload,
+  createServicePricing
+);
+pricingRouter.put(
+  "/services/:id",
+  requireAuth,
+  requireRoles("administrator", "admin"),
+  validateServicePricingPayload,
+  updateServicePricing
+);
+pricingRouter.delete(
+  "/services/:id",
+  requireAuth,
+  requireRoles("administrator", "admin"),
+  deleteServicePricing
 );

@@ -32,7 +32,9 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
 
   constructor(baseUrl = APP_CONFIG.apiBaseUrl) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.initFromApi();
+    if (typeof window === "undefined" || (typeof window !== "undefined" && window.localStorage?.getItem("auth_token"))) {
+      this.initFromApi();
+    }
   }
 
   private getAuthHeader(): Record<string, string> {
@@ -78,30 +80,38 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
       phone: inv.phone || inv.nomorHp,
       email: inv.email,
       alamat: inv.alamat,
-      biayaSamsat: inv.biayaSamsat || Math.round(totalTagihan * 0.75),
-      profit: inv.profit || Math.round(totalTagihan * 0.25),
-      profitStatus: isFullyPaid(financeStatus) ? "REALIZED" : "PENDING",
-      cashback: inv.cashback || 0,
-      cashbackStatus: isFullyPaid(financeStatus) ? "REALIZED" : "PENDING",
+      biayaSamsat: inv.biayaSamsat !== undefined ? Number(inv.biayaSamsat) : (inv.biaya_samsat !== undefined ? Number(inv.biaya_samsat) : 0),
+      profit: inv.profit !== undefined ? Number(inv.profit) : (inv.profit_final !== undefined ? Number(inv.profit_final) : 0),
+      profitStatus: inv.profitStatus || inv.profit_status || (isFullyPaid(financeStatus) && (inv.isCompleted || inv.billingStatus === "COMPLETED") ? "REALIZED" : "PENDING"),
+      cashback: inv.cashback !== undefined ? Number(inv.cashback) : (inv.cashback_nominal !== undefined ? Number(inv.cashback_nominal) : 0),
+      cashbackStatus: inv.cashbackStatus || inv.cashback_status || (isFullyPaid(financeStatus) && (inv.isCompleted || inv.refundStatus === "PROCESSED") ? "REALIZED" : "PENDING"),
       isCashRealized: dibayar > 0,
       cashRecordedAmount: dibayar,
       metodePembayaran: inv.metodePembayaran || (dibayar > 0 ? "Transfer Bank" : "Tempo"),
       bank: inv.bank || (dibayar > 0 ? "BCA" : "Kas Kantor"),
-      billingStatus: isFullyPaid(financeStatus) ? "COMPLETED" : "ACTIVE",
-      settlementCondition: inv.settlementCondition,
-      refundStatus: inv.refundStatus,
-      overpayment: inv.overpayment,
+      billingStatus: inv.billingStatus || (isFullyPaid(financeStatus) && inv.isCompleted ? "COMPLETED" : "ACTIVE"),
+      settlementCondition: inv.settlementCondition || inv.settlement_condition || (isFullyPaid(financeStatus) ? "BALANCED" : "UNDERPAID"),
+      refundStatus: inv.refundStatus || inv.refund_status || "NONE",
+      overpayment: inv.overpayment !== undefined ? Number(inv.overpayment) : 0,
     };
   }
 
   public async initFromApi(): Promise<void> {
+    const authHeaders = this.getAuthHeader();
+    if (!authHeaders.Authorization) {
+      this.isLoadingState = false;
+      return;
+    }
     this.isLoadingState = true;
     this.lastError = null;
     try {
       const invRes = await fetch(`${this.baseUrl}/finance/invoices`, {
-        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+        headers: { "Content-Type": "application/json", ...authHeaders },
       });
       if (!invRes.ok) {
+        if (invRes.status === 401 && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("sun89_auth_unauthorized"));
+        }
         throw new Error(`Gagal memuat invoice dari server (HTTP ${invRes.status})`);
       }
       const payload = await invRes.json();
@@ -142,6 +152,30 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
             keterangan: p.keterangan,
             nominal: Number(p.nominal || 0),
             penanggungJawab: p.penanggungJawab || p.penanggung_jawab || undefined,
+          }));
+        }
+      }
+
+      const messengerRes = await fetch(`${this.baseUrl}/finance/kas-messenger`, {
+        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      });
+      if (messengerRes.ok) {
+        const messengerPayload = await messengerRes.json();
+        if (messengerPayload.success && Array.isArray(messengerPayload.data)) {
+          this.kasMessenger = messengerPayload.data.map((m: any) => ({
+            id: Number(m.id),
+            tanggal: m.tanggal,
+            jenis: m.jenis,
+            messenger: m.messenger,
+            keterangan: m.keterangan,
+            in: Number(m.in || m.debit || 0),
+            out: Number(m.out || m.kredit || 0),
+            total: Number(m.total || 0),
+            penanggungJawab: m.penanggungJawab || m.penanggung_jawab || undefined,
+            orderNo: m.orderNo || m.order_no || undefined,
+            reimbursementId: m.reimbursementId || m.reimbursement_id || undefined,
+            receiptUrl: m.receiptUrl || m.receipt_url || undefined,
+            kategori: m.kategori || undefined,
           }));
         }
       }
@@ -237,7 +271,7 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
     return this.pengeluaran;
   }
 
-  public recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): boolean {
+  public async recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): Promise<boolean> {
     if (paymentAmount <= 0) return false;
 
     const idx = this.invoices.findIndex(
@@ -253,6 +287,13 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
     const newSisa = Math.max(0, record.totalTagihan - newDibayar);
     const newStatus = newSisa === 0 ? "Lunas" : "Kurang Bayar";
 
+    // Stable idempotency key: reuse existing key if provided (e.g. on client retry) or generate once
+    const idempotencyKey = details?.idempotencyKey || `idem-${record.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const effectiveDetails = {
+      ...details,
+      idempotencyKey,
+    };
+
     record.dibayar = newDibayar;
     (record as any).terbayar = newDibayar;
     record.sisa = newSisa;
@@ -266,40 +307,43 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
     this.deriveProfitFromInvoices();
     this.notify();
 
-    // Persist to backend with rollback on failure
-    fetch(`${this.baseUrl}/finance/invoices/${encodeURIComponent(record.id)}/pay`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
-      body: JSON.stringify({ amount: paymentAmount, details }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`Server returned status ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((payload) => {
-        if (payload?.success && payload.data) {
-          const currentIdx = this.invoices.findIndex((inv) => inv.id === record.id);
-          if (currentIdx !== -1) {
-            this.invoices[currentIdx] = this.normalizeInvoice(payload.data);
-            this.deriveProfitFromInvoices();
-            this.notify();
-          }
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to persist payment to server, rolling back:", err);
-        // Rollback optimistic update
+    try {
+      const res = await fetch(`${this.baseUrl}/finance/invoices/${encodeURIComponent(record.id)}/pay`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+          ...this.getAuthHeader(),
+        },
+        body: JSON.stringify({ amount: paymentAmount, details: effectiveDetails }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData?.error?.message || errorData?.message || `Gagal mencatat pembayaran (HTTP ${res.status})`);
+      }
+
+      const payload = await res.json();
+      if (payload?.success && payload.data) {
         const currentIdx = this.invoices.findIndex((inv) => inv.id === record.id);
         if (currentIdx !== -1) {
-          this.invoices[currentIdx] = previousRecord;
+          this.invoices[currentIdx] = this.normalizeInvoice(payload.data);
           this.deriveProfitFromInvoices();
           this.notify();
         }
-      });
-
-    return true;
+      }
+      return true;
+    } catch (err) {
+      console.error("Failed to persist payment to server, rolling back:", err);
+      // Rollback optimistic update
+      const currentIdx = this.invoices.findIndex((inv) => inv.id === record.id);
+      if (currentIdx !== -1) {
+        this.invoices[currentIdx] = previousRecord;
+        this.deriveProfitFromInvoices();
+        this.notify();
+      }
+      throw err;
+    }
   }
 
   public resolveInvoice(id: number, details?: any): boolean {
@@ -314,6 +358,75 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
     record.billingStatus = "COMPLETED";
     if (completedBy) record.completedBy = completedBy;
     this.notify();
+
+    fetch(`${this.baseUrl}/finance/invoices/${encodeURIComponent(id)}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      body: JSON.stringify({ completedBy }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((payload) => {
+        if (payload?.success && payload.data) {
+          const currentIdx = this.invoices.findIndex((inv) => inv.id === id);
+          if (currentIdx !== -1) {
+            this.invoices[currentIdx] = this.normalizeInvoice(payload.data);
+            this.deriveProfitFromInvoices();
+            this.notify();
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to persist completeInvoice to server:", err);
+      });
+
+    return true;
+  }
+
+  public async payoutCashback(id: number, payoutData: any): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/finance/invoices/${encodeURIComponent(id)}/cashback-payout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      body: JSON.stringify(payoutData),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      const msg = errorData.error?.message || errorData.message || `Gagal mencairkan cashback (HTTP ${res.status})`;
+      throw new Error(msg);
+    }
+
+    const payload = await res.json();
+    if (payload?.success && payload.data) {
+      const currentIdx = this.invoices.findIndex((inv) => inv.id === id);
+      if (currentIdx !== -1) {
+        this.invoices[currentIdx] = this.normalizeInvoice(payload.data);
+      }
+
+      const kasRes = await fetch(`${this.baseUrl}/finance/kas-kantor`, {
+        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      });
+      if (kasRes.ok) {
+        const kasPayload = await kasRes.json();
+        if (kasPayload?.success && Array.isArray(kasPayload.data)) {
+          this.kasKantor = kasPayload.data.map((k: any) => ({
+            id: Number(k.id),
+            tanggal: k.tanggal,
+            keterangan: k.keterangan,
+            status: k.status,
+            debit: Number(k.debit || 0),
+            kredit: Number(k.kredit || 0),
+            total: Number(k.total ?? k.saldo ?? 0),
+            saldo: Number(k.saldo ?? k.total ?? 0),
+            penanggungJawab: k.penanggungJawab || k.penanggung_jawab || undefined,
+          }));
+        }
+      }
+      this.deriveProfitFromInvoices();
+      this.notify();
+    }
     return true;
   }
 
@@ -417,6 +530,153 @@ export class ApiFinanceProvider implements IFinanceDataProvider {
       });
 
     return newEntry;
+  }
+
+  public async deleteKasKantor(id: number): Promise<boolean> {
+    const idx = this.kasKantor.findIndex((k) => k.id === id);
+    if (idx === -1) return false;
+    const previous = this.kasKantor[idx];
+
+    this.kasKantor.splice(idx, 1);
+    this.notify();
+
+    try {
+      const res = await fetch(`${this.baseUrl}/finance/kas-kantor/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Gagal menghapus kas kantor (HTTP ${res.status})`);
+      }
+      return true;
+    } catch (err) {
+      console.error("Failed to delete kas kantor, rolling back:", err);
+      this.kasKantor.splice(idx, 0, previous);
+      this.notify();
+      throw err;
+    }
+  }
+
+  public addKasMessenger(item: Omit<KasMessengerItem, "id" | "total"> & { total?: number }): KasMessengerItem | null {
+    const lastTotal = this.kasMessenger.length > 0
+      ? this.kasMessenger[this.kasMessenger.length - 1].total
+      : 0;
+    const runningTotal = item.total !== undefined ? item.total : lastTotal + item.in - item.out;
+
+    const newEntry: KasMessengerItem = {
+      id: Date.now(),
+      tanggal: item.tanggal,
+      jenis: item.jenis,
+      messenger: item.messenger,
+      keterangan: item.keterangan,
+      in: item.in,
+      out: item.out,
+      total: runningTotal,
+      orderNo: (item as any).orderNo,
+      penanggungJawab: (item as any).penanggungJawab,
+      reimbursementId: (item as any).reimbursementId,
+      receiptUrl: (item as any).receiptUrl,
+      kategori: (item as any).kategori,
+    };
+
+    this.kasMessenger.push(newEntry);
+    this.notify();
+
+    fetch(`${this.baseUrl}/finance/kas-messenger`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      body: JSON.stringify(item),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((payload) => {
+        if (payload?.success && payload.data) {
+          const idx = this.kasMessenger.findIndex((k) => k.id === newEntry.id);
+          if (idx !== -1) {
+            this.kasMessenger[idx] = {
+              id: Number(payload.data.id),
+              tanggal: payload.data.tanggal,
+              jenis: payload.data.jenis,
+              messenger: payload.data.messenger,
+              keterangan: payload.data.keterangan,
+              in: Number(payload.data.in ?? payload.data.debit ?? 0),
+              out: Number(payload.data.out ?? payload.data.kredit ?? 0),
+              total: Number(payload.data.total ?? 0),
+              orderNo: payload.data.orderNo || payload.data.order_no || (item as any).orderNo,
+              penanggungJawab: payload.data.penanggungJawab || payload.data.penanggung_jawab || (item as any).penanggungJawab,
+              reimbursementId: payload.data.reimbursementId || payload.data.reimbursement_id || (item as any).reimbursementId,
+              receiptUrl: payload.data.receiptUrl || payload.data.receipt_url || (item as any).receiptUrl,
+              kategori: payload.data.kategori || (item as any).kategori,
+            };
+            this.notify();
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to persist kas messenger, rolling back:", err);
+        const idx = this.kasMessenger.findIndex((k) => k.id === newEntry.id);
+        if (idx !== -1) {
+          this.kasMessenger.splice(idx, 1);
+          this.notify();
+        }
+      });
+
+    return newEntry;
+  }
+
+  public async deleteKasMessenger(id: number): Promise<boolean> {
+    const idx = this.kasMessenger.findIndex((k) => k.id === id);
+    if (idx === -1) return false;
+    const previous = this.kasMessenger[idx];
+
+    this.kasMessenger.splice(idx, 1);
+    this.notify();
+
+    try {
+      const res = await fetch(`${this.baseUrl}/finance/kas-messenger/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Gagal menghapus kas messenger (HTTP ${res.status})`);
+      }
+      return true;
+    } catch (err) {
+      console.error("Failed to delete kas messenger, rolling back:", err);
+      this.kasMessenger.splice(idx, 0, previous);
+      this.notify();
+      throw err;
+    }
+  }
+
+  public async deletePengeluaran(id: number): Promise<boolean> {
+    const idx = this.pengeluaran.findIndex((p) => p.id === id);
+    if (idx === -1) return false;
+    const previous = this.pengeluaran[idx];
+
+    this.pengeluaran.splice(idx, 1);
+    this.notify();
+
+    try {
+      const res = await fetch(`${this.baseUrl}/finance/pengeluaran/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Gagal menghapus pengeluaran (HTTP ${res.status})`);
+      }
+      return true;
+    } catch (err) {
+      console.error("Failed to delete pengeluaran, rolling back:", err);
+      this.pengeluaran.splice(idx, 0, previous);
+      this.notify();
+      throw err;
+    }
   }
 
   public saveInvoice(invoice: InvoiceBillingRecord): void {

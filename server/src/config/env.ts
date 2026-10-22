@@ -6,6 +6,15 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Automatically load root .env file in Node.js 20+
+if (typeof (process as any).loadEnvFile === "function") {
+  try {
+    (process as any).loadEnvFile();
+  } catch {
+    // Non-fatal if .env doesn't exist
+  }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Project root is 3 levels up from server/src/config

@@ -134,19 +134,7 @@ export function Dashboard() {
   ];
 
   return (
-    <div className="space-y-4 p-3 sm:p-4 md:p-6 w-full min-w-0 text-left">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
-        <div>
-          <h1 className="text-lg md:text-xl font-semibold tracking-tight text-foreground">Dashboard</h1>
-          <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">Ringkasan operasional dan performa bisnis Biro Jasa SUN89</p>
-        </div>
-      </motion.div>
-
+    <div className="space-y-4 w-full min-w-0 text-left content-fluid">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         {statsData.map((stat, index) => (

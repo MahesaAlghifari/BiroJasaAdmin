@@ -21,6 +21,12 @@ import { financeRouter } from "./routes/financeRoutes";
 import { userRouter } from "./routes/userRoutes";
 import { auditRouter } from "./routes/auditRoutes";
 import { documentRouter } from "./routes/documentRoutes";
+import { estimationRouter } from "./routes/estimationRoutes";
+import { wilayahRouter, samsatOfficeRouter } from "./routes/wilayahRoutes";
+import { notificationRouter } from "./routes/notificationRoutes";
+import { permissionRouter } from "./routes/permissionRoutes";
+import { paymentMethodRouter } from "./routes/paymentMethodRoutes";
+import { messengerRouter } from "./routes/messengerRoutes";
 
 export function createApp(): Express {
   // Initialize Database Seeds if needed
@@ -52,7 +58,7 @@ export function createApp(): Express {
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Idempotency-Key", "x-idempotency-key", "Accept", "Cache-Control", "cache-control"],
     })
   );
 
@@ -60,10 +66,7 @@ export function createApp(): Express {
   app.use(express.json({ limit: "10mb" }));
   app.use(requestLogger);
 
-  // 4. Rate Limiting for all API routes (Milestone 15)
-  app.use("/api", apiRateLimiter);
-
-  // 5. Health Probes: Liveness & Readiness Endpoints (Section 9)
+  // 4. Health Probes: Liveness & Readiness Endpoints (exempt from rate limits)
   // Liveness probe (fast, lightweight process-alive check)
   const livenessHandler = (req: Request, res: Response) => {
     res.json({
@@ -121,6 +124,9 @@ export function createApp(): Express {
     });
   });
 
+  // 5. Rate Limiting for all business API routes (Milestone 15)
+  app.use("/api", apiRateLimiter);
+
   // Mount Feature Routes
   app.use("/api/auth", authRouter);
   app.use("/api/orders", orderRouter);
@@ -129,6 +135,13 @@ export function createApp(): Express {
   app.use("/api/users", userRouter);
   app.use("/api/audit-logs", auditRouter);
   app.use("/api/documents", documentRouter);
+  app.use("/api/estimation", estimationRouter);
+  app.use("/api/wilayah", wilayahRouter);
+  app.use("/api/samsat/offices", samsatOfficeRouter);
+  app.use("/api/notifications", notificationRouter);
+  app.use("/api/permissions", permissionRouter);
+  app.use("/api/payment-methods", paymentMethodRouter);
+  app.use("/api/messenger", messengerRouter);
 
   // 404 handler for unknown routes
   app.use((req, res) => {

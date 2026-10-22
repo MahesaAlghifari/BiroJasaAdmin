@@ -31,9 +31,9 @@ export function MessengerActiveProcesses({ currentUser }: MessengerActiveProcess
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   const samsatTasks = useMemo(() => {
-    const all = getMessengerTasksForEmployee(activeOrders, currentUser.employeeId || "");
+    const all = getMessengerTasksForEmployee(activeOrders, currentUser);
     return all.filter((t) => t.keteranganTugas === "Proses Samsat" && t.status !== "Selesai");
-  }, [activeOrders, currentUser.employeeId]);
+  }, [activeOrders, currentUser]);
 
   const handleOpenDetail = (task: MessengerTaskItem) => {
     setSelectedTask(task);

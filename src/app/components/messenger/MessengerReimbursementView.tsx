@@ -29,7 +29,10 @@ import {
   Camera,
   Layers,
   ArrowRight,
+  Eye,
+  MessageSquare,
 } from "lucide-react";
+import { DocumentPreviewModal } from "../DocumentPreviewModal";
 import {
   ReimbursementCategory,
   ReimbursementStatus,
@@ -75,11 +78,12 @@ export function MessengerReimbursementView({ currentUser }: MessengerReimburseme
   const [note, setNote] = useState<string>("");
   const [receiptUrl, setReceiptUrl] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; title: string } | null>(null);
 
   // Messenger active tasks to link to reimbursement
   const myTasks = useMemo(() => {
-    return getMessengerTasksForEmployee(activeOrders, currentUser.employeeId || "");
-  }, [activeOrders, currentUser.employeeId]);
+    return getMessengerTasksForEmployee(activeOrders, currentUser);
+  }, [activeOrders, currentUser]);
 
   // Strictly filter reimbursements for current messenger by employee ID
   const myReimbursements = useMemo(() => {
@@ -364,9 +368,25 @@ export function MessengerReimbursementView({ currentUser }: MessengerReimburseme
                 </div>
 
                 <div className="text-right">
-                  <span className="text-base sm:text-lg font-bold text-foreground">
-                    Rp {req.amount.toLocaleString("id-ID")}
-                  </span>
+                  {req.approvedAmount !== undefined && req.status !== "Diajukan" ? (
+                    <div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Diajukan: <span className="line-through">Rp {req.amount.toLocaleString("id-ID")}</span>
+                      </div>
+                      <span className="text-base sm:text-lg font-bold text-emerald-600 dark:text-emerald-400 block">
+                        Rp {req.approvedAmount.toLocaleString("id-ID")}
+                      </span>
+                      {req.approvedAmount < req.amount && (
+                        <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 block">
+                          Disetujui sebagian
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-base sm:text-lg font-bold text-foreground">
+                      Rp {req.amount.toLocaleString("id-ID")}
+                    </span>
+                  )}
                   <div className="mt-1">{getStatusBadge(req.status)}</div>
                 </div>
               </div>
@@ -378,15 +398,33 @@ export function MessengerReimbursementView({ currentUser }: MessengerReimburseme
                 </p>
               )}
 
-              {/* Receipt / Proof Thumbnail */}
+              {/* Admin Review Notes (if provided by finance) */}
+              {req.reviewNotes && (
+                <div className="text-xs text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-2.5 rounded-xl space-y-1">
+                  <span className="font-semibold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    Catatan Tim Finance / Admin:
+                  </span>
+                  <p className="leading-relaxed">{req.reviewNotes}</p>
+                </div>
+              )}
+
+              {/* Receipt / Proof Thumbnail (Clickable to preview) */}
               {req.receiptUrl && (
-                <div className="flex items-center gap-2.5 text-xs sm:text-sm text-emerald-600 font-semibold p-1">
+                <div
+                  onClick={() => setPreviewDoc({ url: req.receiptUrl!, title: `Bukti Kuitansi ${req.id} - ${req.category}` })}
+                  className="flex items-center gap-2.5 text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 font-semibold p-1 hover:bg-emerald-500/5 rounded-lg cursor-pointer transition-colors w-fit"
+                  title="Klik untuk memperbesar bukti kuitansi"
+                >
                   <img
                     src={req.receiptUrl}
                     alt="Bukti kuitansi"
-                    className="w-10 h-10 object-cover rounded-lg border border-border"
+                    className="w-10 h-10 object-cover rounded-lg border border-border shadow-2xs"
                   />
-                  <span>Bukti kuitansi / struk terlampir</span>
+                  <div className="flex items-center gap-1">
+                    <span>Bukti kuitansi / struk terlampir</span>
+                    <Eye className="w-3.5 h-3.5 opacity-70" />
+                  </div>
                 </div>
               )}
 
@@ -573,6 +611,16 @@ export function MessengerReimbursementView({ currentUser }: MessengerReimburseme
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Full preview modal for receipt photos */}
+      <DocumentPreviewModal
+        isOpen={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        title={previewDoc?.title || "Pratinjau Kuitansi"}
+        documentName="Foto Kuitansi / Struk Biaya"
+        rawUrl={previewDoc?.url}
+        fileType="image"
+      />
     </div>
   );
 }

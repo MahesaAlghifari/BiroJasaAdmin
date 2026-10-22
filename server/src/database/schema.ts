@@ -50,6 +50,50 @@ export function initializeSchema(targetDb: DatabaseSync): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS wilayah_administratif (
+      kode_kabupaten_kota TEXT PRIMARY KEY,
+      kode_provinsi TEXT NOT NULL,
+      nama_provinsi TEXT NOT NULL,
+      nama_kabupaten_kota TEXT NOT NULL,
+      jenis_wilayah TEXT NOT NULL CHECK(jenis_wilayah IN ('Kabupaten', 'Kota')),
+      status_aktif INTEGER NOT NULL DEFAULT 1,
+      sumber_referensi TEXT NOT NULL DEFAULT 'Kepmendagri No. 300.2.2-2138 Tahun 2025',
+      tahun_referensi INTEGER NOT NULL DEFAULT 2025,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_wilayah_provinsi ON wilayah_administratif(kode_provinsi);
+    CREATE INDEX IF NOT EXISTS idx_wilayah_nama ON wilayah_administratif(nama_kabupaten_kota);
+
+    CREATE TABLE IF NOT EXISTS samsat_offices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      wilayah TEXT NOT NULL,
+      alamat TEXT,
+      kode_kabupaten_kota TEXT,
+      is_verified INTEGER NOT NULL DEFAULT 1,
+      status_aktif INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (kode_kabupaten_kota) REFERENCES wilayah_administratif(kode_kabupaten_kota)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_samsat_wilayah ON samsat_offices(kode_kabupaten_kota);
+
+    CREATE TABLE IF NOT EXISTS estimation_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      service_type TEXT NOT NULL,
+      tipe_kendaraan TEXT NOT NULL,
+      koefisien_denda REAL NOT NULL DEFAULT 0.48,
+      data_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_estimation_service ON estimation_templates(service_type);
+    CREATE INDEX IF NOT EXISTS idx_estimation_vehicle ON estimation_templates(tipe_kendaraan);
+
     CREATE TABLE IF NOT EXISTS finance_invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       invoice_no TEXT UNIQUE NOT NULL,
@@ -77,6 +121,7 @@ export function initializeSchema(targetDb: DatabaseSync): void {
       kredit REAL NOT NULL DEFAULT 0,
       saldo REAL NOT NULL DEFAULT 0,
       penanggung_jawab TEXT,
+      kategori TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -86,7 +131,19 @@ export function initializeSchema(targetDb: DatabaseSync): void {
       keterangan TEXT NOT NULL,
       nominal REAL NOT NULL DEFAULT 0,
       penanggung_jawab TEXT,
+      kategori TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS payment_methods (
+      id TEXT PRIMARY KEY,
+      nama_metode TEXT NOT NULL UNIQUE,
+      bank TEXT NOT NULL,
+      nama_rekening TEXT,
+      nomor_rekening TEXT,
+      status TEXT NOT NULL DEFAULT 'Aktif',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -127,15 +184,208 @@ export function initializeSchema(targetDb: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_documents_order ON documents(order_no);
     CREATE INDEX IF NOT EXISTS idx_documents_invoice ON documents(invoice_id);
     CREATE INDEX IF NOT EXISTS idx_documents_storage_name ON documents(storage_name);
+
+    CREATE TABLE IF NOT EXISTS notification_settings (
+      id TEXT PRIMARY KEY DEFAULT 'global',
+      recipient_emails TEXT NOT NULL DEFAULT '[]',
+      notify_tagihan_reminder INTEGER NOT NULL DEFAULT 1,
+      notify_tagihan_perubahan INTEGER NOT NULL DEFAULT 1,
+      notify_order_update INTEGER NOT NULL DEFAULT 1,
+      notify_proses_gagal INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_by TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_logs (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      title TEXT NOT NULL,
+      reference_no TEXT,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notif_logs_created ON notification_logs(created_at);
+
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role TEXT PRIMARY KEY,
+      permissions_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_by TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS messenger_reimbursements (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      messenger_name TEXT NOT NULL,
+      order_no TEXT,
+      category TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      approved_amount REAL DEFAULT 0,
+      rejected_amount REAL DEFAULT 0,
+      date TEXT NOT NULL,
+      note TEXT,
+      receipt_url TEXT,
+      receipt_name TEXT,
+      status TEXT NOT NULL DEFAULT 'Diajukan',
+      items_json TEXT,
+      submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      reviewed_at TEXT,
+      reviewed_by TEXT,
+      review_notes TEXT,
+      paid_at TEXT,
+      paid_by TEXT,
+      payment_method TEXT,
+      transaction_ref TEXT,
+      pengeluaran_id INTEGER,
+      kas_messenger_id INTEGER,
+      channel TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reimb_employee ON messenger_reimbursements(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_reimb_order ON messenger_reimbursements(order_no);
+    CREATE INDEX IF NOT EXISTS idx_reimb_status ON messenger_reimbursements(status);
+
+    CREATE TABLE IF NOT EXISTS kas_messenger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tanggal TEXT NOT NULL,
+      jenis TEXT NOT NULL,
+      messenger TEXT NOT NULL,
+      keterangan TEXT NOT NULL,
+      debit REAL NOT NULL DEFAULT 0,
+      kredit REAL NOT NULL DEFAULT 0,
+      total REAL NOT NULL DEFAULT 0,
+      penanggung_jawab TEXT,
+      order_no TEXT,
+      reimbursement_id TEXT,
+      receipt_url TEXT,
+      kategori TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_kas_messenger_messenger ON kas_messenger(messenger);
+    CREATE INDEX IF NOT EXISTS idx_kas_messenger_tanggal ON kas_messenger(tanggal);
+
+    CREATE TABLE IF NOT EXISTS service_pricing_configs (
+      id TEXT PRIMARY KEY,
+      service_id TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      samsat_id TEXT NOT NULL,
+      wilayah TEXT NOT NULL,
+      biaya_jasa REAL NOT NULL DEFAULT 0,
+      biaya_antar_jemput REAL NOT NULL DEFAULT 50000,
+      data_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_service_pricing_service ON service_pricing_configs(service_id);
+    CREATE INDEX IF NOT EXISTS idx_service_pricing_samsat ON service_pricing_configs(samsat_id);
+
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      key TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      user_id TEXT,
+      request_hash TEXT NOT NULL,
+      resource_id TEXT,
+      response_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_idempotency_scope ON idempotency_keys(scope, key);
+
+    CREATE TABLE IF NOT EXISTS invoice_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_no TEXT NOT NULL,
+      order_no TEXT NOT NULL,
+      nominal REAL NOT NULL CHECK(nominal > 0),
+      metode_pembayaran TEXT NOT NULL,
+      nama_bank TEXT,
+      nomor_rekening TEXT,
+      tanggal_bayar TEXT NOT NULL,
+      document_id TEXT,
+      kas_kantor_id INTEGER,
+      status_verifikasi TEXT NOT NULL DEFAULT 'TERVERIFIKASI',
+      idempotency_key TEXT UNIQUE,
+      verified_by TEXT,
+      verified_at TEXT,
+      catatan TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (invoice_no) REFERENCES finance_invoices(invoice_no) ON DELETE CASCADE,
+      FOREIGN KEY (order_no) REFERENCES orders(order_no) ON DELETE RESTRICT,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL,
+      FOREIGN KEY (kas_kantor_id) REFERENCES kas_kantor(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inv_payments_invoice ON invoice_payments(invoice_no);
+    CREATE INDEX IF NOT EXISTS idx_inv_payments_order ON invoice_payments(order_no);
+    CREATE INDEX IF NOT EXISTS idx_inv_payments_idempotency ON invoice_payments(idempotency_key);
   `);
 
   migrateDocumentsTable(targetDb);
+  migrateOrdersTable(targetDb);
+  migrateFinanceInvoicesTable(targetDb);
   migrateKasKantorTable(targetDb);
   migratePengeluaranTable(targetDb);
+  migrateUsersTable(targetDb);
+  migrateKasMessengerTable(targetDb);
+  migrateMessengerReimbursementsTable(targetDb);
+  migrateIdempotencyKeysTable(targetDb);
+  reconcileLegacyDocuments(targetDb);
+  backfillHistoricalFinanceData(targetDb);
 
   targetDb.exec(`
     CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active);
   `);
+}
+
+export function reconcileLegacyDocuments(targetDb: DatabaseSync): { matchedCount: number; unidentifiedCount: number } {
+  try {
+    const ordersStmt = targetDb.prepare("SELECT order_no, data_json FROM orders");
+    const orderRows = ordersStmt.all() as { order_no: string; data_json: string }[];
+    const linkStmt = targetDb.prepare(
+      "UPDATE documents SET order_no = ?, updated_at = datetime('now') WHERE id = ? AND (order_no IS NULL OR order_no != ?)"
+    );
+
+    let linkedCount = 0;
+    for (const orderRow of orderRows) {
+      if (!orderRow.data_json || !orderRow.order_no) continue;
+      const docIds = orderRow.data_json.match(/DOC-[A-Za-z0-9_-]+/g);
+      if (docIds && docIds.length > 0) {
+        const uniqueDocIds = [...new Set(docIds)];
+        for (const docId of uniqueDocIds) {
+          try {
+            const info: any = linkStmt.run(orderRow.order_no, docId, orderRow.order_no);
+            if (info?.changes > 0) {
+              linkedCount += info.changes;
+            }
+          } catch {
+            // Ignore single doc linking collision
+          }
+        }
+      }
+    }
+
+    const unlinkedStmt = targetDb.prepare("SELECT COUNT(*) as count FROM documents WHERE order_no IS NULL");
+    const unlinkedRow = unlinkedStmt.get() as { count: number };
+    const linkedTotalStmt = targetDb.prepare("SELECT COUNT(*) as count FROM documents WHERE order_no IS NOT NULL");
+    const linkedTotalRow = linkedTotalStmt.get() as { count: number };
+
+    console.log(
+      `[SUN89 Reconciliation] Documents linked to orders: ${linkedTotalRow?.count || 0} total (newly reconciled: ${linkedCount}), unidentified: ${unlinkedRow?.count || 0}`
+    );
+
+    return {
+      matchedCount: linkedTotalRow?.count || 0,
+      unidentifiedCount: unlinkedRow?.count || 0,
+    };
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during document reconciliation:", err);
+    return { matchedCount: 0, unidentifiedCount: 0 };
+  }
 }
 
 function migrateDocumentsTable(targetDb: DatabaseSync): void {
@@ -213,6 +463,94 @@ function migrateDocumentsTable(targetDb: DatabaseSync): void {
   }
 }
 
+function migrateOrdersTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(orders)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("biaya_antar_jemput")) {
+      targetDb.exec("ALTER TABLE orders ADD COLUMN biaya_antar_jemput REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("biaya_jasa")) {
+      targetDb.exec("ALTER TABLE orders ADD COLUMN biaya_jasa REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("nama_penerima_keluar")) {
+      targetDb.exec("ALTER TABLE orders ADD COLUMN nama_penerima_keluar TEXT;");
+    }
+    if (!columnNames.has("bank_uang_keluar")) {
+      targetDb.exec("ALTER TABLE orders ADD COLUMN bank_uang_keluar TEXT;");
+    }
+    if (!columnNames.has("metode_pembayaran_keluar")) {
+      targetDb.exec("ALTER TABLE orders ADD COLUMN metode_pembayaran_keluar TEXT;");
+    }
+    if (!columnNames.has("alasan_pending")) {
+      targetDb.exec("ALTER TABLE orders ADD COLUMN alasan_pending TEXT;");
+    }
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during orders table migration:", err);
+  }
+}
+
+function migrateFinanceInvoicesTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(finance_invoices)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("biaya_antar_jemput")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN biaya_antar_jemput REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("biaya_jasa")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN biaya_jasa REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("nama_penerima_keluar")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN nama_penerima_keluar TEXT;");
+    }
+    if (!columnNames.has("biaya_samsat")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN biaya_samsat REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("pendapatan_jasa")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN pendapatan_jasa REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("overpayment")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN overpayment REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("settlement_condition")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN settlement_condition TEXT NOT NULL DEFAULT 'BALANCED';");
+    }
+    if (!columnNames.has("refund_status")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN refund_status TEXT NOT NULL DEFAULT 'NONE';");
+    }
+    if (!columnNames.has("cashback_nominal")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN cashback_nominal REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("cashback_status")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN cashback_status TEXT NOT NULL DEFAULT 'PENDING';");
+    }
+    if (!columnNames.has("cashback_doc_id")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN cashback_doc_id TEXT;");
+    }
+    if (!columnNames.has("profit_final")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN profit_final REAL NOT NULL DEFAULT 0;");
+    }
+    if (!columnNames.has("profit_status")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN profit_status TEXT NOT NULL DEFAULT 'PENDING';");
+    }
+    if (!columnNames.has("alasan_pending")) {
+      targetDb.exec("ALTER TABLE finance_invoices ADD COLUMN alasan_pending TEXT;");
+    }
+
+    targetDb.exec(`
+      CREATE INDEX IF NOT EXISTS idx_invoices_settlement ON finance_invoices(settlement_condition);
+      CREATE INDEX IF NOT EXISTS idx_invoices_profit_status ON finance_invoices(profit_status);
+      CREATE INDEX IF NOT EXISTS idx_invoices_cashback_status ON finance_invoices(cashback_status);
+    `);
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during finance_invoices table migration:", err);
+  }
+}
+
 function migrateKasKantorTable(targetDb: DatabaseSync): void {
   try {
     const tableInfo = targetDb.prepare("PRAGMA table_info(kas_kantor)").all() as { name: string }[];
@@ -222,6 +560,16 @@ function migrateKasKantorTable(targetDb: DatabaseSync): void {
     if (!columnNames.has("penanggung_jawab")) {
       targetDb.exec("ALTER TABLE kas_kantor ADD COLUMN penanggung_jawab TEXT;");
     }
+    if (!columnNames.has("order_no")) {
+      targetDb.exec("ALTER TABLE kas_kantor ADD COLUMN order_no TEXT;");
+    }
+    if (!columnNames.has("invoice_no")) {
+      targetDb.exec("ALTER TABLE kas_kantor ADD COLUMN invoice_no TEXT;");
+    }
+    if (!columnNames.has("kategori")) {
+      targetDb.exec("ALTER TABLE kas_kantor ADD COLUMN kategori TEXT;");
+    }
+    targetDb.exec("CREATE INDEX IF NOT EXISTS idx_kas_kantor_order ON kas_kantor(order_no);");
   } catch (err) {
     console.warn("[SUN89 Migration] Warning during kas_kantor table migration:", err);
   }
@@ -236,7 +584,362 @@ function migratePengeluaranTable(targetDb: DatabaseSync): void {
     if (!columnNames.has("penanggung_jawab")) {
       targetDb.exec("ALTER TABLE pengeluaran ADD COLUMN penanggung_jawab TEXT;");
     }
+    if (!columnNames.has("order_no")) {
+      targetDb.exec("ALTER TABLE pengeluaran ADD COLUMN order_no TEXT;");
+    }
+    if (!columnNames.has("invoice_no")) {
+      targetDb.exec("ALTER TABLE pengeluaran ADD COLUMN invoice_no TEXT;");
+    }
+    if (!columnNames.has("kategori")) {
+      targetDb.exec("ALTER TABLE pengeluaran ADD COLUMN kategori TEXT;");
+    }
+    targetDb.exec("CREATE INDEX IF NOT EXISTS idx_pengeluaran_order ON pengeluaran(order_no);");
   } catch (err) {
     console.warn("[SUN89 Migration] Warning during pengeluaran table migration:", err);
+  }
+}
+
+function migrateUsersTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("phone")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN phone TEXT;");
+    }
+    if (!columnNames.has("wilayah")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN wilayah TEXT;");
+    }
+    if (!columnNames.has("employee_id")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN employee_id TEXT;");
+    }
+    if (!columnNames.has("alamat")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN alamat TEXT;");
+    }
+    if (!columnNames.has("tanggal_lahir")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN tanggal_lahir TEXT;");
+    }
+    if (!columnNames.has("gaji_pokok")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN gaji_pokok REAL DEFAULT 0;");
+    }
+    if (!columnNames.has("tanggal_bergabung")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN tanggal_bergabung TEXT;");
+    }
+    if (!columnNames.has("jenis_kelamin")) {
+      targetDb.exec("ALTER TABLE users ADD COLUMN jenis_kelamin TEXT;");
+    }
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during users table migration:", err);
+  }
+}
+
+function migrateKasMessengerTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(kas_messenger)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("reimbursement_id")) {
+      targetDb.exec("ALTER TABLE kas_messenger ADD COLUMN reimbursement_id TEXT;");
+    }
+    if (!columnNames.has("receipt_url")) {
+      targetDb.exec("ALTER TABLE kas_messenger ADD COLUMN receipt_url TEXT;");
+    }
+    if (!columnNames.has("kategori")) {
+      targetDb.exec("ALTER TABLE kas_messenger ADD COLUMN kategori TEXT;");
+    }
+    targetDb.exec("CREATE INDEX IF NOT EXISTS idx_kas_messenger_reimb ON kas_messenger(reimbursement_id);");
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during kas_messenger table migration:", err);
+  }
+}
+
+function migrateMessengerReimbursementsTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(messenger_reimbursements)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("kas_messenger_id")) {
+      targetDb.exec("ALTER TABLE messenger_reimbursements ADD COLUMN kas_messenger_id INTEGER;");
+    }
+    if (!columnNames.has("channel")) {
+      targetDb.exec("ALTER TABLE messenger_reimbursements ADD COLUMN channel TEXT;");
+    }
+    targetDb.exec("CREATE INDEX IF NOT EXISTS idx_reimb_kas_msg ON messenger_reimbursements(kas_messenger_id);");
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during messenger_reimbursements table migration:", err);
+  }
+}
+
+function migrateIdempotencyKeysTable(targetDb: DatabaseSync): void {
+  try {
+    const tableInfo = targetDb.prepare("PRAGMA table_info(idempotency_keys)").all() as { name: string }[];
+    if (!tableInfo || tableInfo.length === 0) return;
+
+    const columnNames = new Set(tableInfo.map((c) => c.name));
+    if (!columnNames.has("user_id")) {
+      targetDb.exec("ALTER TABLE idempotency_keys ADD COLUMN user_id TEXT;");
+    }
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during idempotency_keys table migration:", err);
+  }
+}
+
+export interface BackfillHistoricalFinanceResult {
+  backfilledInvoices: number;
+  backfilledPayments: number;
+  kasKantorStats: {
+    mapped: number;
+    unmatched: number;
+    ambiguous: number;
+    remainingEmpty: number;
+  };
+  pengeluaranStats: {
+    mapped: number;
+    unmatched: number;
+    ambiguous: number;
+    remainingEmpty: number;
+  };
+}
+
+export function backfillHistoricalFinanceData(targetDb: DatabaseSync): BackfillHistoricalFinanceResult {
+  const result: BackfillHistoricalFinanceResult = {
+    backfilledInvoices: 0,
+    backfilledPayments: 0,
+    kasKantorStats: { mapped: 0, unmatched: 0, ambiguous: 0, remainingEmpty: 0 },
+    pengeluaranStats: { mapped: 0, unmatched: 0, ambiguous: 0, remainingEmpty: 0 },
+  };
+
+  try {
+    // 1. Gather all known valid orders and invoices for strict relational verification
+    const knownOrders = new Set<string>();
+    const ordRows = targetDb.prepare("SELECT order_no FROM orders").all() as { order_no: string }[];
+    for (const r of ordRows) {
+      if (r.order_no) knownOrders.add(r.order_no);
+    }
+
+    const knownInvoices = new Map<string, string | null>();
+    const invRows = targetDb.prepare("SELECT invoice_no, order_no FROM finance_invoices").all() as { invoice_no: string; order_no: string | null }[];
+    for (const r of invRows) {
+      if (r.invoice_no) knownInvoices.set(r.invoice_no, r.order_no || null);
+    }
+
+    // 2. Backfill finance_invoices & invoice_payments (existing idempotent logic)
+    const invStmt = targetDb.prepare("SELECT id, invoice_no, order_no, total_tagihan, dibayar, sisa, status, data_json, created_at FROM finance_invoices");
+    const invoices = invStmt.all() as any[];
+
+    const updateInvStmt = targetDb.prepare(`
+      UPDATE finance_invoices SET
+        biaya_samsat = ?,
+        pendapatan_jasa = ?,
+        overpayment = ?,
+        settlement_condition = ?,
+        refund_status = ?,
+        cashback_nominal = ?,
+        cashback_status = ?,
+        profit_final = ?,
+        profit_status = ?
+      WHERE id = ?
+    `);
+
+    const insertPaymentStmt = targetDb.prepare(`
+      INSERT OR IGNORE INTO invoice_payments (
+        invoice_no, order_no, nominal, metode_pembayaran, nama_bank,
+        nomor_rekening, tanggal_bayar, document_id, status_verifikasi,
+        idempotency_key, verified_by, verified_at, catatan
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const inv of invoices) {
+      let parsedJson: any = {};
+      try {
+        parsedJson = JSON.parse(inv.data_json || "{}");
+      } catch {}
+
+      const biayaSamsat = Number(parsedJson.biayaSamsat || parsedJson.biaya_samsat || 0);
+      const totalTagihan = Number(inv.total_tagihan || parsedJson.totalTagihan || 0);
+      const pendapatanJasa = Math.max(0, totalTagihan - biayaSamsat);
+      const overpayment = Number(parsedJson.overpayment || 0);
+      const settlementCondition = parsedJson.settlementCondition || (inv.status === "Lunas" ? "BALANCED" : "UNDERPAID");
+      const refundStatus = parsedJson.refundStatus || "NONE";
+      const cashbackNominal = Number(parsedJson.cashback || parsedJson.jumlahCashback || 0);
+      const cashbackStatus = parsedJson.cashbackStatus || (cashbackNominal > 0 ? "PENDING" : "APPROVED");
+      const profitFinal = Number(parsedJson.profit || 0);
+      const profitStatus = parsedJson.profitStatus || (inv.status === "Lunas" ? "REALIZED" : "PENDING");
+
+      updateInvStmt.run(
+        biayaSamsat,
+        pendapatanJasa,
+        overpayment,
+        settlementCondition,
+        refundStatus,
+        cashbackNominal,
+        cashbackStatus,
+        profitFinal,
+        profitStatus,
+        inv.id
+      );
+      result.backfilledInvoices++;
+
+      // Check if order has paymentRecords
+      let orderJson: any = {};
+      if (inv.order_no) {
+        try {
+          const ordRow = targetDb.prepare("SELECT data_json FROM orders WHERE order_no = ?").get(inv.order_no) as any;
+          if (ordRow?.data_json) orderJson = JSON.parse(ordRow.data_json);
+        } catch {}
+      }
+
+      const pRecords = orderJson?.payment?.paymentRecords || parsedJson?.paymentRecords || [];
+      if (Array.isArray(pRecords) && pRecords.length > 0) {
+        for (const pr of pRecords) {
+          const nominal = Number(pr.nominal || 0);
+          if (nominal <= 0) continue;
+          const key = `BACKFILL-${inv.invoice_no}-${pr.id || nominal}-${pr.tanggal || "init"}`;
+          insertPaymentStmt.run(
+            inv.invoice_no,
+            inv.order_no,
+            nominal,
+            pr.metodePembayaran || pr.metode || "Transfer BCA",
+            pr.namaBank || null,
+            pr.noRekening || null,
+            pr.tanggal || inv.created_at || new Date().toISOString(),
+            pr.buktiPembayaran?.documentId || null,
+            pr.statusVerifikasi || "TERVERIFIKASI",
+            key,
+            pr.verifiedBy || "System Migration",
+            pr.verifiedAt || new Date().toISOString(),
+            pr.catatan || "Migrasi historis payment record"
+          );
+          result.backfilledPayments++;
+        }
+      } else if (Number(inv.dibayar || 0) > 0) {
+        // Synthesize single historical payment for existing balance
+        const nominal = Number(inv.dibayar);
+        const key = `BACKFILL-${inv.invoice_no}-INIT`;
+        insertPaymentStmt.run(
+          inv.invoice_no,
+          inv.order_no,
+          nominal,
+          parsedJson.metodePembayaran || "Transfer Bank",
+          parsedJson.bank || null,
+          null,
+          parsedJson.tanggalBayar || inv.created_at || new Date().toISOString(),
+          null,
+          "TERVERIFIKASI",
+          key,
+          "System Migration",
+          new Date().toISOString(),
+          "Saldo terbayar historis awal"
+        );
+        result.backfilledPayments++;
+      }
+    }
+
+    // 3. Backfill kas_kantor relations (order_no, invoice_no)
+    const updateKasStmt = targetDb.prepare(`
+      UPDATE kas_kantor SET
+        order_no = COALESCE(order_no, ?),
+        invoice_no = COALESCE(invoice_no, ?)
+      WHERE id = ?
+    `);
+
+    const kasRows = targetDb.prepare("SELECT id, keterangan, order_no, invoice_no FROM kas_kantor").all() as any[];
+    for (const row of kasRows) {
+      if (row.order_no && row.invoice_no) {
+        continue;
+      }
+
+      const text = row.keterangan || "";
+      const invMatches = Array.from(new Set(text.match(/\bINV-[A-Za-z0-9_-]+\b/g) || []));
+      const rawOrdMatches = Array.from(new Set(text.match(/\bORD-[0-9]+\b/g) || []));
+      const ordMatches = rawOrdMatches.filter((ord) => !invMatches.some((inv) => inv.includes(ord)));
+
+      if (invMatches.length > 1 || ordMatches.length > 1) {
+        result.kasKantorStats.ambiguous++;
+      } else if (invMatches.length === 1) {
+        const invNo = invMatches[0];
+        if (knownInvoices.has(invNo)) {
+          const ordNo = knownInvoices.get(invNo) || (ordMatches.length === 1 && knownOrders.has(ordMatches[0]) ? ordMatches[0] : null);
+          updateKasStmt.run(ordNo, invNo, row.id);
+          result.kasKantorStats.mapped++;
+        } else {
+          result.kasKantorStats.unmatched++;
+        }
+      } else if (ordMatches.length === 1) {
+        const ordNo = ordMatches[0];
+        if (knownOrders.has(ordNo)) {
+          updateKasStmt.run(ordNo, null, row.id);
+          result.kasKantorStats.mapped++;
+        } else {
+          result.kasKantorStats.unmatched++;
+        }
+      } else {
+        result.kasKantorStats.remainingEmpty++;
+      }
+    }
+
+    // 4. Backfill pengeluaran relations (order_no, invoice_no)
+    const updatePengeluaranStmt = targetDb.prepare(`
+      UPDATE pengeluaran SET
+        order_no = COALESCE(order_no, ?),
+        invoice_no = COALESCE(invoice_no, ?)
+      WHERE id = ?
+    `);
+
+    const pengeluaranRows = targetDb.prepare("SELECT id, keterangan, order_no, invoice_no FROM pengeluaran").all() as any[];
+    for (const row of pengeluaranRows) {
+      if (row.order_no && row.invoice_no) {
+        continue;
+      }
+
+      const text = row.keterangan || "";
+      const invMatches = Array.from(new Set(text.match(/\bINV-[A-Za-z0-9_-]+\b/g) || []));
+      const rawOrdMatches = Array.from(new Set(text.match(/\bORD-[0-9]+\b/g) || []));
+      const ordMatches = rawOrdMatches.filter((ord) => !invMatches.some((inv) => inv.includes(ord)));
+
+      if (invMatches.length > 1 || ordMatches.length > 1) {
+        result.pengeluaranStats.ambiguous++;
+      } else if (invMatches.length === 1) {
+        const invNo = invMatches[0];
+        if (knownInvoices.has(invNo)) {
+          const ordNo = knownInvoices.get(invNo) || (ordMatches.length === 1 && knownOrders.has(ordMatches[0]) ? ordMatches[0] : null);
+          updatePengeluaranStmt.run(ordNo, invNo, row.id);
+          result.pengeluaranStats.mapped++;
+        } else {
+          result.pengeluaranStats.unmatched++;
+        }
+      } else if (ordMatches.length === 1) {
+        const ordNo = ordMatches[0];
+        if (knownOrders.has(ordNo)) {
+          updatePengeluaranStmt.run(ordNo, null, row.id);
+          result.pengeluaranStats.mapped++;
+        } else {
+          result.pengeluaranStats.unmatched++;
+        }
+      } else {
+        result.pengeluaranStats.remainingEmpty++;
+      }
+    }
+
+    if (
+      result.backfilledInvoices > 0 ||
+      result.backfilledPayments > 0 ||
+      result.kasKantorStats.mapped > 0 ||
+      result.pengeluaranStats.mapped > 0
+    ) {
+      console.log(
+        `[SUN89 Migration] Backfill completed: ` +
+        `${result.backfilledInvoices} invoices, ${result.backfilledPayments} payments, ` +
+        `KasKantor[mapped=${result.kasKantorStats.mapped}, unmatched=${result.kasKantorStats.unmatched}, ambig=${result.kasKantorStats.ambiguous}, empty=${result.kasKantorStats.remainingEmpty}], ` +
+        `Pengeluaran[mapped=${result.pengeluaranStats.mapped}, unmatched=${result.pengeluaranStats.unmatched}, ambig=${result.pengeluaranStats.ambiguous}, empty=${result.pengeluaranStats.remainingEmpty}]`
+      );
+    }
+    return result;
+  } catch (err) {
+    console.warn("[SUN89 Migration] Warning during finance backfill:", err);
+    return result;
   }
 }

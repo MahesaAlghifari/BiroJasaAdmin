@@ -8,6 +8,25 @@ export interface SamsatMasterItem {
   name: string; // e.g. "Samsat Jakarta Timur"
   wilayah: string; // e.g. "Jakarta Timur"
   alamat?: string;
+  kode_kabupaten_kota?: string; // Foreign key referencing WilayahAdministratif.kode_kabupaten_kota
+  nama_provinsi?: string;
+  is_verified?: boolean;
+  status_aktif?: boolean;
+}
+
+export interface WilayahAdministratif {
+  kode_kabupaten_kota: string; // Official code e.g. "31.75"
+  kode_provinsi: string; // Official province code e.g. "31"
+  nama_provinsi: string;
+  nama_kabupaten_kota: string;
+  jenis_wilayah: "Kabupaten" | "Kota";
+  status_aktif: boolean;
+  sumber_referensi: string;
+  tahun_referensi: number;
+  samsatCount?: number;
+  hasConfiguredSamsat?: boolean;
+  statusKonfigurasi?: "Terkonfigurasi" | "Belum Dikonfigurasi";
+  samsatOffices?: SamsatMasterItem[];
 }
 
 export interface PricingItem {
@@ -84,6 +103,14 @@ export interface ServiceFeeConfig {
   };
   biayaLainnya?: ServiceCostItem[];
   active: boolean;
+}
+
+export interface ApplyAllScope {
+  applyBiayaLayanan?: boolean;
+  applyBiayaTambahan?: boolean;
+  applyKomponenSamsat?: boolean;
+  applyBiayaLainnya?: boolean;
+  applyAturanEstimasi?: boolean;
 }
 
 export interface OrderCostBreakdownItem {

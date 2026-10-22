@@ -10,14 +10,23 @@ import { SamsatCostItem } from "../../domain/pricing/types";
 export interface IPricingDataProvider {
   getSamsatItems(): SamsatCostItem[];
   getSamsatItemById(id: string): SamsatCostItem | undefined;
-  updateSamsatItem(id: string, updates: Partial<SamsatCostItem>): boolean;
+  updateSamsatItem(id: string, updates: Partial<SamsatCostItem>): Promise<boolean> | boolean;
   addSamsatItem(item: Omit<SamsatCostItem, "id">): SamsatCostItem;
+  getServiceConfigs?(): any[];
+  getSamsatOffices?(): any[];
+  updateServicePricing?(id: string, config: any): Promise<boolean> | boolean;
+  createServicePricing?(config: any): Promise<any> | any;
+  deleteServicePricing?(id: string): Promise<boolean> | boolean;
+  createSamsatOffice?(office: any): Promise<any> | any;
+  updateSamsatOffice?(id: string, updates: any): Promise<boolean> | boolean;
+  deleteSamsatOffice?(id: string): Promise<boolean> | boolean;
   subscribe(listener: () => void): () => void;
   isLoading?(): boolean;
   getError?(): Error | null;
 }
 
 export class MockPricingProvider implements IPricingDataProvider {
+  private serviceConfigs: any[] = [];
   private items: SamsatCostItem[] = [
     { id: "mutasi-legalisir", code: "MK-01", name: "Legalisir", category: "Mutasi Keluar", basePrice: 50000, active: true },
     { id: "mutasi-hadir", code: "MK-02", name: "Hadir", category: "Mutasi Keluar", basePrice: 75000, active: true },
@@ -52,6 +61,39 @@ export class MockPricingProvider implements IPricingDataProvider {
     return newItem;
   }
 
+  public getServiceConfigs(): any[] {
+    return this.serviceConfigs;
+  }
+
+  public updateServicePricing(id: string, config: any): boolean {
+    const idx = this.serviceConfigs.findIndex((c) => c.id === id);
+    if (idx !== -1) {
+      this.serviceConfigs[idx] = { ...this.serviceConfigs[idx], ...config };
+    } else {
+      this.serviceConfigs.push({ id, ...config });
+    }
+    this.notify();
+    return true;
+  }
+
+  public createServicePricing(config: any): any {
+    const id = config.id || `${config.serviceId || "service"}:${config.samsatId || "samsat"}`;
+    const newConfig = { ...config, id };
+    this.serviceConfigs.push(newConfig);
+    this.notify();
+    return newConfig;
+  }
+
+  public deleteServicePricing(id: string): boolean {
+    const idx = this.serviceConfigs.findIndex((c) => c.id === id);
+    if (idx !== -1) {
+      this.serviceConfigs.splice(idx, 1);
+      this.notify();
+      return true;
+    }
+    return false;
+  }
+
   public subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -65,6 +107,18 @@ export class MockPricingProvider implements IPricingDataProvider {
         console.error("MockPricingProvider listener error:", err);
       }
     });
+  }
+
+  public createSamsatOffice(office: any): any {
+    return { id: `samsat-${Date.now()}`, ...office };
+  }
+
+  public updateSamsatOffice(id: string, updates: any): boolean {
+    return true;
+  }
+
+  public deleteSamsatOffice(id: string): boolean {
+    return true;
   }
 
   public isLoading(): boolean {

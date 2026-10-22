@@ -7,47 +7,111 @@ import { Badge, getStatusBadgeClass } from "./ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Search, Eye, FileDown, Calendar, DollarSign, FileText, Printer, CheckCircle2, ShieldCheck, User, Receipt, Info, CheckCircle, PackageCheck, Truck } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
+import { 
+  Search, 
+  Eye, 
+  FileDown, 
+  Calendar, 
+  DollarSign, 
+  FileText, 
+  Printer, 
+  CheckCircle2, 
+  ShieldCheck, 
+  User, 
+  Receipt, 
+  Info, 
+  CheckCircle, 
+  PackageCheck, 
+  Truck,
+  Trash2,
+  Download,
+  Image as ImageIcon,
+  MapPin,
+  Clock,
+  ExternalLink
+} from "lucide-react";
 import { toast } from "sonner";
 import { InvoiceDialog } from "./InvoiceDialog";
 import { useOrderStore, OperationalOrder } from "../data/orderStore";
 import { cn } from "./ui/utils";
+import { generateDocumentSvgUrl, downloadDataUrl } from "../utils/documentSvgGenerator";
+import { DocumentPreviewModal } from "./DocumentPreviewModal";
 
 export function OrderHistory() {
-  const { archivedOrders } = useOrderStore();
+  const { archivedOrders, deleteArchivedOrder, clearArchivedOrders } = useOrderStore();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterPeriode, setFilterPeriode] = useState("bulan");
   const [filterTanggal, setFilterTanggal] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [orderToDelete, setOrderToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isClearDialogOpen, setIsClearDialogOpen] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
   const [isPDFDialogOpen, setIsPDFDialogOpen] = useState(false);
   const [activeDocPreview, setActiveDocPreview] = useState<string>("STNK Asli");
+  const [previewPhotoModal, setPreviewPhotoModal] = useState<{ title: string; url: string } | null>(null);
+  const [historyPreviewDoc, setHistoryPreviewDoc] = useState<{
+    name: string;
+    title: string;
+    rawUrl?: string;
+    fileType?: string;
+    documentId?: string;
+  } | null>(null);
+
+  const currentUser = useMemo(() => {
+    try {
+      const stored = localStorage.getItem("auth_user");
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+  const userRole = (currentUser?.role || currentUser?.jabatan || "admin").toLowerCase();
+  const canClearRekap = userRole === "admin" || userRole === "administrator" || userRole === "svp";
 
   // Derived view for Rekap Order from single source of truth store
-  // Enforces 3 strict Rekap criteria:
-  // 1. Operational workflow complete (Stage 8 / Archived)
-  // 2. Financial settlement complete (kurang === 0, status === "Lunas")
-  // 3. No pending refund (refundStatus !== "PENDING")
+  // Shows all operational completed / archived orders with their true financial reconciliation status
   const mappedArchivedOrders = useMemo(() => {
     return archivedOrders
       .filter((op: OperationalOrder) => {
-        const isOperationalDone = op.currentStageName === "Selesai (Arsip)" || op.currentStep >= 8;
-        const kurang = op.payment?.kurang ?? 0;
-        const isLunas = op.payment?.statusPembayaran === "Lunas" && kurang === 0;
-        const noPendingRefund = op.payment?.refundStatus !== "PENDING" && op.refundStatus !== "PENDING";
-        return isOperationalDone && isLunas && noPendingRefund;
+        return op.currentStageName === "Selesai (Arsip)" || op.currentStep >= 8 || (op as any).isArchived;
       })
       .map((op: OperationalOrder) => {
         const orderDate = op.createdAt ? new Date(op.createdAt) : new Date();
         const totalEstimasiAwal = op.costSnapshot?.totalEstimasi || op.totalEstimasi || 0;
         const totalBiayaFinal = op.finalCost || op.payment?.totalBiaya || totalEstimasiAwal;
-        const dibayar = op.payment?.dibayar ?? totalBiayaFinal;
-        const kurang = op.payment?.kurang ?? 0;
-        const statusPembayaran = op.payment?.statusPembayaran || "Lunas";
+        const dibayar = op.payment?.dibayar ?? 0;
+        const kurang = op.payment?.kurang ?? Math.max(0, totalBiayaFinal - dibayar);
+        const overpayment = op.payment?.overpayment ?? Math.max(0, dibayar - totalBiayaFinal);
+        
+        const isCancelled = Boolean((op as any).isCancelled || op.currentStageName === "Dibatalkan" || (op as any).status === "Dibatalkan");
+        let statusPembayaran = isCancelled ? "Dibatalkan" : op.payment?.statusPembayaran;
+        if (!statusPembayaran) {
+          if (kurang > 0) {
+            statusPembayaran = dibayar > 0 ? "Kurang Bayar" : "Belum Bayar";
+          } else if (overpayment > 0 || op.refundStatus === "PENDING" || op.payment?.refundStatus === "PENDING") {
+            statusPembayaran = "Lebih Bayar";
+          } else {
+            statusPembayaran = "Lunas";
+          }
+        }
 
         return {
           orderNo: op.orderNo,
+          isCancelled,
+          cancellationReason: (op as any).cancellationReason,
           customer: op.customer,
           nomorHP: op.nomorHP || "-",
           layanan: op.layanan,
@@ -155,7 +219,7 @@ export function OrderHistory() {
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
           Rekap Order
         </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Order yang telah selesai secara operasional dan finansial.</p>
+        <p className="text-xs text-muted-foreground mt-0.5">Arsip riwayat order operasional dan status rekonsiliasi pembayaran.</p>
       </motion.div>
 
       <Card className="p-4 md:p-5 border border-border/80 bg-card shadow-xs flex-1 flex flex-col min-h-0">
@@ -202,6 +266,19 @@ export function OrderHistory() {
               <FileDown className="w-3.5 h-3.5 mr-1.5" />
               PDF
             </Button>
+            {canClearRekap && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={orders.length === 0}
+                onClick={() => setIsClearDialogOpen(true)}
+                className="border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 text-xs h-9 gap-1.5 ml-auto"
+                title="Bersihkan data tampilan Rekap Order"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear Rekap Order
+              </Button>
+            )}
           </div>
         </div>
 
@@ -212,7 +289,7 @@ export function OrderHistory() {
               <div>
                 <p className="text-xs text-muted-foreground font-medium">Total Order Selesai</p>
                 <p className="text-2xl font-bold tracking-tight text-foreground font-mono tabular-nums mt-0.5">{filteredOrders.length}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Operasional & Finansial</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Arsip Operasional</p>
               </div>
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
                 <PackageCheck className="w-4 h-4" />
@@ -254,10 +331,20 @@ export function OrderHistory() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground font-medium">Status Penyelesaian</p>
-                <p className="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 mt-0.5">
-                  100% Lunas
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Bebas piutang / kewajiban</p>
+                {(() => {
+                  const lunasCount = filteredOrders.filter(o => o.statusPembayaran === "Lunas").length;
+                  const lunasPercent = filteredOrders.length > 0 ? Math.round((lunasCount / filteredOrders.length) * 100) : 100;
+                  return (
+                    <>
+                      <p className="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 mt-0.5">
+                        {lunasPercent}% Lunas ({lunasCount}/{filteredOrders.length})
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {lunasPercent === 100 ? "Bebas piutang / kewajiban" : `${filteredOrders.length - lunasCount} order perlu pelunasan`}
+                      </p>
+                    </>
+                  );
+                })()}
               </div>
               <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
                 <ShieldCheck className="w-4 h-4" />
@@ -271,14 +358,14 @@ export function OrderHistory() {
           <Table className={`w-full min-w-[850px] ${filteredOrders.length === 0 ? "h-full" : ""}`}>
             <TableHeader className="bg-muted/40 border-b border-border/80">
               <TableRow>
-                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Order</TableHead>
+                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nomor Order</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nama Customer</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nomor Polisi</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Jenis Pengurusan</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Samsat</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tanggal Selesai</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Total Final</TableHead>
-                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">Status</TableHead>
+                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Total Biaya Final</TableHead>
+                <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">Status Pengerjaan</TableHead>
                 <TableHead className="h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[95px]">Aksi</TableHead>
               </TableRow>
             </TableHeader>
@@ -309,9 +396,27 @@ export function OrderHistory() {
                       Rp {order.totalBiayaFinal.toLocaleString('id-ID')}
                     </TableCell>
                     <TableCell className="px-3 py-2 text-xs text-center">
-                      <Badge status="success" className="text-[10px] font-medium">
-                        Selesai & Lunas
-                      </Badge>
+                      {order.isCancelled || order.statusPembayaran === "Dibatalkan" ? (
+                        <Badge status="error" className="text-[10px] font-medium">
+                          Dibatalkan
+                        </Badge>
+                      ) : order.statusPembayaran === "Kurang Bayar" ? (
+                        <Badge status="warning" className="text-[10px] font-medium">
+                          Kurang Bayar
+                        </Badge>
+                      ) : order.statusPembayaran === "Belum Bayar" ? (
+                        <Badge status="neutral" className="text-[10px] font-medium">
+                          Belum Bayar
+                        </Badge>
+                      ) : order.statusPembayaran === "Lebih Bayar" ? (
+                        <Badge status="info" className="text-[10px] font-medium">
+                          Lebih Bayar
+                        </Badge>
+                      ) : (
+                        <Badge status="success" className="text-[10px] font-medium">
+                          Selesai & Lunas
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right px-2 py-1.5">
                       <div className="flex justify-end gap-1">
@@ -350,6 +455,15 @@ export function OrderHistory() {
                           title="Cetak Invoice"
                         >
                           <Printer className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
+                          onClick={() => setOrderToDelete(order)}
+                          title="Hapus Rekap Order Sementara"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
                     </TableCell>
@@ -430,8 +544,16 @@ export function OrderHistory() {
                     <Receipt className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                     2. Rekonsiliasi Finansial
                   </h4>
-                  <Badge status="success" className="text-[10px]">
-                    Status: Lunas (Settled)
+                  <Badge 
+                    status={
+                      selectedOrder.isCancelled || selectedOrder.statusPembayaran === "Dibatalkan" ? "error" :
+                      selectedOrder.statusPembayaran === "Kurang Bayar" ? "warning" :
+                      selectedOrder.statusPembayaran === "Belum Bayar" ? "neutral" :
+                      selectedOrder.statusPembayaran === "Lebih Bayar" ? "info" : "success"
+                    } 
+                    className="text-[10px]"
+                  >
+                    Status: {selectedOrder.isCancelled ? `Dibatalkan (${selectedOrder.cancellationReason || "Dibatalkan"})` : selectedOrder.statusPembayaran}
                   </Badge>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -454,9 +576,19 @@ export function OrderHistory() {
                     </span>
                   </div>
                   <div className="p-2.5 rounded bg-card border border-border">
-                    <span className="text-[10px] text-muted-foreground block">Sisa Kewajiban</span>
-                    <span className="font-mono font-bold text-muted-foreground">
-                      Rp 0 (Lunas)
+                    <span className="text-[10px] text-muted-foreground block">
+                      {selectedOrder.kurang > 0 ? "Sisa Kewajiban" : selectedOrder.refundAmount > 0 ? "Kelebihan Bayar" : "Sisa Kewajiban"}
+                    </span>
+                    <span className={`font-mono font-bold ${
+                      selectedOrder.kurang > 0 ? "text-amber-600 dark:text-amber-400" :
+                      selectedOrder.refundAmount > 0 ? "text-blue-600 dark:text-blue-400" :
+                      "text-emerald-600 dark:text-emerald-400"
+                    }`}>
+                      {selectedOrder.kurang > 0 
+                        ? `Rp ${selectedOrder.kurang.toLocaleString('id-ID')} (${selectedOrder.statusPembayaran})` 
+                        : selectedOrder.refundAmount > 0 
+                          ? `Rp ${selectedOrder.refundAmount.toLocaleString('id-ID')} (Refund Pending)`
+                          : "Rp 0 (Lunas)"}
                     </span>
                   </div>
                 </div>
@@ -517,6 +649,140 @@ export function OrderHistory() {
                 </div>
               </Card>
 
+              {/* SECTION 3B: Detail Petugas Kurir & Rincian Proses di Kantor Samsat */}
+              <Card className="p-4 bg-muted/20 border border-border space-y-3.5">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-primary" />
+                  Rincian Penjemputan, Proses Samsat &amp; Serah Terima
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Card 1: Petugas Penjemputan */}
+                  <div className="p-3 rounded-lg border border-border bg-card space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-border">
+                      <span className="font-semibold text-foreground text-xs flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        1. Penjemputan Berkas
+                      </span>
+                      <span className="text-[10px] bg-blue-500/10 text-blue-600 px-1.5 py-0.5 rounded font-medium border border-blue-500/20">
+                        Selesai
+                      </span>
+                    </div>
+                    <div className="space-y-1 text-[11px]">
+                      <p><span className="text-muted-foreground">Petugas Jemput: </span><strong className="text-foreground">{selectedOrder.jemputDokumen.messenger}</strong></p>
+                      <p><span className="text-muted-foreground">Waktu: </span><span className="font-mono">{selectedOrder.jemputDokumen.tanggal ? new Date(selectedOrder.jemputDokumen.tanggal).toLocaleDateString('id-ID') : '-'}</span></p>
+                      <p className="text-[10px] text-muted-foreground">Berkas fisik diterima dari customer &amp; diserahkan ke loket kantor.</p>
+                    </div>
+
+                    {/* Foto Bukti Penjemputan */}
+                    <div className="pt-2 border-t border-border/60">
+                      <span className="text-[10px] text-muted-foreground block mb-1">Bukti Foto Penjemputan:</span>
+                      {selectedOrder.rawOrder?.pickupProof?.photoUrl || selectedOrder.rawOrder?.jemputDokumen?.photoUrl ? (
+                        <div
+                          onClick={() => setPreviewPhotoModal({
+                            title: `Bukti Foto Penjemputan — ${selectedOrder.orderNo}`,
+                            url: selectedOrder.rawOrder?.pickupProof?.photoUrl || selectedOrder.rawOrder?.jemputDokumen?.photoUrl
+                          })}
+                          className="h-16 w-full rounded border border-border bg-muted/40 overflow-hidden cursor-pointer relative group flex items-center justify-center"
+                        >
+                          <img
+                            src={selectedOrder.rawOrder?.pickupProof?.photoUrl || selectedOrder.rawOrder?.jemputDokumen?.photoUrl}
+                            alt="Bukti Jemput"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] gap-1 font-medium">
+                            <Eye className="w-3 h-3" /> Lihat Foto
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded bg-muted/20 border border-dashed border-border/80 text-center">
+                          <ImageIcon className="w-4 h-4 mx-auto text-muted-foreground/60 mb-0.5" />
+                          <span className="text-[10px] text-muted-foreground block">
+                            Belum ada foto penjemputan
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card 2: Tahapan di Samsat */}
+                  <div className="p-3 rounded-lg border border-border bg-card space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-border">
+                      <span className="font-semibold text-foreground text-xs flex items-center gap-1">
+                        <PackageCheck className="w-3.5 h-3.5 text-primary" />
+                        2. Proses di Kantor Samsat
+                      </span>
+                      <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-medium border border-primary/20">
+                        {selectedOrder.samsat}
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 text-[10px]">
+                      {[
+                        { no: "A", name: "Cek Fisik Kendaraan & Gesek No. Rangka/Mesin" },
+                        { no: "B", name: "Pendaftaran Berkas di Loket Samsat" },
+                        { no: "C", name: "Penetapan Pajak Pokok & Jasa Raharja (SKPD)" },
+                        { no: "D", name: "Kasir Pembayaran Pajak & Cetak Bukti Bayar" },
+                        { no: "E", name: "Pengesahan STNK Baru & Cetak SKPD" },
+                        { no: "F", name: "Pengambilan BPKB / Dokumen Akhir" },
+                      ].map((sub) => (
+                        <div key={sub.no} className="flex items-center justify-between gap-1 text-foreground/90">
+                          <span className="truncate">• {sub.name}</span>
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Card 3: Petugas Pengantaran Kembali */}
+                  <div className="p-3 rounded-lg border border-border bg-card space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-border">
+                      <span className="font-semibold text-foreground text-xs flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                        3. Pengantaran Kembali
+                      </span>
+                      <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-medium border border-emerald-500/20">
+                        Diterima
+                      </span>
+                    </div>
+                    <div className="space-y-1 text-[11px]">
+                      <p><span className="text-muted-foreground">Petugas Antar: </span><strong className="text-foreground">{selectedOrder.pengantaranKembali.messenger}</strong></p>
+                      <p><span className="text-muted-foreground">Waktu: </span><span className="font-mono">{selectedOrder.pengantaranKembali.tanggal ? new Date(selectedOrder.pengantaranKembali.tanggal).toLocaleDateString('id-ID') : '-'}</span></p>
+                      <p className="text-[10px] text-muted-foreground">Dokumen resmi diserahkan langsung ke customer dan telah diverifikasi.</p>
+                    </div>
+
+                    {/* Foto Bukti Pengantaran / Serah Terima */}
+                    <div className="pt-2 border-t border-border/60">
+                      <span className="text-[10px] text-muted-foreground block mb-1">Bukti Foto Serah Terima:</span>
+                      {selectedOrder.rawOrder?.deliveryHandover?.photoProofUrl || selectedOrder.rawOrder?.pengantaranKembali?.photoUrl ? (
+                        <div
+                          onClick={() => setPreviewPhotoModal({
+                            title: `Bukti Foto Serah Terima — ${selectedOrder.orderNo}`,
+                            url: selectedOrder.rawOrder?.deliveryHandover?.photoProofUrl || selectedOrder.rawOrder?.pengantaranKembali?.photoUrl
+                          })}
+                          className="h-16 w-full rounded border border-border bg-muted/40 overflow-hidden cursor-pointer relative group flex items-center justify-center"
+                        >
+                          <img
+                            src={selectedOrder.rawOrder?.deliveryHandover?.photoProofUrl || selectedOrder.rawOrder?.pengantaranKembali?.photoUrl}
+                            alt="Bukti Serah Terima"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] gap-1 font-medium">
+                            <Eye className="w-3 h-3" /> Lihat Foto
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded bg-muted/20 border border-dashed border-border/80 text-center">
+                          <ImageIcon className="w-4 h-4 mx-auto text-muted-foreground/60 mb-0.5" />
+                          <span className="text-[10px] text-muted-foreground block">
+                            Belum ada foto serah terima pengantaran
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
               {/* SECTION 4: Dokumen Pengurusan (BEFORE vs AFTER) */}
               <Card className="p-4 bg-muted/20 border border-border space-y-3">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -537,43 +803,66 @@ export function OrderHistory() {
                     </div>
                     <div className="space-y-2">
                       {[
-                        { label: "STNK Asli", fileType: "PDF", fileName: selectedOrder.clientDocuments?.stnk?.name || "STNK_Asli.pdf", state: "Terverifikasi" },
-                        { label: "BPKB Asli", fileType: "PDF", fileName: selectedOrder.clientDocuments?.bpkb?.name || "BPKB_Kendaraan.pdf", state: "Terverifikasi" },
-                        { label: "KTP Pemilik", fileType: "JPG", fileName: selectedOrder.clientDocuments?.ktp?.name || "KTP_Pemilik.jpg", state: "Terverifikasi" },
-                      ].map((doc, idx) => (
-                        <div key={idx} className="p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                              <FileText className="w-3.5 h-3.5" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-medium text-foreground text-xs truncate">{doc.label}</span>
-                                <span className="px-1 py-0.2 rounded bg-muted text-[9px] font-mono text-muted-foreground uppercase">{doc.fileType}</span>
+                        { key: "stnk", label: "STNK Asli", doc: selectedOrder.clientDocuments?.stnk },
+                        { key: "bpkb", label: "BPKB Asli", doc: selectedOrder.clientDocuments?.bpkb },
+                        { key: "ktp", label: "KTP Pemilik", doc: selectedOrder.clientDocuments?.ktp },
+                      ].map((item, idx) => {
+                        const hasFile = Boolean(item.doc?.name || item.doc?.fileUrl);
+                        const fileName = item.doc?.name || "Belum diunggah";
+                        const fileType = item.doc?.fileType?.toUpperCase() || (item.doc?.name?.toLowerCase().endsWith(".pdf") ? "PDF" : "JPG");
+                        const state = hasFile ? (item.doc?.status || "Terverifikasi") : "Belum Tersedia";
+
+                        return (
+                          <div key={idx} className="p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                                <FileText className="w-3.5 h-3.5" />
                               </div>
-                              <span className="text-[10px] text-muted-foreground truncate font-mono block max-w-[130px]">{doc.fileName}</span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-medium text-foreground text-xs truncate">{item.label}</span>
+                                  {hasFile && (
+                                    <span className="px-1 py-0.2 rounded bg-muted text-[9px] font-mono text-muted-foreground uppercase">{fileType}</span>
+                                  )}
+                                </div>
+                                <span className={cn("text-[10px] truncate font-mono block max-w-[130px]", !hasFile ? "text-amber-500 italic" : "text-muted-foreground")}>
+                                  {fileName}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className={cn(
+                                "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border",
+                                hasFile
+                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                  : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                              )}>
+                                {state}
+                              </span>
+                              {hasFile && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 px-2 text-[10px] gap-1"
+                                  onClick={() => {
+                                    setHistoryPreviewDoc({
+                                      name: item.doc?.name || item.label,
+                                      title: item.label,
+                                      rawUrl: item.doc?.fileUrl,
+                                      fileType: item.doc?.fileType,
+                                      documentId: item.doc?.documentId,
+                                    });
+                                  }}
+                                  title={`Preview ${item.label}`}
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>Lihat</span>
+                                </Button>
+                              )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                              {doc.state}
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-[10px] gap-1"
-                              onClick={() => {
-                                setActiveDocPreview(doc.label);
-                                setIsPDFDialogOpen(true);
-                              }}
-                              title={`Preview ${doc.label}`}
-                            >
-                              <Eye className="w-3 h-3" />
-                              <span>Lihat</span>
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -589,44 +878,75 @@ export function OrderHistory() {
                       </span>
                     </div>
                     <div className="space-y-2">
-                      {[
-                        { label: "Notice Pajak Baru", fileType: "PDF", fileName: `Notice_Pajak_${selectedOrder.nopol?.replace(/\s+/g, '_') || 'Baru'}.pdf`, state: "Tercetak Resmi" },
-                        { label: "STNK Pengesahan Baru", fileType: "PDF", fileName: `STNK_Baru_${selectedOrder.nopol?.replace(/\s+/g, '_') || 'Baru'}.pdf`, state: "Tercetak Resmi" },
-                        { label: "Tanda Terima Dokumen", fileType: "PDF", fileName: `TT_${selectedOrder.orderNo}.pdf`, state: "Ditandatangani" },
-                      ].map((doc, idx) => (
-                        <div key={idx} className="p-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-7 h-7 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                              <ShieldCheck className="w-3.5 h-3.5" />
+                      {(() => {
+                        const afterDocs = [
+                          ...(selectedOrder.rekapDocuments?.filter((d: any) => d.phase === "AFTER" || d.category === "Dokumen Hasil") || []),
+                          ...(selectedOrder.uploadedDocs || []),
+                          ...(selectedOrder.deliveryHandover?.photoProofUrl ? [{
+                            id: "handover-proof",
+                            name: selectedOrder.deliveryHandover.fileName || "Bukti Serah Terima",
+                            label: "Bukti Serah Terima",
+                            fileUrl: selectedOrder.deliveryHandover.photoProofUrl,
+                            fileType: selectedOrder.deliveryHandover.fileType || "image",
+                            status: "Dokumen Diserahkan",
+                          }] : []),
+                        ];
+
+                        if (afterDocs.length === 0) {
+                          return (
+                            <div className="p-3 text-center text-xs text-muted-foreground italic bg-muted/10 rounded border border-dashed border-border">
+                              Belum ada dokumen hasil yang diunggah untuk order ini.
                             </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-medium text-foreground text-xs truncate">{doc.label}</span>
-                                <span className="px-1 py-0.2 rounded bg-emerald-500/20 text-[9px] font-mono text-emerald-700 dark:text-emerald-300 uppercase">{doc.fileType}</span>
+                          );
+                        }
+
+                        return afterDocs.map((doc: any, idx: number) => {
+                          const docName = doc.name || doc.label || doc.documentType || "Dokumen Hasil";
+                          const fileType = doc.fileType?.toUpperCase() || (docName.toLowerCase().endsWith(".pdf") ? "PDF" : "IMAGE");
+                          const docUrl = doc.fileUrl;
+                          return (
+                            <div key={doc.id || idx} className="p-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-7 h-7 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-medium text-foreground text-xs truncate">{docName}</span>
+                                    <span className="px-1 py-0.2 rounded bg-emerald-500/20 text-[9px] font-mono text-emerald-700 dark:text-emerald-300 uppercase">{fileType}</span>
+                                  </div>
+                                  <span className="text-[10px] text-muted-foreground truncate font-mono block max-w-[130px]">{doc.fileName || docName}</span>
+                                </div>
                               </div>
-                              <span className="text-[10px] text-muted-foreground truncate font-mono block max-w-[130px]">{doc.fileName}</span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                  {doc.status || "Tersedia"}
+                                </span>
+                                {docUrl && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 px-2 text-[10px] gap-1 text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800"
+                                    onClick={() => {
+                                      setHistoryPreviewDoc({
+                                        name: docName,
+                                        title: `Dokumen Hasil — ${docName}`,
+                                        rawUrl: docUrl,
+                                        fileType: doc.fileType,
+                                        documentId: doc.id?.startsWith("doc-") ? undefined : doc.id,
+                                      });
+                                    }}
+                                    title={`Preview ${docName}`}
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                    <span>Lihat</span>
+                                  </Button>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                              {doc.state}
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-[10px] gap-1 text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800"
-                              onClick={() => {
-                                setActiveDocPreview(doc.label);
-                                setIsPDFDialogOpen(true);
-                              }}
-                              title={`Preview ${doc.label}`}
-                            >
-                              <Eye className="w-3 h-3" />
-                              <span>Lihat</span>
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -696,7 +1016,7 @@ export function OrderHistory() {
               </div>
 
               {/* Active Document Status Panel */}
-              <Card className="p-5 border border-border bg-card shadow-2xs space-y-3">
+              <Card className="p-4 border border-border bg-card shadow-2xs space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-border">
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-primary" />
@@ -706,18 +1026,76 @@ export function OrderHistory() {
                     Arsip Terverifikasi
                   </span>
                 </div>
-                <div className="p-4 rounded-lg bg-muted/20 border border-border text-center space-y-2">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-5 h-5" />
-                  </div>
-                  <p className="font-medium text-foreground text-xs">Arsip Berkas Resmi Terverifikasi</p>
-                  <p className="text-[11px] text-muted-foreground max-w-md mx-auto">
-                    Dokumen fisik asli telah melalui seluruh alur verifikasi Samsat dan diserahterimakan kepada customer secara sah pada Stage 8 ({selectedOrder.completedAt?.toLocaleDateString('id-ID')}).
-                  </p>
-                  <p className="text-[10px] font-mono text-muted-foreground">
-                    Kode Registrasi: ARC-{selectedOrder.orderNo}-{activeDocPreview.replace(/\s+/g, '')}
-                  </p>
-                </div>
+
+                {/* Real document preview container */}
+                {(() => {
+                  const lower = activeDocPreview.toLowerCase();
+                  const clientKey = lower.includes("stnk") ? "stnk" : lower.includes("bpkb") ? "bpkb" : lower.includes("ktp") ? "ktp" : "";
+                  const clientFile = clientKey ? selectedOrder.clientDocuments?.[clientKey] : null;
+                  const rekapMatch = selectedOrder.rekapDocuments?.find((r: any) => r.label === activeDocPreview || r.documentType === activeDocPreview);
+                  const updatedMatch = selectedOrder.updatedDocuments?.find((u: any) => u.name === activeDocPreview);
+                  const realUrl = clientFile?.fileUrl || rekapMatch?.fileUrl || updatedMatch?.fileUrl;
+
+                  if (!realUrl) {
+                    return (
+                      <div className="w-full flex flex-col items-center justify-center p-6 bg-muted/10 border border-dashed border-border rounded-lg min-h-[180px] text-center space-y-2">
+                        <FileText className="w-8 h-8 text-muted-foreground/50 mx-auto" />
+                        <p className="text-xs font-semibold text-foreground">{activeDocPreview}</p>
+                        <p className="text-[11px] text-muted-foreground max-w-sm">
+                          Dokumen fisik tercatat dalam tahapan pengurusan, namun belum ada softcopy atau scan berkas digital yang diunggah ke sistem.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  const isPdf = (clientFile?.fileType === "pdf" || realUrl.endsWith(".pdf")) && !realUrl.startsWith("data:image/");
+
+                  return (
+                    <div className="space-y-3">
+                      <div className="w-full flex items-center justify-center p-2 bg-muted/20 border border-border rounded-lg min-h-[300px] max-h-[55vh] overflow-auto">
+                        {isPdf ? (
+                          <iframe
+                            src={realUrl}
+                            title={activeDocPreview}
+                            className="w-full h-[50vh] rounded border border-border"
+                          />
+                        ) : (
+                          <img
+                            src={realUrl}
+                            alt={activeDocPreview}
+                            className="max-h-[50vh] max-w-full object-contain rounded shadow-xs"
+                          />
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between pt-1 text-[11px] text-muted-foreground">
+                        <span className="font-mono">ID Arsip: ARC-{selectedOrder.orderNo}-{activeDocPreview.replace(/\s+/g, '')}</span>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            if (realUrl.startsWith("data:")) {
+                              downloadDataUrl(realUrl, `${activeDocPreview.replace(/\s+/g, '_')}_${selectedOrder.orderNo}.${isPdf ? 'pdf' : 'png'}`);
+                            } else {
+                              const a = document.createElement("a");
+                              a.href = realUrl;
+                              a.download = `${activeDocPreview.replace(/\s+/g, '_')}_${selectedOrder.orderNo}`;
+                              a.target = "_blank";
+                              a.rel = "noreferrer";
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                            }
+                            toast.success(`Dokumen ${activeDocPreview} berhasil diunduh!`);
+                          }}
+                          className="h-7 px-3 text-xs gap-1.5 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30"
+                          variant="outline"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Unduh Dokumen Ini</span>
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </Card>
             </div>
           )}
@@ -733,11 +1111,157 @@ export function OrderHistory() {
         </DialogContent>
       </Dialog>
 
+      {/* Confirmation Dialog: Hapus Rekap Order Sementara */}
+      <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && setOrderToDelete(null)}>
+        <AlertDialogContent className="bg-card text-card-foreground border-border max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm font-semibold flex items-center gap-2 text-rose-600">
+              <Trash2 className="w-4 h-4" />
+              <span>Hapus Rekap Order Sementara?</span>
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
+              <p>
+                Rekap order <strong className="font-mono text-foreground">{orderToDelete?.orderNo}</strong> ({orderToDelete?.customer}) akan dibersihkan dari daftar rekapitulasi sementara.
+              </p>
+              <p className="p-2.5 rounded bg-muted/40 border border-border text-[11px] text-foreground/80">
+                Catatan: Master data transaksi dan seluruh histori keuangan tetap tersimpan aman di <strong>Data Penjualan</strong>.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting} className="h-8 text-xs">
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!orderToDelete) return;
+                setIsDeleting(true);
+                try {
+                  const ok = deleteArchivedOrder(orderToDelete.orderNo);
+                  if (ok) {
+                    toast.success(`Rekap order ${orderToDelete.orderNo} berhasil dihapus dari rekap.`);
+                    setOrderToDelete(null);
+                  } else {
+                    toast.error("Gagal menghapus rekap order.");
+                  }
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+              className="h-8 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Menghapus..." : "Hapus Rekap"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation Dialog: Clear Rekap Order (Section 7) */}
+      <AlertDialog open={isClearDialogOpen} onOpenChange={setIsClearDialogOpen}>
+        <AlertDialogContent className="bg-card text-card-foreground border-border max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm font-semibold flex items-center gap-2 text-rose-600">
+              <Trash2 className="w-4 h-4" />
+              <span>Clear Rekap Order</span>
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2.5 pt-1">
+              <p className="text-foreground leading-relaxed font-medium">
+                Tindakan ini akan membersihkan data Rekap Order saja. Data Penjualan, transaksi, tagihan, pembayaran, dan riwayat penjualan tidak akan dihapus atau diubah.
+              </p>
+              <div className="p-2.5 rounded bg-muted/40 border border-border text-[11px] text-muted-foreground">
+                Arsip operasional Rekap Order akan dibersihkan dari tampilan. Seluruh catatan akuntansi dan bukti transaksi pada modul Finance tetap tersimpan utuh.
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isClearing} className="h-8 text-xs">
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isClearing}
+              onClick={async (e) => {
+                e.preventDefault();
+                setIsClearing(true);
+                try {
+                  const ok = clearArchivedOrders();
+                  if (ok) {
+                    toast.success("Rekap Order berhasil dibersihkan.");
+                    setIsClearDialogOpen(false);
+                  } else {
+                    toast.error("Gagal membersihkan data Rekap Order.");
+                  }
+                } catch (err: any) {
+                  toast.error(err.message || "Gagal membersihkan data Rekap Order.");
+                } finally {
+                  setIsClearing(false);
+                }
+              }}
+              className="h-8 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 font-medium"
+            >
+              {isClearing ? "Membersihkan..." : "Ya, Clear Rekap Order"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Photo Proof Modal for Messengers */}
+      <Dialog open={!!previewPhotoModal} onOpenChange={() => setPreviewPhotoModal(null)}>
+        <DialogContent className="max-w-xl bg-card text-card-foreground p-4">
+          <DialogHeader className="pb-2 border-b border-border">
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-primary" />
+              <span>{previewPhotoModal?.title}</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-2 bg-muted/20 border border-border rounded-lg flex items-center justify-center my-2 max-h-[65vh] overflow-hidden">
+            {previewPhotoModal?.url && (
+              <img
+                src={previewPhotoModal.url}
+                alt={previewPhotoModal.title}
+                className="max-h-[60vh] max-w-full object-contain rounded"
+              />
+            )}
+          </div>
+          <DialogFooter className="flex justify-between items-center sm:justify-between">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (previewPhotoModal) {
+                  downloadDataUrl(previewPhotoModal.url, `${previewPhotoModal.title.replace(/\s+/g, '_')}.png`);
+                  toast.success("Foto bukti berhasil diunduh!");
+                }
+              }}
+              className="h-8 text-xs gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Unduh Foto</span>
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setPreviewPhotoModal(null)} className="h-8 text-xs">
+              Tutup
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Invoice Dialog */}
       <InvoiceDialog 
         open={isInvoiceDialogOpen}
         onOpenChange={setIsInvoiceDialogOpen}
         order={selectedOrder}
+      />
+
+      {/* Unified Document Preview Modal */}
+      <DocumentPreviewModal
+        isOpen={!!historyPreviewDoc}
+        onClose={() => setHistoryPreviewDoc(null)}
+        title={historyPreviewDoc?.title || "Preview Dokumen"}
+        documentName={historyPreviewDoc?.name}
+        rawUrl={historyPreviewDoc?.rawUrl}
+        fileType={historyPreviewDoc?.fileType}
+        documentId={historyPreviewDoc?.documentId}
       />
     </div>
   );

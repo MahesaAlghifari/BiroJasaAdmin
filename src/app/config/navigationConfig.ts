@@ -25,6 +25,8 @@ import {
   Activity,
   Shield,
   User,
+  AlertCircle,
+  History,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -48,7 +50,9 @@ export const menuItems: MenuItem[] = [
       { id: "finance-kas-kantor", label: "Kas Kantor", path: "/finance/kas-kantor", icon: Building2 },
       { id: "finance-pengeluaran", label: "Pengeluaran", path: "/finance/pengeluaran", icon: CreditCard },
       { id: "finance-penjualan", label: "Data Penjualan", path: "/finance/data-penjualan", icon: FileText },
-      { id: "finance-tagihan", label: "Tagihan", path: "/finance/tagihan", icon: Receipt },
+      { id: "finance-belum-bayar", label: "Belum & Kurang Bayar", path: "/finance/belum-bayar", icon: AlertCircle },
+      { id: "finance-profit-pending", label: "Profit Terpending", path: "/finance/profit-pending", icon: Clock },
+      { id: "finance-cashback-pending", label: "Cashback Terpending", path: "/finance/cashback-pending", icon: DollarSign },
       { id: "finance-laba-rugi", label: "Laba Rugi", path: "/finance/laba-rugi", icon: BarChart3 },
     ],
   },
@@ -59,6 +63,7 @@ export const menuItems: MenuItem[] = [
     icon: Database,
     subItems: [
       { id: "master-samsat", label: "Samsat", path: "/master-data/samsat", icon: Building2 },
+      { id: "master-metode-pembayaran", label: "Metode Pembayaran", path: "/master-data/metode-pembayaran", icon: CreditCard },
       { id: "master-biaya-layanan", label: "Biaya Layanan", path: "/master-data/biaya-layanan", icon: DollarSign },
       { id: "master-harga-dasar-samsat", label: "Harga Dasar Samsat", path: "/master-data/harga-dasar", icon: FileText },
     ],
@@ -82,6 +87,7 @@ export const menuItems: MenuItem[] = [
     icon: Truck,
     subItems: [
       { id: "messenger-task", label: "Messenger Task", path: "/messenger/tasks", icon: Truck },
+      { id: "messenger-history", label: "Messenger History", path: "/messenger/history", icon: History },
     ],
   },
   {

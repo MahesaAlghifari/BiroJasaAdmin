@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -6,21 +6,26 @@ import { Badge } from "./ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
-import { Search, Eye, FileDown, Calendar, Activity, Shield, Wallet, User, Truck } from "lucide-react";
+import { Search, Eye, FileDown, Calendar, Activity, Shield, Wallet, User, Truck, AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { auditLog, type AuditLogEntry } from "../utils/auditLog";
 import { TablePagination } from "./ui/TablePagination";
 
 export function RiwayatAudit() {
+  const [, setAuditTick] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterRole, setFilterRole] = useState("all");
   const [filterAction, setFilterAction] = useState("all");
   const [filterModule, setFilterModule] = useState("all");
   const [filterDate, setFilterDate] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+
+  useEffect(() => {
+    return auditLog.subscribe(() => setAuditTick((t) => t + 1));
+  }, []);
 
   // Get filtered logs
   const getFilteredLogs = () => {
@@ -112,8 +117,51 @@ export function RiwayatAudit() {
         </div>
       </div>
 
-      <Card className="p-4 sm:p-5 border border-border/80 bg-card shadow-xs space-y-3.5">
-        {/* Filters and Export Toolbar */}
+      {auditLog.isLoading() && filteredLogs.length === 0 ? (
+        <Card className="p-8 border border-border/80 bg-card shadow-xs flex flex-col items-center justify-center text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm font-medium text-foreground">Memuat riwayat aktivitas dari database...</p>
+          <p className="text-xs text-muted-foreground mt-1">Menghubungkan ke API server...</p>
+        </Card>
+      ) : auditLog.getError() && filteredLogs.length === 0 ? (
+        <Card className="p-8 border border-red-500/20 bg-red-500/5 shadow-xs flex flex-col items-center justify-center text-center">
+          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 mb-3">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-foreground">Gagal Memuat Riwayat Aktivitas</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-md">{auditLog.getError()}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => auditLog.initFromApi()}
+            className="mt-4 gap-2 border-border text-xs"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Coba Lagi</span>
+          </Button>
+        </Card>
+      ) : (
+        <Card className="p-4 sm:p-5 border border-border/80 bg-card shadow-xs space-y-3.5">
+          {auditLog.isStale() && (
+            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>
+                  <strong>Peringatan Sinkronisasi:</strong> Gagal memperbarui data dari server ({auditLog.getError()}). Menampilkan data riwayat cache lokal terakhir.
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => auditLog.initFromApi()}
+                className="h-7 text-xs gap-1 hover:bg-amber-500/20"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Coba Sinkron Ulang
+              </Button>
+            </div>
+          )}
+          {/* Filters and Export Toolbar */}
         <div className="flex flex-col lg:flex-row gap-2.5 justify-between items-stretch lg:items-center">
           <div className="flex items-center gap-2 flex-wrap">
             <Select value={filterRole} onValueChange={(value) => {
@@ -324,6 +372,7 @@ export function RiwayatAudit() {
           pageSizeOptions={[10, 25, 50, 100]}
         />
       </Card>
+      )}
 
       {/* View Details Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>

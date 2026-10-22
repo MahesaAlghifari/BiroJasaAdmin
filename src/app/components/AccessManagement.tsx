@@ -33,7 +33,20 @@ import {
   Truck,
   ShoppingCart,
   Info,
+  Loader2,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import { toast } from "sonner";
 import { auditLog } from "../utils/auditLog";
 import {
@@ -41,7 +54,6 @@ import {
   permissionStore,
   Role,
   RolePermissions,
-  StageActionPermissions,
 } from "../data/permissionStore";
 
 interface AccessManagementProps {
@@ -107,6 +119,7 @@ const MODULE_GROUPS: ModuleGroup[] = [
     icon: Truck,
     modules: [
       { id: "messenger-task", label: "Messenger Task", description: "Penugasan lapangan, jemput berkas, dan update status loket." },
+      { id: "messenger-history", label: "Messenger History", description: "Arsip pekerjaan kurir selesai, kronologi proses, dan audit pengajuan biaya operasional." },
     ],
   },
   {
@@ -121,17 +134,24 @@ const MODULE_GROUPS: ModuleGroup[] = [
 ];
 
 export function AccessManagement({ currentUserId, currentUserName }: AccessManagementProps) {
-  const { matrix, resetToDefaults } = usePermissionStore();
+  const { matrix, error, isStale, refresh, resetToDefaults } = usePermissionStore();
 
   const [selectedRole, setSelectedRole] = useState<Role>("admin");
   const [localPermissions, setLocalPermissions] = useState<RolePermissions>(() =>
     JSON.parse(JSON.stringify(permissionStore.getRolePermissions("admin")))
   );
   const [hasChanges, setHasChanges] = useState(false);
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Sync when selectedRole changes or external matrix updates
   useEffect(() => {
-    const canonical = permissionStore.getRolePermissions(selectedRole);
+    const validRole = (["admin", "finance"] as Role[]).includes(selectedRole) ? selectedRole : "admin";
+    if (validRole !== selectedRole) {
+      setSelectedRole(validRole);
+      return;
+    }
+    const canonical = permissionStore.getRolePermissions(validRole);
     setLocalPermissions(JSON.parse(JSON.stringify(canonical)));
     setHasChanges(false);
   }, [selectedRole, matrix]);
@@ -174,42 +194,45 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
     setHasChanges(true);
   };
 
-  const handleToggleStage = (stageKey: keyof StageActionPermissions) => {
-    setLocalPermissions((prev) => ({
-      ...prev,
-      stages: {
-        ...prev.stages,
-        [stageKey]: !prev.stages[stageKey],
-      },
-    }));
-    setHasChanges(true);
-  };
+  const handleSave = async () => {
+    try {
+      await permissionStore.saveRolePermissions(selectedRole, localPermissions);
 
-  const handleSave = () => {
-    permissionStore.saveRolePermissions(selectedRole, localPermissions);
+      auditLog.log({
+        userId: currentUserId || "usr-admin",
+        userName: currentUserName || "Administrator",
+        userRole: "administrator",
+        action: "UPDATE",
+        module: "Hak Akses",
+        details: `Memperbarui matriks hak akses untuk role ${selectedRole.toUpperCase()}`,
+        metadata: {
+          role: selectedRole,
+          permissions: localPermissions,
+        },
+      });
 
-    auditLog.log({
-      userId: currentUserId || "usr-admin",
-      userName: currentUserName || "Administrator",
-      userRole: "administrator",
-      action: "UPDATE",
-      module: "Hak Akses",
-      details: `Memperbarui matriks hak akses untuk role ${selectedRole.toUpperCase()}`,
-      metadata: {
-        role: selectedRole,
-        permissions: localPermissions,
-      },
-    });
-
-    toast.success("Hak akses berhasil disimpan.");
-    setHasChanges(false);
+      toast.success("Hak akses berhasil disimpan.");
+      setHasChanges(false);
+    } catch (err: any) {
+      toast.error(err.message || "Gagal menyimpan hak akses.");
+    }
   };
 
   const handleReset = () => {
-    if (confirm("Kembalikan seluruh konfigurasi hak akses ke pengaturan standar pabrik?")) {
-      resetToDefaults();
+    setIsResetDialogOpen(true);
+  };
+
+  const handleConfirmReset = async () => {
+    try {
+      setIsResetting(true);
+      await resetToDefaults();
       toast.success("Hak akses berhasil direset ke standar.");
       setHasChanges(false);
+      setIsResetDialogOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || "Gagal mereset hak akses.");
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -247,15 +270,15 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
   };
 
   return (
-    <div className="w-full space-y-5 p-4 sm:p-6 lg:p-8 min-w-0 text-left">
-      {/* HEADER */}
+    <div className="w-full space-y-5 min-w-0 text-left content-fluid">
+      {/* ACTION TOOLBAR & CONTEXT */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border/60">
         <div>
           <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-primary" />
-            <h1 className="text-lg sm:text-xl font-semibold text-foreground">
-              Manajemen Hak Akses (Role & Permission)
-            </h1>
+            <Shield className="w-4 h-4 text-primary" />
+            <h2 className="text-sm sm:text-base font-semibold text-foreground">
+              Pengaturan Matriks Perizinan Role
+            </h2>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             Atur izin akses navigasi halaman, tombol mutasi data, dan pembatasan aksi workflow per role secara terpusat.
@@ -286,9 +309,29 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
         </div>
       </div>
 
-      {/* ROLE SELECTOR TABS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {(["svp", "admin", "finance", "messenger"] as Role[]).map((role) => {
+      {isStale && (
+        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>
+              <strong>Peringatan Sinkronisasi:</strong> Gagal memperbarui matriks hak akses dari server ({error}). Menampilkan data tersimpan lokal.
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => refresh()}
+            className="h-7 text-xs gap-1 hover:bg-amber-500/20"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Coba Sinkron Ulang
+          </Button>
+        </div>
+      )}
+
+      {/* ROLE SELECTOR TABS (MANAGEABLE ROLES: ADMIN & FINANCE - MESSENGER DI DASHBOARD TERPISAH) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {(["admin", "finance"] as Role[]).map((role) => {
           const isSelected = selectedRole === role;
           const meta = roleMeta[role];
           return (
@@ -303,7 +346,7 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
             >
               <div className="flex items-start justify-between gap-2">
                 <span className="font-semibold text-xs text-foreground uppercase tracking-wide">
-                  {role === "svp" ? "SVP / SPV" : role.toUpperCase()}
+                  {role.toUpperCase()}
                 </span>
                 <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${meta.color}`}>
                   {meta.badge}
@@ -340,73 +383,12 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
         )}
       </Card>
 
-      {/* SPECIAL WORKFLOW STAGE ACTIONS (ORDER TRACKING STAGE 4 & 6) */}
-      <Card className="p-4 border border-border bg-card space-y-3">
-        <div className="flex items-center justify-between border-b border-border/60 pb-2">
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-              <ShieldAlert className="w-4 h-4 text-primary" />
-              Pembatasan Aksi Mutasi Tahap Order Tracking (Stage Actions)
-            </h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Kontrol apakah role ini diizinkan mengeksekusi mutasi atau hanya memiliki hak lihat (View-Only).
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-          {/* Stage 4: Proses Samsat */}
-          <div className="p-3 rounded-lg border border-border bg-muted/20 flex items-start justify-between gap-3">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-xs text-foreground">Stage 4 — Proses Samsat</span>
-                {localPermissions.stages?.stage4_prosesSamsat ? (
-                  <Badge status="success" className="text-[10px]">Aksi Diizinkan</Badge>
-                ) : (
-                  <Badge status="neutral" className="text-[10px]">Hanya Lihat (View Only)</Badge>
-                )}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Tombol 'Simpan Progress' dan 'Lanjut ke Verifikasi Ulang'. Untuk Admin disetel default: View-Only.
-              </p>
-            </div>
-            <Switch
-              checked={Boolean(localPermissions.stages?.stage4_prosesSamsat)}
-              onCheckedChange={() => handleToggleStage("stage4_prosesSamsat")}
-              aria-label="Toggle Stage 4 mutation permission"
-            />
-          </div>
-
-          {/* Stage 6: Supervisi */}
-          <div className="p-3 rounded-lg border border-border bg-muted/20 flex items-start justify-between gap-3">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-xs text-foreground">Stage 6 — Supervisi (SPV)</span>
-                {localPermissions.stages?.stage6_supervisi ? (
-                  <Badge status="success" className="text-[10px]">Approval Diizinkan</Badge>
-                ) : (
-                  <Badge status="neutral" className="text-[10px]">Hanya Lihat (View Only)</Badge>
-                )}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Tombol 'Approve Supervisi & Lanjut ke Pengantaran'. Wajib dibatasi untuk Supervisor / SVP.
-              </p>
-            </div>
-            <Switch
-              checked={Boolean(localPermissions.stages?.stage6_supervisi)}
-              onCheckedChange={() => handleToggleStage("stage6_supervisi")}
-              aria-label="Toggle Stage 6 mutation permission"
-            />
-          </div>
-        </div>
-      </Card>
-
       {/* DETAILED MODULE & SUBMODULE PERMISSION MATRIX */}
       <div className="space-y-4">
         {MODULE_GROUPS.map((group) => {
           const GroupIcon = group.icon;
           return (
-            <Card key={group.name} className="p-4 border border-border bg-card space-y-3">
+            <Card key={group.name} className="p-4 border border-border/80 bg-card space-y-3 rounded-xl shadow-xs">
               <div className="flex items-center justify-between pb-2 border-b border-border/60">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-md bg-primary/10 text-primary flex items-center justify-center">
@@ -416,19 +398,19 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
                     Modul {group.name}
                   </h3>
                 </div>
-                <div className="flex items-center gap-6 pr-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                <div className="hidden sm:flex items-center gap-6 pr-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                   <span className="w-16 text-center">Lihat</span>
                   <span className="w-16 text-center">Kelola</span>
                 </div>
               </div>
 
-              <div className="space-y-2 divide-y divide-border/40">
+              <div className="space-y-2.5 divide-y divide-border/40">
                 {group.modules.map((mod) => {
                   const perm = localPermissions.modules[mod.id] || { view: false, manage: false };
                   return (
                     <div
                       key={mod.id}
-                      className="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                      className="pt-2.5 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
                     >
                       <div className="space-y-0.5 max-w-xl">
                         <Label className="text-xs font-medium text-foreground cursor-pointer" onClick={() => handleToggleView(mod.id)}>
@@ -437,9 +419,10 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
                         <p className="text-[11px] text-muted-foreground">{mod.description}</p>
                       </div>
 
-                      <div className="flex items-center gap-6 self-end sm:self-center pr-2">
+                      <div className="flex items-center gap-4 sm:gap-6 self-start sm:self-center pr-2 bg-muted/30 sm:bg-transparent p-1.5 sm:p-0 rounded-lg">
                         {/* Toggle Lihat (View) */}
-                        <div className="w-16 flex justify-center">
+                        <div className="flex items-center sm:justify-center gap-1.5 sm:gap-0 sm:w-16">
+                          <span className="text-[10px] sm:hidden text-muted-foreground font-medium">Lihat:</span>
                           <Switch
                             checked={perm.view}
                             onCheckedChange={() => handleToggleView(mod.id)}
@@ -448,7 +431,8 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
                         </div>
 
                         {/* Toggle Kelola (Manage) */}
-                        <div className="w-16 flex justify-center">
+                        <div className="flex items-center sm:justify-center gap-1.5 sm:gap-0 sm:w-16">
+                          <span className="text-[10px] sm:hidden text-muted-foreground font-medium">Kelola:</span>
                           <Switch
                             checked={perm.manage}
                             disabled={!perm.view}
@@ -466,26 +450,55 @@ export function AccessManagement({ currentUserId, currentUserName }: AccessManag
         })}
       </div>
 
-      {/* BOTTOM ACTION BAR */}
-      <div className="sticky bottom-4 z-20 p-3 bg-card/95 backdrop-blur-md rounded-xl border border-border shadow-md flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Info className="w-4 h-4 text-primary shrink-0" />
-          <span>
-            Perubahan akan langsung mengupdate menu navigasi, route guard, dan tombol aksi untuk seluruh akun dengan role <strong>{selectedRole.toUpperCase()}</strong>.
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            size="sm"
-            onClick={handleSave}
-            className="h-8 text-xs gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
-          >
-            <Save className="w-3.5 h-3.5" />
-            Simpan Hak Akses
-          </Button>
-        </div>
+      {/* BOTTOM INFO BAR */}
+      <div className="p-3 sm:p-3.5 bg-card/95 backdrop-blur-md rounded-xl border border-border/80 shadow-xs flex items-center gap-2 text-xs text-muted-foreground">
+        <Info className="w-4 h-4 text-primary shrink-0" />
+        <span>
+          Perubahan akan langsung mengupdate menu navigasi, route guard, dan tombol aksi untuk seluruh akun dengan role <strong>{selectedRole.toUpperCase()}</strong> setelah Anda mengklik <strong>Simpan Hak Akses</strong>.
+        </span>
       </div>
+
+      {/* Confirmation Dialog: Reset Hak Akses ke Standar */}
+      <AlertDialog open={isResetDialogOpen} onOpenChange={(open) => { if (!open && !isResetting) setIsResetDialogOpen(false); }}>
+        <AlertDialogContent className="border-border sm:max-w-md bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm sm:text-base font-semibold text-foreground flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-primary" />
+              Reset Hak Akses ke Standar Pabrik?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground pt-1 space-y-2">
+              <p>
+                Apakah Anda yakin ingin mengembalikan seluruh izin hak akses untuk seluruh role ke konfigurasi default sistem?
+              </p>
+              <p className="p-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-[11px] font-medium leading-relaxed">
+                Seluruh kustomisasi hak akses yang telah disimpan pada role Admin dan Finance akan diganti dengan pengaturan bawaan sistem.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel disabled={isResetting} className="text-xs h-8">
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isResetting}
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmReset();
+              }}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs h-8 font-semibold shadow-xs flex items-center gap-1.5"
+            >
+              {isResetting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Mereset...
+                </>
+              ) : (
+                "Ya, Reset Standar"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

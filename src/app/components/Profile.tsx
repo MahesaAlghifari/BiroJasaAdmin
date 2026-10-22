@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
@@ -10,6 +10,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { User, Mail, Phone, MapPin, Building, Edit, Save, Camera } from "lucide-react";
 import { toast } from "sonner";
+import { userRepository } from "../../data/repositories/userRepository";
+import { orderRepository } from "../../data/repositories/orderRepository";
 
 interface ProfileProps {
   userRole?: 'admin' | 'messenger';
@@ -17,6 +19,8 @@ interface ProfileProps {
 
 export function Profile({ userRole = 'admin' }: ProfileProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [activeUser, setActiveUser] = useState<any>(null);
+  const [totalOrdersCount, setTotalOrdersCount] = useState<number>(0);
   
   // Default profile data based on role
   const getDefaultProfile = () => {
@@ -44,23 +48,71 @@ export function Profile({ userRole = 'admin' }: ProfileProps) {
 
   const [profileData, setProfileData] = useState(getDefaultProfile());
 
+  useEffect(() => {
+    let sessionUser: any = null;
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem("auth_user") : null;
+      if (raw) sessionUser = JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+
+    const allUsers = userRepository.getAll();
+    const userFromRepo = sessionUser 
+      ? allUsers.find((u) => String(u.id) === String(sessionUser.userId || sessionUser.id) || u.email === sessionUser.email)
+      : allUsers[0];
+
+    const current = userFromRepo || sessionUser;
+    if (current) {
+      setActiveUser(current);
+      setProfileData({
+        name: current.nama || current.name || (userRole === 'messenger' ? "Messenger Biro Jasa" : "Admin Biro Jasa"),
+        email: current.email || (userRole === 'messenger' ? "messenger@birojasa.com" : "admin@birojasa.com"),
+        phone: (current as any).phone || (current as any).noHp || (current as any).telepon || "08123456789",
+        address: (current as any).alamat || "Jl. Sudirman No. 123, Jakarta Selatan",
+        company: "PT. Biro Jasa Indonesia",
+        position: current.jabatan || (userRole === 'messenger' ? "Messenger" : "Administrator"),
+        bio: (current as any).bio || (userRole === 'messenger' 
+          ? "Menjalankan tugas pengambilan dan pengantaran dokumen kendaraan bermotor dengan pengalaman lebih dari 3 tahun."
+          : "Mengelola sistem biro jasa kendaraan bermotor dengan pengalaman operasional profesional."),
+      });
+    }
+
+    try {
+      const orders = orderRepository.getAllFlat();
+      setTotalOrdersCount(orders.length);
+    } catch {
+      setTotalOrdersCount(0);
+    }
+  }, [userRole]);
+
   const handleSave = () => {
     setIsEditing(false);
+    if (activeUser?.id) {
+      userRepository.updateUser(activeUser.id, {
+        nama: profileData.name,
+        email: profileData.email,
+        phone: profileData.phone,
+        alamat: profileData.address,
+      } as any);
+
+      try {
+        const raw = localStorage.getItem("auth_user");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          parsed.nama = profileData.name;
+          parsed.email = profileData.email;
+          localStorage.setItem("auth_user", JSON.stringify(parsed));
+        }
+      } catch {
+        // ignore
+      }
+    }
     toast.success("Profil berhasil diupdate!");
   };
 
   return (
-    <div className="space-y-4 p-4 md:p-5">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <h1 className="text-xl font-semibold text-foreground tracking-tight">
-          Profil Saya
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">Kelola informasi profil dan akun Anda</p>
-      </motion.div>
-
+    <div className="space-y-4 w-full min-w-0 text-left content-fluid">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Profile Card */}
         <motion.div
@@ -104,7 +156,7 @@ export function Profile({ userRole = 'admin' }: ProfileProps) {
                 </Card>
                 <Card className="p-3 bg-muted/40 border border-border">
                   <p className="text-xs text-muted-foreground">Total Order</p>
-                  <p className="text-sm font-medium font-mono tabular-nums text-foreground">1,247 orders</p>
+                  <p className="text-sm font-medium font-mono tabular-nums text-foreground">{totalOrdersCount} orders</p>
                 </Card>
                 <Card className="p-3 bg-muted/40 border border-border">
                   <p className="text-xs text-muted-foreground">Rating</p>
@@ -276,7 +328,7 @@ export function Profile({ userRole = 'admin' }: ProfileProps) {
           <Card className="p-4 sm:p-5 border border-border/80 bg-card shadow-xs mt-6">
             <h3 className="text-lg font-semibold text-foreground mb-4">Aktivitas Terakhir</h3>
             <Separator className="mb-4" />
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(userRole === 'messenger' ? [
                 { action: "Jemput dokumen dari klien", time: "2 jam yang lalu", icon: "📄" },
                 { action: "Proses dokumen di Samsat", time: "4 jam yang lalu", icon: "🏢" },

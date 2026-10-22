@@ -2,9 +2,9 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 
 const groups = [
-  { title: "Informasi Kendaraan", fields: ["R4 / R2", "Nomor Polisi di BPKB / STNK", "Nama Customer", "Nama Sesuai BPKB / STNK"] },
-  { title: "Informasi Pengurusan", fields: ["Jenis Pengurusan", "Samsat", "Jenis Bayar"] },
-  { title: "Keuangan", fields: ["Tanggal Uang Masuk", "Uang Masuk dari Konsumen", "Bank Uang Keluar", "Tanggal Uang Keluar", "Uang Keluar dari Biro Jasa", "Profit", "Status"] },
+  { title: "Informasi Kendaraan", fields: ["R4 / R2", "Nomor Polisi di BPKB / STNK", "Nama Customer", "Nama Pemilik (STNK/BPKB)"] },
+  { title: "Informasi Pengurusan", fields: ["Jenis Pengurusan", "Samsat", "Skema Pembayaran"] },
+  { title: "Keuangan", fields: ["Tanggal Uang Masuk", "Uang Masuk dari Konsumen", "Bank Uang Keluar", "Tanggal Uang Keluar", "Biaya Pokok Samsat", "Profit", "Status Pembayaran"] },
   { title: "Dokumen", fields: ["No Invoice", "Tanggal Invoice", "Tanda Terima", "BPKB", "Status BPKB", "TTB BPKB"] },
 ];
 

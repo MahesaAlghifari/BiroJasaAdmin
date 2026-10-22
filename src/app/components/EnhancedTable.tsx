@@ -8,11 +8,12 @@ import {
   Download, 
   Search, 
   Edit, 
-  Trash2,
-  FileText,
-  ChevronLeft,
-  ChevronRight,
-  Filter
+  Trash2, 
+  FileText, 
+  ChevronLeft, 
+  ChevronRight, 
+  Filter,
+  RotateCcw
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -28,9 +29,22 @@ import {
   SelectValue,
 } from "./ui/select";
 import { TablePagination } from "./ui/TablePagination";
+import { EmptyState } from "./ui/empty-state";
+import { cn } from "./ui/utils";
+
+export interface ColumnDef {
+  key: string;
+  label: string;
+  align?: "left" | "center" | "right";
+  filterable?: boolean;
+  filterType?: string;
+  [key: string]: any;
+}
+
+export type Column = ColumnDef;
 
 interface EnhancedTableProps {
-  columns: { key: string; label: string; }[];
+  columns: ColumnDef[];
   data: any[];
   onAdd?: () => void;
   onEdit?: (item: any) => void;
@@ -39,6 +53,7 @@ interface EnhancedTableProps {
   onExport?: (format: 'csv' | 'pdf') => void;
   searchPlaceholder?: string;
   itemsPerPageOptions?: number[];
+  filterSlot?: React.ReactNode;
 }
 
 export function EnhancedTable({
@@ -49,12 +64,12 @@ export function EnhancedTable({
   onDelete,
   onExport,
   searchPlaceholder = "Cari data...",
-  itemsPerPageOptions = [10, 25, 50, 100]
+  itemsPerPageOptions = [10, 25, 50, 100],
+  filterSlot
 }: EnhancedTableProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(itemsPerPageOptions[0]);
-  const [showFilter, setShowFilter] = useState(false);
+  const [itemsPerPage, setItemsPerPage] = useState(itemsPerPageOptions.includes(25) ? 25 : itemsPerPageOptions[0]);
 
   // Filter data based on search
   const filteredData = data.filter(item =>
@@ -64,8 +79,9 @@ export function EnhancedTable({
   );
 
   // Pagination
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const paginatedData = filteredData.slice(startIndex, endIndex);
 
@@ -96,6 +112,23 @@ export function EnhancedTable({
     return value;
   };
 
+  const getColAlignment = (col: ColumnDef) => {
+    if (col.align) return col.align;
+    const k = col.key.toLowerCase();
+    if (k.includes("uang") || k.includes("biaya") || k.includes("profit") || k.includes("gaji") || k.includes("nominal") || k.includes("total")) {
+      return "right";
+    }
+    if (k.includes("status") || k.includes("jabatan") || k === "no" || k === "nik") {
+      return "center";
+    }
+    return "left";
+  };
+
+  const handleResetSearch = () => {
+    setSearchTerm("");
+    setCurrentPage(1);
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-3">
       {/* Header Actions */}
@@ -104,7 +137,7 @@ export function EnhancedTable({
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             placeholder={searchPlaceholder}
-            className="pl-10 bg-input-background border-border h-9"
+            className="pl-10 bg-input-background border-border h-9 text-xs"
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
@@ -112,36 +145,43 @@ export function EnhancedTable({
             }}
           />
         </div>
+        {filterSlot && (
+          <div className="shrink-0 w-full sm:w-auto">
+            {filterSlot}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2 shrink-0">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => setShowFilter(!showFilter)}
-            className="border-border"
-          >
-            <Filter className="w-4 h-4 mr-2" />
-            Filter
-          </Button>
+          {searchTerm && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleResetSearch}
+              className="border-border text-xs h-9 gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset
+            </Button>
+          )}
           {onAdd && (
-            <Button onClick={onAdd} className="bg-primary hover:bg-primary/90">
-              <Plus className="w-4 h-4 mr-2" />
+            <Button onClick={onAdd} className="bg-primary hover:bg-primary/90 h-9 text-xs">
+              <Plus className="w-4 h-4 mr-1.5" />
               Tambah
             </Button>
           )}
           {onExport && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="border-border">
-                  <Download className="w-4 h-4 mr-2" />
+                <Button variant="outline" className="border-border h-9 text-xs">
+                  <Download className="w-4 h-4 mr-1.5" />
                   Export
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => onExport('csv')}>
+                <DropdownMenuItem onClick={() => onExport('csv')} className="text-xs">
                   <FileText className="w-4 h-4 mr-2" />
                   Export CSV
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onExport('pdf')}>
+                <DropdownMenuItem onClick={() => onExport('pdf')} className="text-xs">
                   <FileText className="w-4 h-4 mr-2" />
                   Export PDF
                 </DropdownMenuItem>
@@ -151,24 +191,37 @@ export function EnhancedTable({
         </div>
       </div>
 
-
-
       {/* Table */}
       <div className="rounded-xl border border-border/80 overflow-hidden shadow-xs bg-card flex-1 flex flex-col min-h-[220px]">
         <Table className={`w-full min-w-[550px] ${paginatedData.length === 0 ? "h-full" : ""}`}>
           <TableHeader className="bg-muted/40 border-b border-border/80">
             <TableRow>
-              {columns.map(col => (
-                <TableHead key={col.key} className="h-9 px-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{col.label}</TableHead>
-              ))}
+              {columns.map(col => {
+                const align = getColAlignment(col);
+                const alignClass = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+                return (
+                  <TableHead
+                    key={col.key}
+                    className={cn(
+                      "h-9 px-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider",
+                      alignClass
+                    )}
+                  >
+                    {col.label}
+                  </TableHead>
+                );
+              })}
               {(onEdit || onDelete) && <TableHead className="text-right h-9 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-[90px]">Aksi</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {paginatedData.length === 0 ? (
               <TableRow className="h-full hover:bg-transparent">
-                <TableCell colSpan={columns.length + 1} className="text-center text-muted-foreground py-12 text-xs h-full min-h-[200px] align-middle">
-                  Tidak ada data ditemukan
+                <TableCell colSpan={columns.length + (onEdit || onDelete ? 1 : 0)} className="text-center py-8 align-middle p-0">
+                  <EmptyState
+                    title="Tidak ada data ditemukan"
+                    description="Belum ada data yang cocok dengan kriteria pencarian atau filter saat ini."
+                  />
                 </TableCell>
               </TableRow>
             ) : (
@@ -177,11 +230,15 @@ export function EnhancedTable({
                   key={item.id ?? idx}
                   className="hover:bg-muted/30 transition-colors border-b border-border/60 last:border-0 h-10"
                 >
-                  {columns.map(col => (
-                    <TableCell key={col.key} className="px-3.5 py-2 text-xs">
-                      {formatValue(item[col.key], col.key)}
-                    </TableCell>
-                  ))}
+                  {columns.map(col => {
+                    const align = getColAlignment(col);
+                    const alignClass = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+                    return (
+                      <TableCell key={col.key} className={cn("px-3.5 py-2 text-xs", alignClass)}>
+                        {formatValue(item[col.key], col.key)}
+                      </TableCell>
+                    );
+                  })}
                   {(onEdit || onDelete) && (
                     <TableCell className="text-right px-3 py-1.5">
                       <div className="flex gap-1 justify-end">

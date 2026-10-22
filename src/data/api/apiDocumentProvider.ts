@@ -161,4 +161,20 @@ export class ApiDocumentProvider implements IDocumentProvider {
     const ticket = await this.createAccessTicket(id, "download");
     return `${this.baseUrl}/documents/${encodeURIComponent(id)}/download?ticket=${encodeURIComponent(ticket)}`;
   }
+
+  public async linkOrder(id: string, orderNo: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/documents/${encodeURIComponent(id)}/link-order`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...this.getAuthHeader(),
+        },
+        body: JSON.stringify({ orderNo }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
 }

@@ -25,6 +25,7 @@ import {
 } from "../../domain/order/types";
 import { createInitialOrders } from "../../data/mock/orderMockData";
 import { orderRepository, IOrderRepository } from "../../data/repositories/orderRepository";
+import { APP_CONFIG } from "../config/appConfig";
 
 export type {
   StructuredAddress,
@@ -148,30 +149,47 @@ class OrderStore {
 
     const totalEst = data.totalEstimasi || data.uangMasuk || 0;
     const initialPaid = data.uangMasuk || 0;
-    const explicitInvoice = data.invoiceNo || data["No Invoice"];
+    const explicitInvoice = data.noInvoice !== undefined ? data.noInvoice : (data.invoiceNo || data["No Invoice"]);
 
     return this.addOrder({
       customer: data.customer.trim(),
       nopol: data.nopol.trim(),
       layanan: data.layanan.trim(),
-      namaPemilik: data.namaPemilik?.trim() || data.customer.trim(),
+      namaPemilik: data.namaPemilik?.trim() || "-",
       nomorHP: data.nomorHP?.trim() || "081200000000",
       wilayahSamsatAsal: data.wilayahSamsatAsal || "Jakarta Timur",
+      wilayahSamsatTujuan: data.wilayahSamsatTujuan || "-",
       jenisKendaraan: data.jenisKendaraan || (data.r4r2 === "R2" ? "Motor" : "Mobil"),
       biayaJasa: data.biayaJasa || 0,
+      biayaAntarJemput: data.biayaAntarJemput || 0,
+      namaPenerimaKeluar: data.namaPenerimaKeluar || data.namaPemilikRekeningKeluar || "",
+      bankUangKeluar: data.bankUangKeluar || "",
+      metodePembayaranKeluar: data.metodePembayaranKeluar || "",
+      tanggalPengeluaranSamsat: data.tanggalPengeluaranSamsat || "",
       totalEstimasi: totalEst,
-      catatanOrder: "Order dibuat dari Data Penjualan (+ Tambah Data)",
-      clientDocuments: {
-        stnk: { name: "STNK_Asli.pdf", status: "Sudah Tersedia", isOptional: false },
-        bpkb: { name: "BPKB_Kendaraan.pdf", status: data.bpkb === "Ada" ? "Sudah Tersedia" : "Belum Tersedia", isOptional: false },
-        ktp: { name: "KTP_Pemilik.pdf", status: "Sudah Tersedia", isOptional: false },
+      currentStep: data.currentStep || 1,
+      currentStageName: data.currentStageName || "Verifikasi",
+      isArchived: data.isArchived || false,
+      catatanOrder: data.catatanOrder || "Order dibuat dari Data Penjualan (+ Tambah Data)",
+      statusPengerjaan: data.statusPengerjaan,
+      salesSnapshotStatus: data.salesSnapshotStatus || data.statusPengerjaan,
+      noInvoice: explicitInvoice,
+      tandaTerima: data.tandaTerima,
+      ttbBPKB: data.ttbBPKB,
+      statusBPKB: data.statusBPKB,
+      bpkb: data.bpkb,
+      statusKepemilikan: data.statusKepemilikan || "Pribadi",
+      clientDocuments: data.clientDocuments || {
+        stnk: { name: "", status: "Belum Tersedia", isOptional: false },
+        bpkb: { name: "", status: data.bpkb === "Ada" ? "Sudah Tersedia" : "Belum Tersedia", isOptional: false },
+        ktp: { name: "", status: "Belum Tersedia", isOptional: false },
         skkp: { name: "", status: "Belum Tersedia", isOptional: true },
         lainnya: { name: "", status: "Belum Tersedia", isOptional: true },
       },
       payment: {
         tipePembayaran: initialPaid >= totalEst && totalEst > 0 ? "Bayar di Awal" : "Bayar di Akhir",
         metodePembayaran: "Transfer",
-        statusPembayaran: initialPaid >= totalEst && totalEst > 0 ? "Lunas" : initialPaid > 0 ? "Kurang" : "Belum Bayar",
+        statusPembayaran: data.statusPembayaran || (initialPaid >= totalEst && totalEst > 0 ? "Lunas" : initialPaid > 0 ? "Kurang" : "Belum Bayar"),
         totalBiaya: totalEst,
         totalEstimasi: totalEst,
         dibayar: initialPaid,
@@ -182,6 +200,7 @@ class OrderStore {
         isPaymentVerified: initialPaid >= totalEst && totalEst > 0,
         invoiceNo: explicitInvoice,
       },
+      rekapDocuments: data.rekapDocuments || [],
     });
   }
 
@@ -214,17 +233,22 @@ class OrderStore {
       customer: data.customer.trim(),
       nopol: data.nopol.trim(),
       layanan: data.layanan.trim(),
-      namaPemilik: data.namaPemilik?.trim() || data.customer.trim(),
+      namaPemilik: data.namaPemilik?.trim() || "-",
       nomorHP: data.nomorHP?.trim() || "081200000000",
       wilayahSamsatAsal: data.wilayahSamsatAsal || "Jakarta Timur",
       jenisKendaraan: data.jenisKendaraan || (data.r4r2 === "R2" ? "Motor" : "Mobil"),
       biayaJasa: data.biayaJasa || 0,
+      biayaAntarJemput: data.biayaAntarJemput || 0,
+      namaPenerimaKeluar: data.namaPenerimaKeluar || data.namaPemilikRekeningKeluar || "",
+      bankUangKeluar: data.bankUangKeluar || "",
+      metodePembayaranKeluar: data.metodePembayaranKeluar || "",
+      tanggalPengeluaranSamsat: data.tanggalPengeluaranSamsat || "",
       totalEstimasi: totalEst,
       catatanOrder: "Order dibuat dari Data Penjualan (+ Tambah Data)",
-      clientDocuments: {
-        stnk: { name: "STNK_Asli.pdf", status: "Sudah Tersedia", isOptional: false },
-        bpkb: { name: "BPKB_Kendaraan.pdf", status: data.bpkb === "Ada" ? "Sudah Tersedia" : "Belum Tersedia", isOptional: false },
-        ktp: { name: "KTP_Pemilik.pdf", status: "Sudah Tersedia", isOptional: false },
+      clientDocuments: data.clientDocuments || {
+        stnk: { name: "", status: "Belum Tersedia", isOptional: false },
+        bpkb: { name: "", status: "Belum Tersedia", isOptional: false },
+        ktp: { name: "", status: "Belum Tersedia", isOptional: false },
         skkp: { name: "", status: "Belum Tersedia", isOptional: true },
         lainnya: { name: "", status: "Belum Tersedia", isOptional: true },
       },
@@ -242,6 +266,7 @@ class OrderStore {
         isPaymentVerified: initialPaid >= totalEst && totalEst > 0,
         invoiceNo: explicitInvoice,
       },
+      rekapDocuments: data.rekapDocuments || [],
     });
   }
 
@@ -274,13 +299,14 @@ class OrderStore {
       customer: data.customer,
       nomorHP: data.nomorHP,
       layanan: data.layanan,
-      currentStep: 1,
-      currentStageName: "Verifikasi",
+      currentStep: (data as any).currentStep || 1,
+      currentStageName: (data as any).currentStageName || "Verifikasi",
       catatanOrder: data.catatanOrder || "Order baru dibuat dari formulir Buat Order.",
-      createdAt: new Date().toISOString().split("T")[0],
+      createdAt: (data as any).createdAt || new Date().toISOString().split("T")[0],
+      isArchived: (data as any).isArchived || false,
 
       namaPemilik: data.namaPemilik,
-      kepemilikanKendaraan: data.kepemilikanKendaraan || "Pribadi",
+      kepemilikanKendaraan: (data as any).statusKepemilikan || data.kepemilikanKendaraan || "Pribadi",
       jenisKendaraan: data.jenisKendaraan || "Mobil",
       tahunKendaraan: data.tahunKendaraan || new Date().getFullYear(),
       nopol: data.nopol,
@@ -313,9 +339,9 @@ class OrderStore {
       },
 
       clientDocuments: data.clientDocuments || {
-        stnk: { name: "STNK_Asli.pdf", status: "Sudah Tersedia", isOptional: false },
-        bpkb: { name: "BPKB_Kendaraan.pdf", status: "Sudah Tersedia", isOptional: false },
-        ktp: { name: "KTP_Pemilik.pdf", status: "Sudah Tersedia", isOptional: false },
+        stnk: { name: "", status: "Belum Tersedia", isOptional: false },
+        bpkb: { name: "", status: "Belum Tersedia", isOptional: false },
+        ktp: { name: "", status: "Belum Tersedia", isOptional: false },
         skkp: { name: "", status: "Belum Tersedia", isOptional: true },
         lainnya: { name: "", status: "Belum Tersedia", isOptional: true },
       },
@@ -339,7 +365,13 @@ class OrderStore {
       payment: data.payment ? {
         ...data.payment,
         totalEstimasi,
-        overpayment: data.payment.overpayment || 0,
+        totalBiaya: data.payment.totalBiaya || totalEstimasi,
+        dibayar: data.payment.dibayar || 0,
+        kurang: data.payment.kurang !== undefined ? data.payment.kurang : Math.max(0, totalEstimasi - (data.payment.dibayar || 0)),
+        overpayment: data.payment.overpayment !== undefined ? data.payment.overpayment : Math.max(0, (data.payment.dibayar || 0) - totalEstimasi),
+        nominalDibayarAwal: data.payment.nominalDibayarAwal,
+        nominalPembayaranAwalTerkonfirmasi: data.payment.nominalPembayaranAwalTerkonfirmasi,
+        riwayatKoreksiPembayaran: data.payment.riwayatKoreksiPembayaran || [],
         settlementCondition: data.payment.settlementCondition || "PENDING_FINALIZATION",
         refundStatus: data.payment.refundStatus || "NONE",
         isPaymentVerified: data.payment.isPaymentVerified ?? false,
@@ -362,7 +394,19 @@ class OrderStore {
       createdByRole: data.createdByRole,
       settlementCondition: "PENDING_FINALIZATION",
       refundStatus: "NONE",
-      rekapDocuments: [],
+      rekapDocuments: data.rekapDocuments || [],
+      salesSnapshotStatus: (data as any).salesSnapshotStatus,
+      statusPengerjaan: (data as any).statusPengerjaan,
+      noInvoice: (data as any).noInvoice,
+      tandaTerima: (data as any).tandaTerima,
+      ttbBPKB: (data as any).ttbBPKB,
+      statusBPKB: (data as any).statusBPKB,
+      bpkb: (data as any).bpkb,
+      biayaAntarJemput: (data as any).biayaAntarJemput || 0,
+      namaPenerimaKeluar: (data as any).namaPenerimaKeluar || (data as any).namaPemilikRekeningKeluar || "",
+      bankUangKeluar: (data as any).bankUangKeluar || "",
+      metodePembayaranKeluar: (data as any).metodePembayaranKeluar || "",
+      tanggalPengeluaranSamsat: (data as any).tanggalPengeluaranSamsat || "",
     };
   }
 
@@ -380,8 +424,10 @@ class OrderStore {
 
     // Register invoice in Finance Store as Single Source of Truth
     try {
-      const isLunasInitial = newOrder.payment.tipePembayaran === "Bayar di Awal" && newOrder.payment.isPaymentVerified;
-      const initialPaid = isLunasInitial ? newOrder.totalEstimasi : (newOrder.payment.dibayar || 0);
+      const isLunasInitial = newOrder.payment.statusPembayaran === "Lunas" && newOrder.payment.isPaymentVerified;
+      const initialPaid = newOrder.payment.tipePembayaran === "Bayar di Awal" ? (newOrder.payment.dibayar || 0) : 0;
+      const initialOverpayment = newOrder.payment.tipePembayaran === "Bayar di Awal" ? (newOrder.payment.overpayment || 0) : 0;
+      const explicitInv = (data as any).noInvoice !== undefined ? (data as any).noInvoice : newOrder.payment?.invoiceNo;
       const invRecord = financeStore.addInvoice({
         orderNo,
         customer: data.customer,
@@ -396,10 +442,11 @@ class OrderStore {
         collectionStatus: isLunasInitial ? "LUNAS" : "BELUM_JATUH_TEMPO",
         settlementCondition: "PENDING_FINALIZATION",
         refundStatus: "NONE",
-        overpayment: 0,
-        invoice: newOrder.payment?.invoiceNo || undefined,
+        overpayment: initialOverpayment,
+        invoice: explicitInv !== undefined ? explicitInv : undefined,
       });
-      newOrder.payment.invoiceNo = invRecord.invoice;
+      newOrder.payment.invoiceNo = explicitInv !== undefined ? explicitInv : invRecord.invoice;
+      (newOrder as any).noInvoice = explicitInv !== undefined ? explicitInv : invRecord.invoice;
     } catch {
       // safe fallback
     }
@@ -440,8 +487,9 @@ class OrderStore {
     // Register invoice in Finance Store optimistically
     let invRecord: any = null;
     try {
-      const isLunasInitial = newOrder.payment.tipePembayaran === "Bayar di Awal" && newOrder.payment.isPaymentVerified;
-      const initialPaid = isLunasInitial ? newOrder.totalEstimasi : (newOrder.payment.dibayar || 0);
+      const isLunasInitial = newOrder.payment.statusPembayaran === "Lunas" && newOrder.payment.isPaymentVerified;
+      const initialPaid = newOrder.payment.tipePembayaran === "Bayar di Awal" ? (newOrder.payment.dibayar || 0) : 0;
+      const initialOverpayment = newOrder.payment.tipePembayaran === "Bayar di Awal" ? (newOrder.payment.overpayment || 0) : 0;
       invRecord = financeStore.addInvoice({
         orderNo: tempOrderNo,
         customer: data.customer,
@@ -456,7 +504,7 @@ class OrderStore {
         collectionStatus: isLunasInitial ? "LUNAS" : "BELUM_JATUH_TEMPO",
         settlementCondition: "PENDING_FINALIZATION",
         refundStatus: "NONE",
-        overpayment: 0,
+        overpayment: initialOverpayment,
         invoice: newOrder.payment?.invoiceNo || undefined,
       });
       newOrder.payment.invoiceNo = invRecord.invoice;
@@ -500,24 +548,26 @@ class OrderStore {
   }
 
   // Verifikasi Pembayaran (Khususnya untuk Bayar di Awal di Stage 1)
-  public verifyPayment(orderNo: string, verifierName: string = "Admin"): boolean {
+  public verifyPayment(orderNo: string, verifierName: string = "Admin", confirmedAmount?: number, notes?: string, proofPayload?: any): boolean {
     const targetOrder = this.repository.getByOrderNo(orderNo);
     if (!targetOrder) return false;
 
     const success = typeof this.repository.verifyPayment === "function"
-      ? this.repository.verifyPayment(orderNo, verifierName)
+      ? (this.repository as any).verifyPayment(orderNo, verifierName, confirmedAmount, notes, proofPayload)
       : false;
     if (!success) return false;
 
     const updatedOrder = this.repository.getByOrderNo(orderNo);
 
-    // Synchronize to financeStore
-    if (updatedOrder?.payment.invoiceNo) {
+    // Synchronize to financeStore without recording duplicate cash bank entries
+    if (updatedOrder) {
       try {
-        financeStore.recordPayment(updatedOrder.payment.invoiceNo, updatedOrder.payment.totalBiaya, {
-          paymentMethod: updatedOrder.payment.metodePembayaran,
-          tanggal: updatedOrder.payment.tanggalBayar || new Date().toISOString().split("T")[0],
-          skipAudit: true,
+        financeStore.updateInvoiceFromOrder(updatedOrder.orderNo, {
+          totalTagihan: updatedOrder.payment.totalBiaya,
+          terbayar: updatedOrder.payment.dibayar,
+          sisa: updatedOrder.payment.kurang,
+          overpayment: updatedOrder.payment.overpayment,
+          status: updatedOrder.payment.statusPembayaran as any,
         });
       } catch {
         // safe fallback
@@ -531,8 +581,14 @@ class OrderStore {
         userRole: "admin",
         action: "UPDATE",
         module: "Order Tracking",
-        details: `Verifikasi pembayaran lunas order ${targetOrder.orderNo} (${targetOrder.customer})`,
-        metadata: { orderNo: targetOrder.orderNo, totalBiaya: targetOrder.payment.totalBiaya },
+        details: `Verifikasi pembayaran order ${targetOrder.orderNo} (${targetOrder.customer}) - Terkonfirmasi Rp ${(updatedOrder?.payment.dibayar || 0).toLocaleString('id-ID')} (${updatedOrder?.payment.statusPembayaran})`,
+        metadata: {
+          orderNo: targetOrder.orderNo,
+          totalBiaya: targetOrder.payment.totalBiaya,
+          confirmedAmount: updatedOrder?.payment.dibayar,
+          statusPembayaran: updatedOrder?.payment.statusPembayaran,
+          catatan: notes,
+        },
       });
     } catch {
       // safe fallback
@@ -548,7 +604,19 @@ class OrderStore {
     if (!currentOrder) return false;
     const currentStageFound = currentOrder.currentStageName;
 
-    const success = this.repository.advanceOrder(orderNo, targetStage, updates);
+    const nowIso = new Date().toISOString();
+    const effectiveUpdates: Partial<OperationalOrder> = { ...updates };
+    if ((targetStage === "Verifikasi Dokumen" || targetStage === "Proses Samsat") && !currentOrder.tanggalMasukBerkas && !updates.tanggalMasukBerkas) {
+      effectiveUpdates.tanggalMasukBerkas = nowIso;
+    }
+    if ((targetStage === "Proses Samsat" || targetStage === "Verifikasi Ulang" || targetStage === "Supervisi" || targetStage === "Pengantaran" || targetStage === "Dokumen Telah Diterima") && !currentOrder.tanggalProsesSamsat && !updates.tanggalProsesSamsat) {
+      effectiveUpdates.tanggalProsesSamsat = nowIso;
+    }
+    if (updates.tanggalPengeluaranSamsat) {
+      effectiveUpdates.tanggalPengeluaranSamsat = updates.tanggalPengeluaranSamsat;
+    }
+
+    const success = this.repository.advanceOrder(orderNo, targetStage, effectiveUpdates);
     if (!success) return false;
 
     const updatedOrder = this.repository.getByOrderNo(orderNo);
@@ -657,7 +725,8 @@ class OrderStore {
     newTotal: number,
     biayaSamsat: number,
     profit: number,
-    costItems?: any[]
+    costItems?: any[],
+    alasanPending?: string
   ): boolean {
     const targetOrder = this.repository.getByOrderNo(orderNo);
 
@@ -695,6 +764,8 @@ class OrderStore {
         finalCost: newTotal,
         settlementCondition,
         refundStatus,
+        alasanPending: alasanPending || (targetOrder as any).alasanPending || undefined,
+        alasan_pending: alasanPending || (targetOrder as any).alasan_pending || undefined,
         payment: {
           ...targetOrder.payment,
           totalBiaya: newTotal,
@@ -723,6 +794,8 @@ class OrderStore {
       overpayment: newOverpayment,
       dueTrigger: "AFTER_DOCUMENT_RECEIVED",
       collectionStatus,
+      alasan_pending: alasanPending || undefined,
+      alasan: alasanPending || undefined,
     });
     return res !== null;
   }
@@ -744,6 +817,79 @@ class OrderStore {
         module: "Order History",
         details: `Order ${orderNo} (${orderToArchive.customer}) selesai alur operasional dan diarsipkan`,
         metadata: { orderNo, customer: orderToArchive.customer },
+      });
+    } catch {
+      // safe fallback
+    }
+
+    this.notify();
+    return true;
+  }
+
+  // 6c. BATALKAN ORDER (Soft cancellation)
+  public async cancelOrder(orderNo: string, reason?: string): Promise<boolean> {
+    const success = await Promise.resolve(this.repository.cancelOrder?.(orderNo, reason));
+    if (success) {
+      this.notify();
+    }
+    return Boolean(success);
+  }
+
+  // 6b. HAPUS REKAP ORDER SEMENTARA (Membersihkan baris arsip sementara, data penjualan master tetap utuh)
+  public deleteArchivedOrder(orderNo: string): boolean {
+    const targetOrder = this.repository.getByOrderNo(orderNo);
+    if (targetOrder) {
+      try {
+        financeStore.preserveOrderInContractDataset(targetOrder);
+      } catch {
+        // safe fallback
+      }
+    }
+
+    const success = this.repository.deleteArchivedOrder(orderNo);
+    if (!success) return false;
+
+    try {
+      auditLog.log({
+        userId: "usr-admin",
+        userName: "Admin",
+        userRole: "admin",
+        action: "DELETE",
+        module: "Order History",
+        details: `Rekap order sementara ${orderNo} dibersihkan oleh admin`,
+        metadata: { orderNo },
+      });
+    } catch {
+      // safe fallback
+    }
+
+    this.notify();
+    return true;
+  }
+
+  // 6c. CLEAR SELURUH REKAP ORDER (Membersihkan tampilan rekap order saja, Data Penjualan & Finance 100% utuh)
+  public clearArchivedOrders(): boolean {
+    const currentArchived = this.repository.getArchivedOrders();
+    for (const ord of currentArchived) {
+      try {
+        financeStore.preserveOrderInContractDataset(ord);
+      } catch {
+        // safe fallback
+      }
+    }
+
+    const success = this.repository.clearArchivedOrders();
+    if (!success) return false;
+
+    try {
+      auditLog.log({
+        userId: "usr-admin",
+        userName: "Admin",
+        userRole: "admin",
+        action: "DELETE",
+        module: "Order History",
+        details: `Seluruh data Rekap Order (${currentArchived.length} berkas) dibersihkan oleh admin`,
+        metadata: { count: currentArchived.length },
       });
     } catch {
       // safe fallback
@@ -809,11 +955,98 @@ class OrderStore {
     return true;
   }
 
+  public async approveDocumentsAsync(
+    orderNo: string,
+    stage: 5 | 6,
+    user: { name?: string; role?: string } = {},
+    notes?: string,
+    snapshotDocs?: string[]
+  ): Promise<boolean> {
+    const existing = this.repository.getByOrderNo(orderNo);
+    if (!existing) return false;
+
+    const nowIso = new Date().toISOString();
+    const currentApproval = existing.documentApproval || {
+      stage5Verified: false,
+      stage6Approved: false,
+    };
+
+    const userName = user.name || (stage === 6 ? "Supervisor" : "Admin Loket");
+    const userRole = user.role || (stage === 6 ? "supervisor" : "admin");
+
+    const updatedApproval = {
+      ...currentApproval,
+      ...(stage === 5
+        ? {
+            stage5Verified: true,
+            stage5VerifiedAt: nowIso,
+            stage5VerifiedBy: userName,
+            stage5VerifiedByRole: userRole,
+            stage5Notes: notes || "",
+            snapshotDocs: snapshotDocs || currentApproval.snapshotDocs || [],
+          }
+        : {
+            stage6Approved: true,
+            stage6ApprovedAt: nowIso,
+            stage6ApprovedBy: userName,
+            stage6ApprovedByRole: userRole,
+            stage6Notes: notes || "",
+            snapshotDocs: snapshotDocs || currentApproval.snapshotDocs || [],
+          }),
+    };
+
+    this.repository.updateOrder(orderNo, {
+      documentApproval: updatedApproval,
+      ...(stage === 5 ? { documentsVerified: true } : { approvedBySpv: true, supervisorApprovedBy: userName }),
+    });
+
+    try {
+      const token = typeof localStorage !== "undefined" ? localStorage.getItem("auth_token") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      await fetch(`${APP_CONFIG.apiBaseUrl}/orders/${encodeURIComponent(orderNo)}/approve-documents`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          stage,
+          approvedBy: userName,
+          approvedByRole: userRole,
+          notes,
+          snapshotDocs,
+        }),
+      });
+    } catch {
+      // Safe fallback if offline / mock mode
+    }
+
+    try {
+      auditLog.log({
+        userId: userRole === "supervisor" ? "usr-spv" : "usr-admin",
+        userName,
+        userRole: userRole as any,
+        action: "UPDATE",
+        module: "Order Tracking",
+        details: `Persetujuan dokumen Stage ${stage} disetujui untuk order ${orderNo}`,
+        metadata: { orderNo, stage, approvedBy: userName, role: userRole },
+      });
+    } catch {
+      // safe fallback
+    }
+
+    this.notify();
+    return true;
+  }
+
   public async initFromApi(): Promise<void> {
     if (typeof (this.repository as any).initFromApi === "function") {
       await (this.repository as any).initFromApi();
       this.notify();
     }
+  }
+
+  public async refresh(silent?: boolean): Promise<void> {
+    return this.initFromApi();
   }
 }
 
@@ -837,10 +1070,14 @@ export function useOrderStore() {
     updateOrder: orderStore.updateOrder.bind(orderStore),
     verifyPayment: orderStore.verifyPayment.bind(orderStore),
     archiveOrder: orderStore.archiveOrder.bind(orderStore),
+    deleteArchivedOrder: orderStore.deleteArchivedOrder.bind(orderStore),
+    clearArchivedOrders: orderStore.clearArchivedOrders.bind(orderStore),
     getOrderByNo: orderStore.getOrderByNo.bind(orderStore),
     getOrdersByStage: orderStore.getOrdersByStage.bind(orderStore),
     syncFinalCostToFinance: orderStore.syncFinalCostToFinance.bind(orderStore),
     processRefund: orderStore.processRefund.bind(orderStore),
     addRekapDocument: orderStore.addRekapDocument.bind(orderStore),
+    approveDocumentsAsync: orderStore.approveDocumentsAsync.bind(orderStore),
+    cancelOrder: orderStore.cancelOrder.bind(orderStore),
   };
 }

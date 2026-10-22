@@ -22,80 +22,118 @@ export interface RuleCalculationContext {
   pkbDasar: number;
   tahunTunggakan: number;
   bulanTunggakan: number;
+  bulanKalender?: number;
   programSamsat: ProgramSamsat;
   template: EstimationTemplateConfig;
   manualValues: Record<string, number>;
   kondisiBerkas?: KondisiBerkas;
   wilayahAccId?: WilayahAccId;
+  njkb?: number;
+  freeBbn?: boolean;
+  wilayahAsal?: string;
+  wilayahTujuan?: string;
 }
 
 export type RuleHandler = (ctx: RuleCalculationContext) => number;
 
 /**
- * Built-in validated rule handlers mapping strictly to Excel formulas
+ * Checks whether a given wilayah belongs to Polda Jabar / Jawa Barat region
+ * (Bogor, Bekasi, Depok, Jawa Barat, etc.) and is not DKI Jakarta.
+ */
+export function isJawaBaratRegion(wilayah?: string): boolean {
+  if (!wilayah) return false;
+  const w = wilayah.toLowerCase();
+  if (w.includes("dki") || w.includes("jakarta")) return false;
+  return (
+    w.includes("jabar") ||
+    w.includes("jawa barat") ||
+    w.includes("bogor") ||
+    w.includes("bekasi") ||
+    w.includes("depok")
+  );
+}
+
+/**
+ * Resolves destination region preference for BBN / Mutasi
+ */
+export function checkIsJabar(ctx: { wilayahTujuan?: string; wilayahAsal?: string }): boolean {
+  if (ctx.wilayahTujuan) return isJawaBaratRegion(ctx.wilayahTujuan);
+  return isJawaBaratRegion(ctx.wilayahAsal);
+}
+
+/**
+ * Built-in validated rule handlers mapping to estimation formulas
  */
 export const BUILTIN_RULE_HANDLERS: Record<string, RuleHandler> = {
-  // Cell C15: =I14*I12
+  // PKB Tertunggak: PKB Dasar × Tahun Tunggakan
   PKB_TERTUNGGAK: (ctx) => {
     return ctx.pkbDasar * ctx.tahunTunggakan;
   },
 
-  // Cell C16: =IF(I12=0,I14,I14/12*12) => equals PKB Dasar
+  // Pajak Baru: PKB Dasar (1 Tahun Berjalan)
   PAJAK_BARU: (ctx) => {
     return ctx.pkbDasar;
   },
 
-  // Cell F15: =ROUNDUP(IF(I11="free biaya denda",0,IF(I11="normal",IF(C15<>"",SUM(C15*I6/12*12),""),"")),-3)
+  // Denda PKB Tertunggak: PKB Tertunggak × Koefisien Denda (dibulatkan ke kelipatan Rp 1.000)
   DENDA_PKB_TERTUNGGAK: (ctx) => {
     const program = (ctx.programSamsat || "").trim().toLowerCase();
     if (program === "free biaya denda") return 0;
     const pkbTertunggak = ctx.pkbDasar * ctx.tahunTunggakan;
     const raw = pkbTertunggak * ctx.template.koefisienDenda;
-    return Math.ceil(raw / 1000) * 1000;
+    const pembulatan = ctx.template.kelipatanPembulatan || 1000;
+    return Math.ceil(raw / pembulatan) * pembulatan;
   },
 
-  // Cell F16: =ROUNDUP(IF(I11="free biaya denda";0;IF(I11="normal";SUM(I14*I6/12*I13);""));-3)
+  // Denda PKB Pajak Baru: PKB Dasar × Koefisien Denda ÷ 12 × Bulan Tunggakan (dibulatkan ke kelipatan Rp 1.000)
   DENDA_PKB_PAJAK_BARU: (ctx) => {
     const program = (ctx.programSamsat || "").trim().toLowerCase();
     if (program === "free biaya denda") return 0;
-    // SUM(I14*I6/12*I13) where I14 = PKB Dasar, I6 = Koefisien Denda (0.48), I13 = Bulan Denda
-    const raw = (ctx.pkbDasar * ctx.template.koefisienDenda / 12) * ctx.bulanTunggakan;
-    return Math.ceil(raw / 1000) * 1000;
+    const pembagi = ctx.template.pembagiBulan || 12;
+    const pembulatan = ctx.template.kelipatanPembulatan || 1000;
+    const raw = (ctx.pkbDasar * ctx.template.koefisienDenda / pembagi) * ctx.bulanTunggakan;
+    return Math.ceil(raw / pembulatan) * pembulatan;
   },
 
-  // Cell C20: =C21*I12
+  // SWDKLLJ Tertunggak: SWDKLLJ Pokok × Tahun Tunggakan
   SWDKLLJ_TERTUNGGAK: (ctx) => {
     return ctx.template.swdklljPokok * ctx.tahunTunggakan;
   },
 
-  // Cell C21: =IF(I9="mobil",143000,IF(I9="motor",35000,"Kondisi Tidak Valid"))
+  // SWDKLLJ Pajak Baru: SWDKLLJ Pokok Tahunan
   SWDKLLJ_PAJAK_BARU: (ctx) => {
     return ctx.template.swdklljPokok;
   },
 
-  // Cell F20: =IF(I12>0,IF(I9="mobil",100000*I12,IF(I9="motor",32000*I12,"Tipe kendaraan tidak dikenali")),"")
-  // NOTE: Workbook does NOT zero this out when Program Samsat is "FREE Biaya Denda"
+  // Denda SWDKLLJ Tertunggak: Denda SWDKLLJ Pokok × Tahun Tunggakan jika Tahun > 0
   DENDA_SWDKLLJ_TERTUNGGAK: (ctx) => {
     return ctx.tahunTunggakan > 0 ? ctx.template.dendaSwdklljPokok * ctx.tahunTunggakan : 0;
   },
 
-  // Cell F21: =IF(AND(I13>0,I9="mobil"),100000,IF(AND(I13>0,I9="motor"),32000,0))
-  // NOTE: Workbook does NOT zero this out when Program Samsat is "FREE Biaya Denda"
+  // Denda SWDKLLJ Pajak Baru: Denda SWDKLLJ Pokok jika Bulan Tunggakan > 0
   DENDA_SWDKLLJ_PAJAK_BARU: (ctx) => {
     return ctx.bulanTunggakan > 0 ? ctx.template.dendaSwdklljPokok : 0;
   },
 
-  // Cell C24: =IF(AND(I7="5 tahunan",I9="mobil"),200000,IF(AND(I7="5 tahunan",I9="motor"),100000,IF(I7="tahunan",0,"")))
-  ADMIN_STNK: () => 0,
+  // Administrasi STNK: Tarif resmi PNBP untuk proses 5 Tahunan
+  ADMIN_STNK: (ctx) => {
+    if (ctx.template.serviceType === "Tahunan") return 0;
+    if (ctx.template.adminStnk !== undefined) return ctx.template.adminStnk;
+    const comp = ctx.template.components.find((c) => c.id === "admin-stnk");
+    if (comp && comp.defaultValue > 0) return comp.defaultValue;
+    return ctx.template.vehicleType === "Mobil" ? 200000 : 100000;
+  },
 
-  // Cell C25: =IF(AND(I7="5 tahunan",I9="mobil"),100000,IF(AND(I7="5 tahunan",I9="motor"),60000,IF(I7="tahunan",0,"")))
-  ADMIN_TNKB: () => 0,
+  // Administrasi TNKB: Tarif resmi PNBP untuk proses 5 Tahunan
+  ADMIN_TNKB: (ctx) => {
+    if (ctx.template.serviceType === "Tahunan") return 0;
+    if (ctx.template.adminTnkb !== undefined) return ctx.template.adminTnkb;
+    const comp = ctx.template.components.find((c) => c.id === "admin-tnkb");
+    if (comp && comp.defaultValue > 0) return comp.defaultValue;
+    return ctx.template.vehicleType === "Mobil" ? 100000 : 60000;
+  },
 
-  // Cell C27: proses dan acc id (Sheet 5)
-  // Masuk dalam total C30. Default Rp 350.000 untuk Motor.
-  // Jika berkas LENGKAP -> 0.
-  // Jika wilayah spesifik dipilih selain NON ACC ID -> ikuti tarif wilayah.
-  // Jika berkas tidak diisi/kosong -> 0 (tidak menebak biaya).
+  // Proses dan ACC ID: Default Rp 350.000 untuk Motor, atau sesuai tarif wilayah ACC ID
   PROSES_DAN_ACC_ID: (ctx) => {
     const manualVal = ctx.manualValues ? ctx.manualValues["proses-dan-acc-id"] : undefined;
     if (typeof manualVal === "number" && !isNaN(manualVal) && isFinite(manualVal)) {
@@ -113,14 +151,153 @@ export const BUILTIN_RULE_HANDLERS: Record<string, RuleHandler> = {
     return ctx.template.components.find((c) => c.id === "proses-dan-acc-id")?.defaultValue ?? 350000;
   },
 
-  // Cell C28: =IF(I13+I12>0,IF(I9="motor",50000,IF(I9="mobil",100000,"Nilai F9 tidak valid")),"")
+  // Biaya Cetak SKP: Dikenakan jika terdapat durasi keterlambatan (Tahun + Bulan > 0)
   CETAK_SKP: (ctx) => {
     return ctx.tahunTunggakan + ctx.bulanTunggakan > 0 ? ctx.template.biayaCetakSkp : 0;
   },
 
-  // Cell C29: =IF(AND(I7="tahunan",I9="mobil"),250000,...)
+  // Biaya Jasa Standar Pengurusan
   JASA: (ctx) => {
     return ctx.template.biayaJasa;
+  },
+
+  // Biaya Proses 5 Tahunan (Mobil)
+  BY_PROSES_5_TAHUNAN: () => 0,
+
+  // --- Extended Formulas for BBN & Mutasi ---
+
+  // PKB Tertunggak for BBN & Mutasi: includes year overdue + month overdue rounded up
+  PKB_TERTUNGGAK_BBN_MUTASI: (ctx) => {
+    if (ctx.pkbDasar === 0) return 0;
+    const months = ctx.bulanTunggakan;
+    if (ctx.tahunTunggakan === 0 && months === 0) return 0;
+
+    // Mutasi Motor: Menggabungkan perhitungan PKB Pokok + Denda PKB
+    if (ctx.template.serviceType.includes("Mutasi") && ctx.template.vehicleType === "Motor") {
+      const pkbYear = ctx.pkbDasar * ctx.tahunTunggakan;
+      const dendaYear = (ctx.pkbDasar * ctx.template.koefisienDenda) * ctx.tahunTunggakan;
+      const pkbMonth = (ctx.pkbDasar / 12) * months;
+      const dendaMonth = (ctx.pkbDasar * ctx.template.koefisienDenda / 12) * months;
+      return Math.ceil((pkbYear + dendaYear + pkbMonth + dendaMonth) / 1000) * 1000;
+    }
+
+    const raw = ctx.pkbDasar * ctx.tahunTunggakan + (ctx.pkbDasar / 12) * months;
+    return Math.ceil(raw / 1000) * 1000;
+  },
+
+  // Denda PKB for BBN & Mutasi: year overdue penalty + month overdue penalty rounded up
+  DENDA_PKB_BBN_MUTASI: (ctx) => {
+    const program = (ctx.programSamsat || "").trim().toLowerCase();
+    if (program === "free biaya denda") return 0;
+    if (ctx.pkbDasar === 0) return 0;
+    if (ctx.template.serviceType.includes("Mutasi") && ctx.template.vehicleType === "Motor") {
+      return 0; // Already included in combined PKB dan Denda Tertunggak line
+    }
+
+    const months = ctx.bulanTunggakan;
+    if (ctx.tahunTunggakan === 0 && months === 0) return 0;
+
+    const isJabar = checkIsJabar(ctx);
+
+    // Di Jawa Barat, denda bulanan dihitung berdasarkan PKB Baru (60% × 1.2)
+    const pembagi = ctx.template.pembagiBulan || 12;
+    const pembulatan = ctx.template.kelipatanPembulatan || 1000;
+    const monthBase = isJabar
+      ? Math.ceil((Math.ceil((ctx.pkbDasar * 0.6) / pembulatan) * pembulatan * 1.2) / pembulatan) * pembulatan
+      : ctx.pkbDasar;
+    const yearPenalty = (ctx.pkbDasar * ctx.template.koefisienDenda) * ctx.tahunTunggakan;
+    const monthPenalty = (monthBase * ctx.template.koefisienDenda / pembagi) * months;
+
+    return Math.ceil((yearPenalty + monthPenalty) / pembulatan) * pembulatan;
+  },
+
+  // SWDKLLJ Tertunggak untuk BBN & Mutasi
+  SWDKLLJ_TERTUNGGAK_BBN_MUTASI: (ctx) => {
+    const isMobil = ctx.template.vehicleType === "Mobil";
+    const rate = isMobil ? 143000 : 35000;
+    const months = ctx.bulanKalender ?? ctx.bulanTunggakan;
+    if (ctx.tahunTunggakan === 0 && months === 0) return 0;
+
+    let telatSwd = 0;
+    if (ctx.template.serviceType.includes("Mutasi")) {
+      // Pada Mutasi Mobil, Telat SWDKLLJ Keluar dikalikan 0
+      if (isMobil) return 0;
+      telatSwd = ctx.tahunTunggakan === 0 ? 1 : ctx.tahunTunggakan + (months > 0 ? 1 : 0);
+    } else {
+      // Balik Nama: Mobil Jabar menggunakan rawSwd, Motor / DKI dikurangi 1
+      const isJabar = checkIsJabar(ctx);
+      const rawSwd = ctx.tahunTunggakan + (months > 0 ? 1 : 0);
+      telatSwd = isMobil && isJabar ? rawSwd : Math.max(0, rawSwd - 1);
+    }
+    return rate * telatSwd;
+  },
+
+  // Denda SWDKLLJ untuk BBN & Mutasi
+  DENDA_SWDKLLJ_BBN_MUTASI: (ctx) => {
+    const isMobil = ctx.template.vehicleType === "Mobil";
+    const rate = isMobil ? 100000 : 32000;
+    const months = ctx.bulanKalender ?? ctx.bulanTunggakan;
+    if (ctx.tahunTunggakan === 0 && months === 0) return 0;
+
+    let telatSwd = 0;
+    if (ctx.template.serviceType.includes("Mutasi")) {
+      // In workbook sheets 7, 8, 15, 16, 17 (Mobil Mutasi), Telat SWDKLLJ Keluar is explicitly multiplied by 0 (* 0)
+      if (isMobil) return 0;
+      telatSwd = ctx.tahunTunggakan === 0 ? 1 : ctx.tahunTunggakan + (months > 0 ? 1 : 0);
+    } else {
+      const isJabar = checkIsJabar(ctx);
+      const rawSwd = ctx.tahunTunggakan + (months > 0 ? 1 : 0);
+      telatSwd = isMobil && isJabar ? rawSwd : Math.max(0, rawSwd - 1);
+    }
+    return rate * telatSwd;
+  },
+
+  // BBN Pokok: Default Rp 0 if FREE, or percentage/fraction if active
+  BBN_POKOK: (ctx) => {
+    if (ctx.freeBbn !== false) return 0; // Default Free
+    const njkb = ctx.njkb || 0;
+    if (njkb > 0) return Math.ceil(njkb * 0.01);
+    return Math.ceil((ctx.pkbDasar * 2 / 3) / 1000) * 1000;
+  },
+
+  // PKB Baru for BBN & Mutasi: splits 60% * 1.2 if Jabar, or full PKB for DKI
+  PKB_BARU_BBN_MUTASI: (ctx) => {
+    const isJabar = checkIsJabar(ctx);
+    if (isJabar) {
+      const pkb60 = Math.ceil((ctx.pkbDasar * 0.6) / 1000) * 1000;
+      return Math.ceil((pkb60 * 1.2) / 1000) * 1000;
+    }
+    return ctx.pkbDasar;
+  },
+
+  // Opsen PKB for BBN & Mutasi: 40% * 1.2 if Jabar, 0 for DKI
+  OPSEN_PKB: (ctx) => {
+    const isJabar = checkIsJabar(ctx);
+    if (isJabar) {
+      const pkb40 = Math.ceil((ctx.pkbDasar * 0.4) / 1000) * 1000;
+      return Math.ceil((pkb40 * 1.2) / 1000) * 1000;
+    }
+    return 0;
+  },
+
+  // Mutasi Tarik Berkas: Rp 1.000.000 (Antar Samsat)
+  TARIK_BERKAS_MUTASI_AS: () => 1000000,
+
+  // Mutasi Tarik Berkas LD: Rp 1.500.000 (Luar Daerah)
+  TARIK_BERKAS_MUTASI_LD: () => 1500000,
+
+  // Mutasi Masuk BPKB: Rp 1.000.000 (Antar Samsat)
+  MUTASI_MASUK_BPKB_AS: () => 1000000,
+
+  // Mutasi Masuk BPKB LD: Rp 1.500.000 (Luar Daerah)
+  MUTASI_MASUK_BPKB_LD: () => 1500000,
+
+  // Biaya Proses BBN (Cek Fisik, Daftar, BPKB): Rp 1.000.000
+  BIAYA_PROSES_BBN: () => 1000000,
+
+  // Proses dan Jasa Mutasi: Rp 750.000 (Mobil), Rp 500.000 (Motor)
+  PROSES_DAN_JASA_MUTASI: (ctx) => {
+    return ctx.template.vehicleType === "Mobil" ? 750000 : 500000;
   },
 };
 
@@ -177,23 +354,41 @@ export function calculateEstimation(
   const tahunTunggakan = overdue.years;
   const isDelay = overdue.years > 0 || overdue.months > 0;
 
-  // Sheet 5 cell I13 rule:
-  // For Motor (R2), if overdue, bulan denda is calendar months + 5
-  // For Mobil (R4), bulan denda is calendar months
-  const bulanTunggakan = isDelay
-    ? (template.vehicleType === "Motor" ? overdue.months + 5 : overdue.months)
-    : 0;
+  // Penyesuaian offset bulan keterlambatan sesuai aturan jenis layanan dan kendaraan:
+  // - Motor Pajak Tahunan & 5 Tahunan: +5 bulan
+  // - Mutasi AS Motor: +1 bulan
+  // - Mutasi LD Motor: +2 bulan
+  // - BBN Mobil Jabar: +1 bulan
+  // - Lainnya: +0 bulan
+  let monthOffset = 0;
+  if (template.serviceType === "Tahunan" || template.serviceType === "5 Tahunan") {
+    if (template.vehicleType === "Motor") monthOffset = 5;
+  } else if (template.serviceType === "Mutasi Antar Samsat") {
+    if (template.vehicleType === "Motor") monthOffset = 1;
+  } else if (template.serviceType === "Mutasi Luar Daerah") {
+    if (template.vehicleType === "Motor") monthOffset = 2;
+  } else if (template.serviceType === "Balik Nama") {
+    const isJabar = checkIsJabar(input);
+    if (isJabar && template.vehicleType === "Mobil") monthOffset = 1;
+  }
+
+  const bulanTunggakan = isDelay ? overdue.months + monthOffset : 0;
   const bulanKalender = overdue.months;
 
   const ctx: RuleCalculationContext = {
     pkbDasar,
     tahunTunggakan,
     bulanTunggakan,
+    bulanKalender,
     programSamsat: input.programSamsat,
     template,
     manualValues,
     kondisiBerkas: input.kondisiBerkas,
     wilayahAccId: input.wilayahAccId,
+    njkb: input.njkb,
+    freeBbn: input.freeBbn,
+    wilayahAsal: input.wilayahAsal,
+    wilayahTujuan: input.wilayahTujuan,
   };
 
   // 2. Evaluate all active template components in display order
@@ -251,7 +446,7 @@ export function calculateEstimation(
     else if (it.category === "DENDA_PKB") totalDendaPkb += it.amount;
     else if (it.category === "SWDKLLJ") totalSwdkllj += it.amount;
     else if (it.category === "DENDA_SWDKLLJ") totalDendaSwdkllj += it.amount;
-    else if (it.category === "ADMIN" || it.category === "JASA") totalAdminDanJasa += it.amount;
+    else if (it.category === "ADMIN" || it.category === "JASA" || it.category === "PROSES" || it.category === "BBN") totalAdminDanJasa += it.amount;
     else if (it.category === "INSIDENTAL") totalInsidental += it.amount;
 
     if (it.includesInTotal) {
@@ -296,8 +491,9 @@ export function calculateEstimation(
     }
   }
 
-  // 5. Final total with Excel ROUNDUP(..., -3) (up to nearest 1.000)
-  const totalEstimasi = Math.ceil(sumForTotal / 1000) * 1000;
+  // 5. Grand total dibulatkan ke atas ke kelipatan pembulatan terdekat (default Rp 1.000)
+  const pembulatan = template.kelipatanPembulatan || 1000;
+  const totalEstimasi = Math.ceil(sumForTotal / pembulatan) * pembulatan;
 
   return {
     tahunTunggakan,

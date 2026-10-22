@@ -54,7 +54,7 @@ export class DocumentTicketService {
     const ticketStr = `tkt_${crypto.randomBytes(32).toString("hex")}`;
     const now = Date.now();
     const ttl = options?.ttlMs || this.defaultTtlMs;
-    const maxUses = options?.maxUses !== undefined ? options.maxUses : 1;
+    const maxUses = options?.maxUses !== undefined ? options.maxUses : (operation === "preview" ? 30 : 1);
 
     const entry: DocumentAccessTicket = {
       ticket: ticketStr,

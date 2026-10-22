@@ -1,0 +1,132 @@
+erDiagram
+    %% =========================================================================
+    %% 08 — ERD KONSEPTUAL BISNIS ADMIN SUN89
+    %% Relasi konseptual entitas bisnis utama beserta kardinalitas operasional
+    %% =========================================================================
+
+    CUSTOMER ||--o{ OPERATIONAL_ORDER : "memohon pengurusan"
+    VEHICLE ||--o{ OPERATIONAL_ORDER : "didaftarkan dalam"
+    USER_ACCOUNT ||--o{ OPERATIONAL_ORDER : "dikelola oleh"
+    
+    OPERATIONAL_ORDER ||--o{ ORDER_DOCUMENT : "memiliki berkas persyaratan"
+    OPERATIONAL_ORDER ||--o{ MESSENGER_TASK : "memerlukan penugasan lapangan"
+    OPERATIONAL_ORDER ||--|| FINANCE_INVOICE : "diterbitkan tagihan piutang"
+    
+    SAMSAT_OFFICE ||--o{ OPERATIONAL_ORDER : "menjadi lokasi pengurusan"
+    SAMSAT_OFFICE ||--o{ SAMSAT_PRICING : "memiliki daftar tarif dasar"
+    SERVICE_PRICING ||--o{ OPERATIONAL_ORDER : "menentukan margin jasa"
+    
+    MESSENGER_USER ||--o{ MESSENGER_TASK : "menjalankan pekerjaan"
+    MESSENGER_USER ||--o{ REIMBURSEMENT : "mengajukan klaim biaya"
+    
+    FINANCE_INVOICE ||--o{ INVOICE_PAYMENT : "menerima termin setoran"
+    INVOICE_PAYMENT }o--|| KAS_KANTOR : "dibukukan sebagai kas masuk"
+    REIMBURSEMENT }o--|| KAS_KANTOR : "dicairkan dari kas operasional"
+    
+    USER_ACCOUNT ||--o{ AUDIT_LOG : "mencatatkan jejak aktivitas"
+    ROLE_PERMISSION ||--o{ USER_ACCOUNT : "membatasi hak akses"
+
+    CUSTOMER {
+        string customerId PK "Identitas unik pemohon"
+        string nama "Nama lengkap klien / pemohon"
+        string nomorHP "Kontak WhatsApp aktif"
+        string alamat "Alamat domisili pemohon"
+    }
+
+    VEHICLE {
+        string nopol PK "Nomor Polisi Plat Kendaraan"
+        string namaPemilik "Nama pemilik sah di BPKB"
+        string jenisKendaraan "Klasifikasi Roda 2 atau Roda 4"
+        int tahunKendaraan "Tahun perakitan kendaraan"
+        date pkbBerlakuSd "Masa berlaku pajak SKKP"
+    }
+
+    OPERATIONAL_ORDER {
+        string orderNo PK "Nomor resmi order (ORD-...)"
+        int currentStep "Tahapan alur operasional (1 s.d 8)"
+        string layanan "Kategori paket pengurusan Samsat"
+        decimal totalEstimasi "Estimasi awal biaya pengurusan"
+        decimal totalBiayaRiil "Beban riil setelah hasil loket"
+        string statusOrder "Status siklus: active, archived, cancelled"
+    }
+
+    ORDER_DOCUMENT {
+        string documentId PK "ID berkas fisik / upload"
+        string namaDokumen "Jenis berkas (KTP, STNK, BPKB, SKKP)"
+        string fileUrl "Lokasi penyimpanan berkas di server"
+        string statusVerifikasi "Sudah Tersedia, Terverifikasi, Baru"
+    }
+
+    SAMSAT_OFFICE {
+        string samsatId PK "Kode unik kantor Samsat"
+        string namaSamsat "Nama unit pelayanan Samsat"
+        string kodeKabupatenKota "Kode wilayah Kemendagri"
+    }
+
+    SAMSAT_PRICING {
+        string pricingId PK "Kode tarif dasar loket"
+        string kategori "Mutasi Keluar, Masuk, Pajak Tahunan"
+        decimal hargaDasar "Biaya pokok resmi loket pemerintah"
+    }
+
+    SERVICE_PRICING {
+        string serviceId PK "Kode paket jasa biro"
+        string namaLayanan "Nama paket layanan"
+        decimal tarifJasa "Margin keuntungan biro jasa"
+    }
+
+    MESSENGER_TASK {
+        string taskId PK "ID penugasan kurir"
+        string tipeTugas "Jemput Berkas, Loket Samsat, Antar Hasil"
+        string statusTugas "NOT_STARTED, IN_PROGRESS, COMPLETED"
+        string prioritas "NORMAL, IMPORTANT, URGENT"
+    }
+
+    FINANCE_INVOICE {
+        string invoiceNo PK "Nomor resmi invoice tagihan (INV-...)"
+        decimal totalTagihan "Total nominal piutang yang ditagihkan"
+        decimal terbayar "Akumulasi pembayaran yang telah diterima"
+        decimal sisa "Sisa piutang tertunggak"
+        decimal profitFinal "Laba kotor biro jasa"
+        string statusBayar "Belum Bayar, Kurang Bayar, Lunas"
+    }
+
+    INVOICE_PAYMENT {
+        string paymentId PK "ID transaksi setoran"
+        decimal nominal "Jumlah uang disetor"
+        string metodeBayar "Transfer Bank, QRIS, Tunai"
+        string statusVerifikasi "MENUNGGU_VERIFIKASI, TERVERIFIKASI"
+    }
+
+    KAS_KANTOR {
+        int idKas PK "Nomor urut buku kas umum"
+        date tanggal "Tanggal mutasi keuangan"
+        string jenisTransaksi "MASUK atau KELUAR"
+        decimal nominal "Nilai mutasi Rupiah"
+        decimal saldoBerjalan "Saldo kas kumulatif biro jasa"
+    }
+
+    REIMBURSEMENT {
+        string reimbursementNo PK "Nomor pengajuan klaim"
+        decimal nominal "Nilai penggantian biaya lapangan"
+        string status "PENDING, APPROVED, PAID"
+    }
+
+    USER_ACCOUNT {
+        string userId PK "ID akun staf"
+        string username "Nama login sistem"
+        string role "Wewenang: admin, svp, finance, messenger"
+        string status "active atau inactive"
+    }
+
+    ROLE_PERMISSION {
+        string role PK "Nama peran wewenang"
+        json permissions "Daftar hak akses menu dan aksi"
+    }
+
+    AUDIT_LOG {
+        int logId PK "ID log aktivitas"
+        string username "Pelaku mutasi data"
+        string action "Jenis aksi: CREATE, UPDATE, DELETE, LOGIN"
+        timestamp waktu "Waktu mutasi"
+    }

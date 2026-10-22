@@ -54,3 +54,18 @@ export async function deleteUser(req: AuthenticatedRequest, res: Response, next:
     next(err);
   }
 }
+
+export async function resetUserPassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = userService.resetPassword(id, req.user);
+    res.json({
+      success: true,
+      message: `Kata sandi akun ${result.nama} berhasil direset.`,
+      data: result,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
+}

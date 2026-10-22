@@ -169,7 +169,7 @@ export function EstimatorR4Tahunan({
             </h2>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Sumber formula kanonis: Sheet <code className="text-foreground font-mono text-[11px]">PAJAK TAHUNAN  R4</code> (Workbook Resmi SUN89)
+            Formula resmi perpanjangan pajak tahunan Mobil (R4)
           </p>
         </div>
 
@@ -207,7 +207,6 @@ export function EstimatorR4Tahunan({
                   <Label htmlFor="pkb-dasar" className="text-xs font-semibold text-foreground">
                     PKB Dasar Tahunan (STNK) *
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">Cell I14</span>
                 </div>
                 <div className="relative">
                   <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
@@ -231,7 +230,6 @@ export function EstimatorR4Tahunan({
                     <Label htmlFor="due-date" className="text-xs font-semibold text-foreground">
                       Jatuh Tempo Pajak *
                     </Label>
-                    <span className="text-[10px] text-muted-foreground">Cell H21</span>
                   </div>
                   <Input
                     id="due-date"
@@ -247,7 +245,6 @@ export function EstimatorR4Tahunan({
                     <Label htmlFor="estimate-date" className="text-xs font-semibold text-foreground">
                       Tanggal Estimasi
                     </Label>
-                    <span className="text-[10px] text-muted-foreground">Cell I21</span>
                   </div>
                   <Input
                     id="estimate-date"
@@ -265,7 +262,6 @@ export function EstimatorR4Tahunan({
                   <Label className="text-xs font-semibold text-foreground">
                     Program Samsat *
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">Cell I11</span>
                 </div>
                 <RadioGroup
                   value={programSamsat}
@@ -394,7 +390,7 @@ export function EstimatorR4Tahunan({
                 </span>
                 <div>
                   <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                    Durasi Keterlambatan Pajak (Cell I22)
+                    Durasi Keterlambatan Pajak
                   </div>
                   <div className="text-base font-bold text-foreground">
                     {result.durasiKeterlambatan}
@@ -406,7 +402,7 @@ export function EstimatorR4Tahunan({
                   {result.tahunTunggakan} Tahun, {result.bulanTunggakan} Bulan
                 </div>
                 <div className="text-[10px] text-muted-foreground">
-                  Formula DATEDIF Kalender Excel
+                  Dihitung Berdasarkan Kalender
                 </div>
               </div>
             </CardContent>
@@ -420,13 +416,13 @@ export function EstimatorR4Tahunan({
             <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 uppercase tracking-wider">
-                  Total Estimasi Akhir (Cell C30)
+                  Total Estimasi Akhir
                 </span>
                 <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-foreground mt-1">
                   Rp {result.totalEstimasi.toLocaleString("id-ID")}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Termasuk Cetak SKP, Jasa, dan pembulatan kelipatan Rp 1.000 (ROUNDUP)
+                  Termasuk Cetak SKP, Jasa, dan pembulatan kelipatan Rp 1.000
                 </p>
               </div>
 
@@ -477,7 +473,7 @@ export function EstimatorR4Tahunan({
                   Rincian Komponen Biaya Terhitung
                 </CardTitle>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Dihitung otomatis sesuai formula sheet PAJAK TAHUNAN R4
+                  Dihitung otomatis sesuai formula standar perhitungan pajak R4
                 </CardDescription>
               </div>
               <span className="text-xs font-mono text-muted-foreground">
@@ -558,7 +554,7 @@ export function EstimatorR4Tahunan({
                 </span>
                 <div>
                   <div className="text-[11px] font-semibold text-foreground uppercase tracking-wide flex items-center gap-1.5">
-                    Biaya ACC ID (Cell I5)
+                    Biaya ACC ID
                     <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 font-normal">
                       Tidak Masuk Total
                     </span>
@@ -608,7 +604,7 @@ export function EstimatorR4Tahunan({
           <div className="space-y-3.5 py-2 text-xs">
             <div className="space-y-1">
               <div className="flex justify-between items-center">
-                <Label className="text-xs font-medium">Koefisien Denda (Cell I6)</Label>
+                <Label className="text-xs font-medium">Koefisien Denda</Label>
                 <span className="text-[10px] text-muted-foreground">Default: 0.48</span>
               </div>
               <Input
@@ -622,7 +618,7 @@ export function EstimatorR4Tahunan({
 
             <div className="space-y-1">
               <div className="flex justify-between items-center">
-                <Label className="text-xs font-medium">Biaya Jasa R4 (Cell C29)</Label>
+                <Label className="text-xs font-medium">Biaya Jasa R4</Label>
                 <span className="text-[10px] text-muted-foreground">Default: Rp 250.000</span>
               </div>
               <Input
@@ -635,7 +631,7 @@ export function EstimatorR4Tahunan({
 
             <div className="space-y-1">
               <div className="flex justify-between items-center">
-                <Label className="text-xs font-medium">Pokok SWDKLLJ Tahunan Mobil (Cell C21)</Label>
+                <Label className="text-xs font-medium">Pokok SWDKLLJ Tahunan Mobil</Label>
                 <span className="text-[10px] text-muted-foreground">Default: Rp 143.000</span>
               </div>
               <Input
@@ -648,7 +644,7 @@ export function EstimatorR4Tahunan({
 
             <div className="space-y-1">
               <div className="flex justify-between items-center">
-                <Label className="text-xs font-medium">Biaya Cetak SKP (Cell C28)</Label>
+                <Label className="text-xs font-medium">Biaya Cetak SKP</Label>
                 <span className="text-[10px] text-muted-foreground">Default: Rp 100.000</span>
               </div>
               <Input

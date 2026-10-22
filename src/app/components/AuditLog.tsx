@@ -8,10 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Label } from "./ui/label";
-import { Search, Eye, FileDown, FileText, Printer, Activity } from "lucide-react";
+import { Search, Eye, FileDown, FileText, Printer, Activity, RotateCcw, AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { auditLog, AuditLogEntry } from "../utils/auditLog";
 import { TablePagination } from "./ui/TablePagination";
+import { EmptyState } from "./ui/empty-state";
 
 interface AuditLogProps {
   currentUserRole: 'administrator' | 'finance' | 'admin' | 'messenger';
@@ -23,7 +24,7 @@ export function AuditLog({ currentUserRole }: AuditLogProps) {
   const [filterModule, setFilterModule] = useState("all");
   const [filterAction, setFilterAction] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isDocumentViewOpen, setIsDocumentViewOpen] = useState(false);
@@ -34,6 +35,16 @@ export function AuditLog({ currentUserRole }: AuditLogProps) {
   useEffect(() => {
     return auditLog.subscribe(() => setAuditTick((t) => t + 1));
   }, []);
+
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterRole("all");
+    setFilterModule("all");
+    setFilterAction("all");
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters = Boolean(searchTerm || filterRole !== "all" || filterModule !== "all" || filterAction !== "all");
 
   // Get filtered logs
   const filteredLogs = useMemo(() => {
@@ -100,21 +111,63 @@ export function AuditLog({ currentUserRole }: AuditLogProps) {
     setCurrentPage(1);
   };
 
-  return (
-    <div className="flex-1 flex flex-col min-h-full space-y-4 px-2 sm:px-3 lg:px-4 py-4 md:py-6 w-full min-w-0 text-left">
-      <div className="shrink-0">
-        <nav className="text-xs text-muted-foreground flex items-center gap-1.5 pb-2" aria-label="Breadcrumb">
-          <span>Master Data</span>
-          <span>/</span>
-          <span className="text-foreground font-medium">Riwayat Aktivitas</span>
-        </nav>
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold text-foreground tracking-tight">Riwayat Aktivitas</h3>
-          <p className="text-xs md:text-sm text-muted-foreground">Pantau semua aktivitas pengguna dalam sistem</p>
-        </div>
+  if (auditLog.isLoading() && filteredLogs.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col min-h-full space-y-4 w-full min-w-0 text-left content-fluid">
+        <Card className="p-8 border border-border/80 bg-card shadow-xs flex-1 flex flex-col items-center justify-center text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm font-medium text-foreground">Memuat riwayat aktivitas dari database...</p>
+          <p className="text-xs text-muted-foreground mt-1">Menghubungkan ke API server...</p>
+        </Card>
       </div>
+    );
+  }
 
+  if (auditLog.getError() && filteredLogs.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col min-h-full space-y-4 w-full min-w-0 text-left content-fluid">
+        <Card className="p-8 border border-red-500/20 bg-red-500/5 shadow-xs flex-1 flex flex-col items-center justify-center text-center">
+          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 mb-3">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-foreground">Gagal Memuat Riwayat Aktivitas</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-md">{auditLog.getError()}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => auditLog.initFromApi()}
+            className="mt-4 gap-2 border-border text-xs"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Coba Lagi</span>
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 flex flex-col min-h-full space-y-4 w-full min-w-0 text-left content-fluid">
       <Card className="p-4 sm:p-5 border border-border/80 bg-card shadow-xs space-y-3.5 flex-1 flex flex-col min-h-0">
+        {auditLog.isStale() && (
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>
+                <strong>Peringatan Sinkronisasi:</strong> Gagal memperbarui data dari server ({auditLog.getError()}). Menampilkan data riwayat cache lokal terakhir.
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => auditLog.initFromApi()}
+              className="h-7 text-xs gap-1 hover:bg-amber-500/20"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Coba Sinkron Ulang
+            </Button>
+          </div>
+        )}
         {/* Filters and Export Toolbar */}
         <div className="flex flex-col lg:flex-row gap-2.5 justify-between items-stretch lg:items-center shrink-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -156,6 +209,18 @@ export function AuditLog({ currentUserRole }: AuditLogProps) {
                 <SelectItem value="VIEW" className="text-xs">View</SelectItem>
               </SelectContent>
             </Select>
+
+            {hasActiveFilters && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResetFilters}
+                className="border-border text-xs h-8 px-2.5 gap-1 text-muted-foreground hover:text-foreground shrink-0"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset
+              </Button>
+            )}
 
             <div className="flex gap-1.5">
               <Button variant="outline" size="sm" onClick={handleExportCSV} className="border-border text-xs h-8 px-2.5 gap-1.5">
@@ -236,8 +301,11 @@ export function AuditLog({ currentUserRole }: AuditLogProps) {
                 ))
               ) : (
                 <TableRow className="h-full hover:bg-transparent">
-                  <TableCell colSpan={7} className="text-center text-muted-foreground min-h-[200px] py-12 align-middle text-xs">
-                    Tidak ada data aktivitas
+                  <TableCell colSpan={7} className="text-center py-8 align-middle p-0">
+                    <EmptyState
+                      title="Tidak ada data aktivitas"
+                      description="Belum ada riwayat aktivitas yang cocok dengan pencarian atau filter saat ini."
+                    />
                   </TableCell>
                 </TableRow>
               )}

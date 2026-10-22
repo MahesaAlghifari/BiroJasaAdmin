@@ -22,6 +22,7 @@ import { MessengerTaskCard } from "./MessengerTaskCard";
 import { MessengerMobileTaskDetail } from "./MessengerMobileTaskDetail";
 import { toast } from "sonner";
 import { cn } from "../ui/utils";
+import { AlertCircle, RotateCw } from "lucide-react";
 
 interface MessengerTasksViewProps {
   currentUser: UserContext;
@@ -34,16 +35,16 @@ export function MessengerTasksView({
   currentUser,
   onNavigateToTab,
 }: MessengerTasksViewProps) {
-  const { activeOrders } = useOrderStore();
+  const { activeOrders, isLoading, error, refresh } = useOrderStore();
   const [selectedChip, setSelectedChip] = useState<FilterChip>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTask, setSelectedTask] = useState<MessengerTaskItem | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
-  // Strict personal task isolation
+  // Authoritative task isolation & available unassigned tasks
   const myTasks = useMemo(() => {
-    return getMessengerTasksForEmployee(activeOrders, currentUser.employeeId || "");
-  }, [activeOrders, currentUser.employeeId]);
+    return getMessengerTasksForEmployee(activeOrders, currentUser);
+  }, [activeOrders, currentUser]);
 
   // Active / pending tasks count for today's greeting
   const pendingTasksCount = useMemo(() => {
@@ -54,7 +55,7 @@ export function MessengerTasksView({
   const counts = useMemo(() => {
     return {
       all: myTasks.length,
-      jemput: myTasks.filter((t) => t.keteranganTugas === "Jemput Dokumen").length,
+      jemput: myTasks.filter((t) => t.keteranganTugas === "Jemput Dokumen" || t.keteranganTugas === "Jemput Hasil Samsat").length,
       samsat: myTasks.filter((t) => t.keteranganTugas === "Proses Samsat").length,
       antar: myTasks.filter((t) => t.keteranganTugas === "Pengantaran Dokumen").length,
     };
@@ -64,7 +65,10 @@ export function MessengerTasksView({
   const filteredTasks = useMemo(() => {
     return myTasks.filter((t) => {
       const matchChip =
-        selectedChip === "ALL" || t.keteranganTugas === selectedChip;
+        selectedChip === "ALL" ||
+        (selectedChip === "Jemput Dokumen"
+          ? t.keteranganTugas === "Jemput Dokumen" || t.keteranganTugas === "Jemput Hasil Samsat"
+          : t.keteranganTugas === selectedChip);
 
       const q = searchQuery.toLowerCase().trim();
       const matchQuery =
@@ -112,9 +116,15 @@ export function MessengerTasksView({
           </h2>
         </div>
         <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
-          {pendingTasksCount > 0 ? (
+          {isLoading && myTasks.length === 0 ? (
+            <span>Memuat data tugas operasional...</span>
+          ) : pendingTasksCount > 0 ? (
             <span>
               <strong className="text-foreground font-semibold">{pendingTasksCount} tugas</strong> perlu Anda selesaikan hari ini.
+            </span>
+          ) : error && myTasks.length === 0 ? (
+            <span className="text-rose-600 dark:text-rose-400 font-semibold">
+              Gagal memuat tugas. Silakan coba lagi.
             </span>
           ) : (
             <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
@@ -195,7 +205,22 @@ export function MessengerTasksView({
       </div>
 
       {/* Task Cards List */}
-      {filteredTasks.length > 0 ? (
+      {isLoading && myTasks.length === 0 ? (
+        <Card className="p-8 text-center border-dashed bg-card/50 rounded-2xl">
+          <Clock className="w-10 h-10 text-primary mx-auto mb-2 animate-spin opacity-70" />
+          <h3 className="text-sm font-semibold text-foreground">Memuat Tugas Operasional...</h3>
+          <p className="text-xs text-muted-foreground mt-1">Mengambil data tugas operasional dari server backend.</p>
+        </Card>
+      ) : error && myTasks.length === 0 ? (
+        <Card className="p-8 text-center border-rose-300 dark:border-rose-900 bg-rose-50/20 dark:bg-rose-950/20 rounded-2xl">
+          <AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-2" />
+          <h3 className="text-sm font-semibold text-foreground">Gagal Memuat Tugas Operasional</h3>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">{error}</p>
+          <Button onClick={() => refresh()} variant="outline" size="sm" className="mt-4 gap-2">
+            <RotateCw className="w-4 h-4" /> Coba Lagi
+          </Button>
+        </Card>
+      ) : filteredTasks.length > 0 ? (
         <div className="space-y-3">
           {filteredTasks.map((task) => (
             <MessengerTaskCard

@@ -63,6 +63,16 @@ export type SettlementCondition =
 
 export type RefundStatus = "NONE" | "PENDING" | "PROCESSED";
 
+export interface DocumentApprovalMetadata {
+  stage5Verified: boolean;
+  stage5VerifiedBy?: string;
+  stage5VerifiedAt?: string;
+  stage6Approved: boolean;
+  stage6ApprovedBy?: string;
+  stage6ApprovedAt?: string;
+  approvedDocsSnapshot?: string[];
+}
+
 export interface RekapDocument {
   id: string;
   orderId: string;
@@ -75,15 +85,44 @@ export interface RekapDocument {
   uploadedBy: string;
 }
 
-export interface OrderPayment {
-  tipePembayaran: "Bayar di Awal" | "Bayar di Akhir";
+export interface PaymentCorrectionHistoryItem {
+  nominalLama: number;
+  nominalBaru: number;
+  tanggal: string;
+  admin: string;
+  catatan?: string;
+}
+
+export interface PaymentRecordItem {
+  id: string;
+  nominal: number;
+  tanggal: string;
   metodePembayaran: string;
-  statusPembayaran: "Lunas" | "Belum Bayar" | "Kurang Bayar" | "Belum Lunas" | "Kurang";
+  namaBank?: string;
+  namaRekening?: string;
+  noRekening?: string;
+  buktiPembayaran?: PaymentProof;
+  statusVerifikasi: "MENUNGGU_BUKTI" | "MENUNGGU_VERIFIKASI" | "TERVERIFIKASI" | "DITOLAK";
+  verifiedAt?: string;
+  verifiedBy?: string;
+  alasanPenolakan?: string;
+  catatan?: string;
+  uploadedBy?: string;
+}
+
+export interface OrderPayment {
+  tipePembayaran: "Bayar di Awal" | "Bayar di Akhir" | "Tempo";
+  metodePembayaran: string;
+  statusPembayaran: "Lunas" | "Belum Bayar" | "Kurang Bayar" | "Kelebihan Bayar" | "Belum Lunas" | "Kurang";
   totalBiaya: number;
   totalEstimasi?: number;
   dibayar: number;
   kurang: number;
   overpayment?: number;
+  nominalDibayarAwal?: number;
+  nominalPembayaranAwalTerkonfirmasi?: number;
+  riwayatKoreksiPembayaran?: PaymentCorrectionHistoryItem[];
+  paymentRecords?: PaymentRecordItem[];
   settlementCondition?: SettlementCondition;
   refundStatus?: RefundStatus;
   refundAmount?: number;
@@ -91,12 +130,27 @@ export interface OrderPayment {
   refundProcessedBy?: string;
   tanggalBayar?: string;
   namaBank?: string;
+  namaRekening?: string;
   noRekening?: string;
   buktiPembayaran?: PaymentProof;
   isPaymentVerified?: boolean;
   paymentVerifiedAt?: string;
   paymentVerifiedBy?: string;
   invoiceNo?: string;
+}
+
+export interface AdditionalProcessItem {
+  id: string;
+  name: string;
+  category?: string;
+  note?: string;
+  nominal: number;
+  status: "DILAPORKAN_MENUNGGU_REVIEW" | "DISETUJUI" | "DITOLAK";
+  reportedBy: string;
+  reportedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
 }
 
 export interface CustomCostItem {
@@ -117,6 +171,8 @@ export interface OperationalOrder {
   currentStageName: string;
   catatanOrder?: string;
   createdAt: string;
+  tanggalMasukBerkas?: string;
+  tanggalPengeluaranSamsat?: string;
 
   // Data Pemilik & Kendaraan
   namaPemilik: string;
@@ -142,13 +198,20 @@ export interface OperationalOrder {
   updatedDocuments: string[]; // Hasil Samsat
   documentNotes?: string;
   documentsVerified?: boolean;
+  documentApproval?: DocumentApprovalMetadata;
 
   // Estimasi Biaya
   biayaJasa: number;
+  biayaAntarJemput?: number;
   pkb: number;
   swdkllj: number;
   dendaSwdkllj: number;
   totalEstimasi: number;
+
+  // Metadata Pengeluaran Samsat
+  namaPenerimaKeluar?: string;
+  bankUangKeluar?: string;
+  metodePembayaranKeluar?: string;
 
   // Biaya Final Aktual (Stage 5 & 6)
   finalBiayaJasa?: number;
@@ -164,15 +227,38 @@ export interface OperationalOrder {
   keteranganBiayaLainnya?: string;
   isVerified?: boolean;
 
-  // Penjadwalan Jemput
+  // Penjadwalan Jemput (Stage 2)
   tanggalJemput?: string;
   messenger?: string;
+  assignedMessengerId?: string;
+  assignedMessengerName?: string;
   catatanPenjadwalan?: string;
   isScheduled?: boolean;
+  pickupCompleted?: boolean;
+  pickupCompletedAt?: string;
 
-  // Samsat Tracking
+  // Samsat Tracking & Field Operation (Stage 4)
   samsatProcesses: SamsatProcessItem[];
   currentSamsatProcess?: string;
+  isSamsatScheduled?: boolean;
+  tanggalProsesSamsat?: string;
+  samsatMessenger?: string;
+  samsatMessengerId?: string;
+  catatanSamsat?: string;
+  samsatStatus?: "Terjadwal Samsat" | "Menuju Samsat" | "Sedang Proses Samsat" | "Selesai" | string;
+  samsatSubstatus?: string;
+  samsatJourneyStartedAt?: string;
+  samsatArrivedAt?: string;
+  samsatCompletedAt?: string;
+  additionalProcesses?: AdditionalProcessItem[];
+
+  // Penjemputan Dokumen Hasil Samsat (Bagian E)
+  samsatPickupMessenger?: string;
+  samsatPickupMessengerId?: string;
+  samsatPickupStatus?: "Belum Dijadwal" | "Terjadwal" | "Sedang Jemput Dokumen Samsat" | "Dokumen Samsat Diterima di Kantor" | string;
+  samsatPickupStartedAt?: string;
+  samsatPickupCompletedAt?: string;
+  samsatPickupNotes?: string;
 
   // Supervisi SPV
   approvedBySpv?: boolean;
@@ -180,13 +266,15 @@ export interface OperationalOrder {
   spvName?: string;
   spvApprovedAt?: string;
 
-  // Pengantaran Dokumen
+  // Pengantaran Dokumen (Stage 7)
   tanggalPengantaran?: string;
   messengerPengantar?: string;
   catatanPengantaran?: string;
   isDeliveryScheduled?: boolean;
+  deliveryStartedAt?: string;
+  deliveryStatus?: string;
 
-  // Dokumen Telah Diterima
+  // Dokumen Telah Diterima (Stage 8)
   tanggalDiterima?: string;
   isReceived?: boolean;
   receiverName?: string;
@@ -206,16 +294,21 @@ export interface OperationalOrder {
   verificationNotes?: string;
 
   // Messenger Task Overrides / Status
-  assignedMessengerId?: string;
-  assignedMessengerName?: string;
-  messengerTaskStatus?: "Belum Diambil" | "Dalam Proses" | "Selesai" | "Pending" | "Dibatalkan";
+  messengerTaskStatus?: "Belum Diambil" | "Dalam Proses" | "Selesai" | "Pending" | "Dibatalkan" | "Dokumen Sudah Tersedia" | "Sedang Dijemput" | "Terjadwal Jemput";
   messengerTaskNotes?: string;
+  catatanKendala?: string;
+  pickupChecklist?: Record<string, boolean>;
   messengerTaskPriority?: TaskPriority;
   messengerComponentProgress?: Record<string, MessengerComponentProgress>;
   messengerTimeline?: MessengerTimelineEvent[];
   checklistSebelumBerangkat?: ChecklistSebelumBerangkat;
   pickupProof?: PickupProof;
   deliveryHandover?: DeliveryHandoverProof;
+  deliveryProof?: any;
+  metodePengantaran?: string;
+  samsatMessengerNama?: string;
+  samsatPickupMessengerNama?: string;
+  samsatPickupDate?: string;
   deadlineAt?: string;
   startedAt?: string;
 
@@ -247,33 +340,31 @@ export const STAGES = [
 export type StageName = typeof STAGES[number];
 
 export function getDefaultSamsatProcesses(layanan: string, isFinished: boolean = false): SamsatProcessItem[] {
+  // If not finished and no active processes configured, start empty so new orders don't show phantom processes
+  if (!isFinished) {
+    return [];
+  }
+
   if (layanan.includes("Mutasi Keluar")) {
     return [
-      { id: "mk-1", name: "Cek Blokir Kendaraan", category: "Mutasi Keluar", status: isFinished ? "Selesai" : "Selesai", completedAt: "09:30", basePrice: 30000, actualCost: 30000 },
-      { id: "mk-2", name: "Cek Fisik Bantuan & Hadir", category: "Mutasi Keluar", status: isFinished ? "Selesai" : "Selesai", completedAt: "10:15", basePrice: 80000, actualCost: 80000 },
-      { id: "mk-3", name: "Legalisir Hadir & CF", category: "Mutasi Keluar", status: isFinished ? "Selesai" : "Sedang Diproses", completedAt: isFinished ? "11:00" : undefined, basePrice: 60000, actualCost: 60000 },
-      { id: "mk-4", name: "Loket Pembukuan & TU", category: "Mutasi Keluar", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "13:00" : undefined, basePrice: 45000, actualCost: 45000 },
-      { id: "mk-5", name: "Cetak SKP & Fiskal Antar Daerah", category: "Mutasi Keluar", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "14:20" : undefined, basePrice: 70000, actualCost: 75000 },
-      { id: "mk-6", name: "Loket Arsip & Pengeluaran Berkas", category: "Mutasi Keluar", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "15:00" : undefined, basePrice: 40000, actualCost: 40000 },
+      { id: "mk-1", name: "Cek Blokir Kendaraan", category: "Mutasi Keluar", status: "Selesai", completedAt: "09:30", basePrice: 30000, actualCost: 30000 },
+      { id: "mk-2", name: "Cek Fisik Bantuan & Hadir", category: "Mutasi Keluar", status: "Selesai", completedAt: "10:15", basePrice: 80000, actualCost: 80000 },
+      { id: "mk-3", name: "Legalisir Hadir & CF", category: "Mutasi Keluar", status: "Selesai", completedAt: "11:00", basePrice: 60000, actualCost: 60000 },
+      { id: "mk-4", name: "Loket Pembukuan & TU", category: "Mutasi Keluar", status: "Selesai", completedAt: "13:00", basePrice: 45000, actualCost: 45000 },
+      { id: "mk-5", name: "Cetak SKP & Fiskal Antar Daerah", category: "Mutasi Keluar", status: "Selesai", completedAt: "14:20", basePrice: 70000, actualCost: 75000 },
+      { id: "mk-6", name: "Loket Arsip & Pengeluaran Berkas", category: "Mutasi Keluar", status: "Selesai", completedAt: "15:00", basePrice: 40000, actualCost: 40000 },
     ];
   }
 
   if (layanan.includes("Mutasi Masuk")) {
     return [
-      { id: "mm-1", name: "Pendaftaran Berkas Mutasi Masuk", category: "Mutasi Masuk", status: isFinished ? "Selesai" : "Selesai", completedAt: "08:45", basePrice: 50000, actualCost: 50000 },
-      { id: "mm-2", name: "Cek Fisik Ulang & Pengesahan", category: "Mutasi Masuk", status: isFinished ? "Selesai" : "Sedang Diproses", completedAt: isFinished ? "10:00" : undefined, basePrice: 80000, actualCost: 80000 },
-      { id: "mm-3", name: "Penetapan Pajak Baru (Bapenda)", category: "Mutasi Masuk", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "11:30" : undefined, basePrice: 0, actualCost: 0 },
-      { id: "mm-4", name: "Penerbitan BPKB Baru (Polda)", category: "Mutasi Masuk", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "13:30" : undefined, basePrice: 225000, actualCost: 225000 },
-      { id: "mm-5", name: "Penerbitan STNK & TNKB Plat Baru", category: "Mutasi Masuk", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "15:00" : undefined, basePrice: 100000, actualCost: 100000 },
+      { id: "mm-1", name: "Pendaftaran Berkas Mutasi Masuk", category: "Mutasi Masuk", status: "Selesai", completedAt: "08:45", basePrice: 50000, actualCost: 50000 },
+      { id: "mm-2", name: "Cek Fisik Ulang & Pengesahan", category: "Mutasi Masuk", status: "Selesai", completedAt: "10:00", basePrice: 80000, actualCost: 80000 },
+      { id: "mm-3", name: "Penetapan Pajak Baru (Bapenda)", category: "Mutasi Masuk", status: "Selesai", completedAt: "11:30", basePrice: 0, actualCost: 0 },
+      { id: "mm-4", name: "Penerbitan BPKB Baru (Polda)", category: "Mutasi Masuk", status: "Selesai", completedAt: "13:30", basePrice: 225000, actualCost: 225000 },
+      { id: "mm-5", name: "Penerbitan STNK & TNKB Plat Baru", category: "Mutasi Masuk", status: "Selesai", completedAt: "15:00", basePrice: 100000, actualCost: 100000 },
     ];
   }
 
-  // Layanan Standar (Perpanjangan STNK, Balik Nama, dll)
-  return [
-    { id: "std-1", name: "Loket Pendaftaran & Verifikasi Berkas", category: "Layanan Standar", status: isFinished ? "Selesai" : "Selesai", completedAt: "09:00", basePrice: 20000, actualCost: 20000 },
-    { id: "std-2", name: "Cek Fisik Kendaraan (Jika ada)", category: "Layanan Standar", status: isFinished ? "Selesai" : "Selesai", completedAt: "10:00", basePrice: 30000, actualCost: 30000 },
-    { id: "std-3", name: "Penetapan & Cetak SKPD/Pajak", category: "Layanan Standar", status: isFinished ? "Selesai" : "Sedang Diproses", completedAt: isFinished ? "11:15" : undefined, basePrice: 0, actualCost: 0 },
-    { id: "std-4", name: "Loket Pembayaran Kasir Samsat", category: "Layanan Standar", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "13:00" : undefined, basePrice: 0, actualCost: 0 },
-    { id: "std-5", name: "Pencetakan STNK & Penyerahan", category: "Layanan Standar", status: isFinished ? "Selesai" : "Belum Diproses", completedAt: isFinished ? "14:30" : undefined, basePrice: 0, actualCost: 0 },
-  ];
+  return [];
 }

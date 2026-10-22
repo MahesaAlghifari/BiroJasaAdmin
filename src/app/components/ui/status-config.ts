@@ -17,7 +17,8 @@ export type StatusSemantic =
   | 'warning'
   | 'error'
   | 'neutral'
-  | 'role';
+  | 'role'
+  | 'purple';
 
 /**
  * Standardized soft background & border tokens with #333333 text:
@@ -29,6 +30,7 @@ export const STATUS_STYLES: Record<StatusSemantic, string> = {
   error: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200 dark:border-rose-800/50',
   neutral: 'bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300 border-slate-200 dark:border-slate-700/60',
   role: 'bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300 border-slate-200 dark:border-slate-700/60',
+  purple: 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800/50',
 };
 
 /**
@@ -42,8 +44,8 @@ export const LEGACY_COLOR_MAP: Record<string, StatusSemantic> = {
   amber: 'warning',
   blue: 'info',
   cyan: 'info',
-  purple: 'role',
-  indigo: 'role',
+  purple: 'purple',
+  indigo: 'purple',
   red: 'error',
   slate: 'neutral',
   gray: 'role',

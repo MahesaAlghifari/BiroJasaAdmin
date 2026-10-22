@@ -55,6 +55,7 @@ export function MessengerTaskCard({
   const getTaskTypeBadgeClass = () => {
     switch (task.keteranganTugas) {
       case "Jemput Dokumen":
+      case "Jemput Hasil Samsat":
         return "bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-900";
       case "Proses Samsat":
         return "bg-purple-500/10 text-purple-600 border-purple-200 dark:border-purple-900";
@@ -86,6 +87,7 @@ export function MessengerTaskCard({
   const getPrimaryActionLabel = () => {
     if (isStartable) {
       if (task.keteranganTugas === "Jemput Dokumen") return "Mulai Jemput";
+      if (task.keteranganTugas === "Jemput Hasil Samsat") return "Mulai Jemput Hasil";
       if (task.keteranganTugas === "Pengantaran Dokumen") return "Mulai Antar";
       return "Mulai";
     }
@@ -114,6 +116,14 @@ export function MessengerTaskCard({
           >
             {task.keteranganTugas}
           </Badge>
+          {(!task.messenger || task.messenger === "Belum Ditugaskan" || !task.assignedMessengerId) && !isCompleted && (
+            <Badge
+              variant="outline"
+              className="text-xs font-semibold px-2 py-0.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800"
+            >
+              Tersedia
+            </Badge>
+          )}
           {isPriorityRelevant && (
             <Badge
               variant="outline"

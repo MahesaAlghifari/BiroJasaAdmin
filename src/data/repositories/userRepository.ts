@@ -75,6 +75,7 @@ export interface IUserRepository {
   subscribe(listener: () => void): () => void;
   authenticate(email: string, password: string): Promise<AuthUserSession | null>;
   getDemoCredentials(): typeof DEMO_CREDENTIALS;
+  resetPassword?(id: number | string): Promise<{ success: boolean; message?: string }>;
   isLoading?(): boolean;
   getError?(): string | null;
   setProvider?(provider: IUserDataProvider): void;
@@ -132,6 +133,13 @@ export class UserRepository implements IUserRepository {
 
   public getDemoCredentials(): typeof DEMO_CREDENTIALS {
     return this.provider.getDemoCredentials();
+  }
+
+  public async resetPassword(id: number | string): Promise<{ success: boolean; message?: string }> {
+    if (this.provider.resetPassword) {
+      return await this.provider.resetPassword(id);
+    }
+    return { success: true, message: "OK" };
   }
 
   public authenticate(email: string, password: string): Promise<AuthUserSession | null> {

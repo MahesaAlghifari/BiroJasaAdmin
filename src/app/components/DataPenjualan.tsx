@@ -6,20 +6,30 @@ import { ScrollArea } from "./ui/scroll-area";
 import { EnhancedTableWithDialogs, Column } from "./EnhancedTableWithDialogs";
 import { FinanceAddPage } from "./FinanceAddPage";
 import { FinanceDetailPage } from "./FinanceDetailPage";
+import { InvoiceA5Dialog } from "./InvoiceA5Dialog";
 import { toast } from "sonner";
+import { AlertTriangle, Loader2 } from "lucide-react";
+import { Button } from "./ui/button";
+import { cn } from "./ui/utils";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import {
   MUTASI_LD_COLUMNS_CONTRACT,
   MUTASI_AS_COLUMNS_CONTRACT,
   BBN_COLUMNS_CONTRACT,
   PERPANJANGAN_PAJAK_COLUMNS_CONTRACT,
   LAIN_LAIN_COLUMNS_CONTRACT,
-  BELUM_KURANG_BAYAR_COLUMNS_CONTRACT,
-  PROFIT_TERPENDING_COLUMNS_CONTRACT,
-  CASHBACK_TERPENDING_COLUMNS_CONTRACT,
   buildTableColumnsFromContract,
   buildFieldsFromContract,
 } from "../data/penjualanContractData";
-import { useFinanceStore, PenjualanContractCategory } from "../data/financeStore";
+import { useFinanceStore, financeStore, PenjualanContractCategory } from "../data/financeStore";
+import { orderStore } from "../data/orderStore";
 
 const VALID_CATEGORIES: PenjualanContractCategory[] = [
   "mutasi-ld",
@@ -27,9 +37,6 @@ const VALID_CATEGORIES: PenjualanContractCategory[] = [
   "bbn",
   "perpanjangan-pajak",
   "lain-lain",
-  "belum-kurang-bayar",
-  "profit-terpending",
-  "cashback-terpending",
 ];
 
 export function DataPenjualan() {
@@ -60,6 +67,7 @@ export function DataPenjualan() {
   };
 
   const [isAdding, setIsAdding] = useState(false);
+  const [printingItem, setPrintingItem] = useState<any>(null);
   const [viewingItem, setViewingItem] = useState<{
     item: any;
     subTabTitle: string;
@@ -72,16 +80,94 @@ export function DataPenjualan() {
     updateContractData,
     addContractData,
     deleteContractData,
+    cancelSalesOrder,
   } = useFinanceStore();
+
+  const [cancelTargetItem, setCancelTargetItem] = useState<any>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const fetchFreshData = async () => {
+      try {
+        setIsLoadingData(true);
+        await Promise.allSettled([
+          orderStore.initFromApi(),
+          financeStore.initFromApi(),
+        ]);
+      } catch (err) {
+        console.error("Failed to load Data Penjualan:", err);
+      } finally {
+        if (active) setIsLoadingData(false);
+      }
+    };
+    fetchFreshData();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleInitiateCancel = (item: any) => {
+    setCancelTargetItem(item);
+    setCancelReason("");
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!cancelTargetItem) return;
+    if (!cancelReason.trim()) {
+      toast.error("Alasan pembatalan transaksi wajib diisi.");
+      return;
+    }
+    try {
+      setIsSubmittingCancel(true);
+      let orderNo: string | null =
+        cancelTargetItem.orderNo ||
+        cancelTargetItem["Nomor Order"] ||
+        cancelTargetItem["No Order"] ||
+        cancelTargetItem.order_no ||
+        (typeof cancelTargetItem.id === "string" && cancelTargetItem.id.startsWith("ord:")
+          ? cancelTargetItem.id.slice(4)
+          : (typeof cancelTargetItem.id === "string" && cancelTargetItem.id.toUpperCase().startsWith("ORD-")
+            ? cancelTargetItem.id
+            : null));
+
+      if (!orderNo) {
+        const invNo = cancelTargetItem["No Invoice"] || cancelTargetItem.noInvoice || cancelTargetItem.invoiceNo || cancelTargetItem.invoice;
+        if (invNo) {
+          const matchingInv = financeStore.getInvoices().find((i: any) => i.invoiceNo === invNo || i.invoice === invNo);
+          if (matchingInv?.orderNo) {
+            orderNo = matchingInv.orderNo;
+          }
+        }
+      }
+
+      if (orderNo) {
+        const cleanNo = orderNo.trim().toUpperCase();
+        await orderStore.cancelOrder(cleanNo, cancelReason.trim());
+        await cancelSalesOrder(cleanNo, cancelReason.trim());
+        toast.success(`Transaksi order ${cleanNo} berhasil dibatalkan secara resmi.`);
+        setCancelTargetItem(null);
+        setCancelReason("");
+      } else {
+        deleteContractData(currentMeta.category, cancelTargetItem.id);
+        toast.success("Data baris transaksi berhasil dihapus.");
+        setCancelTargetItem(null);
+        setCancelReason("");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal membatalkan transaksi.");
+    } finally {
+      setIsSubmittingCancel(false);
+    }
+  };
 
   const mutasiLD = getContractData("mutasi-ld");
   const mutasiAS = getContractData("mutasi-as");
   const bbn = getContractData("bbn");
   const perpanjangan = getContractData("perpanjangan-pajak");
   const lainLain = getContractData("lain-lain");
-  const belumBayar = getContractData("belum-kurang-bayar");
-  const profitPending = getContractData("profit-terpending");
-  const cashbackPending = getContractData("cashback-terpending");
 
   // Build exact column contracts for each dataset
   const mutasiLDColumns = buildTableColumnsFromContract(MUTASI_LD_COLUMNS_CONTRACT);
@@ -89,9 +175,6 @@ export function DataPenjualan() {
   const bbnColumns = buildTableColumnsFromContract(BBN_COLUMNS_CONTRACT);
   const perpanjanganColumns = buildTableColumnsFromContract(PERPANJANGAN_PAJAK_COLUMNS_CONTRACT);
   const lainLainColumns = buildTableColumnsFromContract(LAIN_LAIN_COLUMNS_CONTRACT);
-  const belumBayarColumns = buildTableColumnsFromContract(BELUM_KURANG_BAYAR_COLUMNS_CONTRACT);
-  const profitPendingColumns = buildTableColumnsFromContract(PROFIT_TERPENDING_COLUMNS_CONTRACT);
-  const cashbackPendingColumns = buildTableColumnsFromContract(CASHBACK_TERPENDING_COLUMNS_CONTRACT);
 
   // Active dataset properties for Add/Edit
   const getActiveTabMeta = () => {
@@ -101,7 +184,7 @@ export function DataPenjualan() {
           title: "Mutasi LD",
           category: "mutasi-ld" as PenjualanContractCategory,
           columns: mutasiLDColumns,
-          fields: buildFieldsFromContract(MUTASI_LD_COLUMNS_CONTRACT),
+          fields: buildFieldsFromContract(MUTASI_LD_COLUMNS_CONTRACT, "mutasi-ld"),
           data: mutasiLD,
         };
       case "mutasi-as":
@@ -109,7 +192,7 @@ export function DataPenjualan() {
           title: "Mutasi AS",
           category: "mutasi-as" as PenjualanContractCategory,
           columns: mutasiASColumns,
-          fields: buildFieldsFromContract(MUTASI_AS_COLUMNS_CONTRACT),
+          fields: buildFieldsFromContract(MUTASI_AS_COLUMNS_CONTRACT, "mutasi-as"),
           data: mutasiAS,
         };
       case "bbn":
@@ -117,7 +200,7 @@ export function DataPenjualan() {
           title: "BBN",
           category: "bbn" as PenjualanContractCategory,
           columns: bbnColumns,
-          fields: buildFieldsFromContract(BBN_COLUMNS_CONTRACT),
+          fields: buildFieldsFromContract(BBN_COLUMNS_CONTRACT, "bbn"),
           data: bbn,
         };
       case "perpanjangan-pajak":
@@ -125,7 +208,7 @@ export function DataPenjualan() {
           title: "Perpanjangan Pajak",
           category: "perpanjangan-pajak" as PenjualanContractCategory,
           columns: perpanjanganColumns,
-          fields: buildFieldsFromContract(PERPANJANGAN_PAJAK_COLUMNS_CONTRACT),
+          fields: buildFieldsFromContract(PERPANJANGAN_PAJAK_COLUMNS_CONTRACT, "perpanjangan-pajak"),
           data: perpanjangan,
         };
       case "lain-lain":
@@ -133,39 +216,15 @@ export function DataPenjualan() {
           title: "Lain-Lain",
           category: "lain-lain" as PenjualanContractCategory,
           columns: lainLainColumns,
-          fields: buildFieldsFromContract(LAIN_LAIN_COLUMNS_CONTRACT),
+          fields: buildFieldsFromContract(LAIN_LAIN_COLUMNS_CONTRACT, "lain-lain"),
           data: lainLain,
-        };
-      case "belum-kurang-bayar":
-        return {
-          title: "Belum & Kurang Bayar",
-          category: "belum-kurang-bayar" as PenjualanContractCategory,
-          columns: belumBayarColumns,
-          fields: buildFieldsFromContract(BELUM_KURANG_BAYAR_COLUMNS_CONTRACT),
-          data: belumBayar,
-        };
-      case "profit-terpending":
-        return {
-          title: "Profit Terpending",
-          category: "profit-terpending" as PenjualanContractCategory,
-          columns: profitPendingColumns,
-          fields: buildFieldsFromContract(PROFIT_TERPENDING_COLUMNS_CONTRACT),
-          data: profitPending,
-        };
-      case "cashback-terpending":
-        return {
-          title: "Cashback Terpending",
-          category: "cashback-terpending" as PenjualanContractCategory,
-          columns: cashbackPendingColumns,
-          fields: buildFieldsFromContract(CASHBACK_TERPENDING_COLUMNS_CONTRACT),
-          data: cashbackPending,
         };
       default:
         return {
           title: "Mutasi LD",
           category: "mutasi-ld" as PenjualanContractCategory,
           columns: mutasiLDColumns,
-          fields: buildFieldsFromContract(MUTASI_LD_COLUMNS_CONTRACT),
+          fields: buildFieldsFromContract(MUTASI_LD_COLUMNS_CONTRACT, "mutasi-ld"),
           data: mutasiLD,
         };
     }
@@ -175,12 +234,16 @@ export function DataPenjualan() {
 
   // Handle Add Submit
   const handleAddSubmit = (rows: any[]) => {
-    const success = addContractData(currentMeta.category, rows);
-    if (success) {
-      setIsAdding(false);
-      toast.success(`${rows.length} order kanonis berhasil ditambahkan dan diproyeksikan`);
-    } else {
-      toast.error("Gagal menambahkan data: Pastikan Nama Customer, Nomor Polisi, dan Jenis Pengurusan terisi dengan benar");
+    try {
+      const success = addContractData(currentMeta.category, rows);
+      if (success) {
+        setIsAdding(false);
+        toast.success(`${rows.length} order kanonis berhasil ditambahkan dan disimpan`);
+      } else {
+        toast.error("Gagal menambahkan data: Pastikan Nama Customer, Nomor Polisi, dan Nomor HP (min. 9 digit) terisi lengkap");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Terjadi kesalahan saat menyimpan data order");
     }
   };
 
@@ -202,6 +265,8 @@ export function DataPenjualan() {
       <FinanceAddPage
         title={`Tambah data ${currentMeta.title}`}
         description={`Masukkan satu atau lebih data transaksi untuk kategori ${currentMeta.title}`}
+        subTabName={currentMeta.category}
+        category={currentMeta.category}
         fields={currentMeta.fields}
         onBack={() => setIsAdding(false)}
         onSubmit={handleAddSubmit}
@@ -245,65 +310,50 @@ export function DataPenjualan() {
             >
               Lain-Lain
             </TabsTrigger>
-            <TabsTrigger
-              value="belum-kurang-bayar"
-              className="text-xs sm:text-sm font-medium whitespace-nowrap px-3.5 py-1.5"
-            >
-              Belum & Kurang Bayar
-            </TabsTrigger>
-            <TabsTrigger
-              value="profit-terpending"
-              className="text-xs sm:text-sm font-medium whitespace-nowrap px-3.5 py-1.5"
-            >
-              Profit Terpending
-            </TabsTrigger>
-            <TabsTrigger
-              value="cashback-terpending"
-              className="text-xs sm:text-sm font-medium whitespace-nowrap px-3.5 py-1.5"
-            >
-              Cashback Terpending
-            </TabsTrigger>
           </TabsList>
         </ScrollArea>
 
         {/* 1. Mutasi LD */}
         <TabsContent value="mutasi-ld" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
           <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data mutasi luar daerah</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Daftar transaksi pengurusan mutasi keluar dan masuk antar daerah</p>
-            </div>
-            <EnhancedTableWithDialogs
-              columns={mutasiLDColumns}
-              data={mutasiLD}
-              subTabTitle="Data Penjualan - Mutasi LD"
-              onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Mutasi LD", columns: mutasiLDColumns })}
-              onAdd={() => setIsAdding(true)}
-              onEdit={(item, updated) => updateContractData("mutasi-ld", item.id, updated)}
-              onDelete={(item) => deleteContractData("mutasi-ld", item.id)}
-              searchPlaceholder="Cari data mutasi luar daerah..."
-              editFields={buildFieldsFromContract(MUTASI_LD_COLUMNS_CONTRACT)}
-            />
+            {isLoadingData && mutasiLD.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 text-muted-foreground gap-2 flex-1">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span className="text-xs font-medium">Memuat data penjualan Mutasi LD...</span>
+              </div>
+            ) : (
+              <EnhancedTableWithDialogs
+                columns={mutasiLDColumns}
+                data={mutasiLD}
+                subTabTitle="Data Penjualan - Mutasi LD"
+                bypassInternalDeleteDialog={true}
+                onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Mutasi LD", columns: mutasiLDColumns })}
+                onPrint={(item) => setPrintingItem(item)}
+                onAdd={() => setIsAdding(true)}
+                onEdit={(item, updated) => updateContractData("mutasi-ld", item.id, updated)}
+                onDelete={handleInitiateCancel}
+                searchPlaceholder="Cari data mutasi luar daerah..."
+                editFields={buildFieldsFromContract(MUTASI_LD_COLUMNS_CONTRACT, "mutasi-ld")}
+              />
+            )}
           </Card>
         </TabsContent>
 
         {/* 2. Mutasi AS */}
         <TabsContent value="mutasi-as" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
           <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data mutasi antar samsat</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Daftar berkas perpindahan administrasi antar kantor samsat</p>
-            </div>
             <EnhancedTableWithDialogs
               columns={mutasiASColumns}
               data={mutasiAS}
               subTabTitle="Data Penjualan - Mutasi AS"
+              bypassInternalDeleteDialog={true}
               onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Mutasi AS", columns: mutasiASColumns })}
+              onPrint={(item) => setPrintingItem(item)}
               onAdd={() => setIsAdding(true)}
               onEdit={(item, updated) => updateContractData("mutasi-as", item.id, updated)}
-              onDelete={(item) => deleteContractData("mutasi-as", item.id)}
+              onDelete={handleInitiateCancel}
               searchPlaceholder="Cari data mutasi antar samsat..."
-              editFields={buildFieldsFromContract(MUTASI_AS_COLUMNS_CONTRACT)}
+              editFields={buildFieldsFromContract(MUTASI_AS_COLUMNS_CONTRACT, "mutasi-as")}
             />
           </Card>
         </TabsContent>
@@ -311,20 +361,18 @@ export function DataPenjualan() {
         {/* 3. BBN */}
         <TabsContent value="bbn" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
           <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data bea balik nama (BBN)</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Daftar proses pengurusan balik nama kendaraan bermotor (BBN 1 & BBN 2)</p>
-            </div>
             <EnhancedTableWithDialogs
               columns={bbnColumns}
               data={bbn}
               subTabTitle="Data Penjualan - BBN"
+              bypassInternalDeleteDialog={true}
               onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - BBN", columns: bbnColumns })}
+              onPrint={(item) => setPrintingItem(item)}
               onAdd={() => setIsAdding(true)}
               onEdit={(item, updated) => updateContractData("bbn", item.id, updated)}
-              onDelete={(item) => deleteContractData("bbn", item.id)}
+              onDelete={handleInitiateCancel}
               searchPlaceholder="Cari data bea balik nama..."
-              editFields={buildFieldsFromContract(BBN_COLUMNS_CONTRACT)}
+              editFields={buildFieldsFromContract(BBN_COLUMNS_CONTRACT, "bbn")}
             />
           </Card>
         </TabsContent>
@@ -332,20 +380,18 @@ export function DataPenjualan() {
         {/* 4. Perpanjangan Pajak */}
         <TabsContent value="perpanjangan-pajak" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
           <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data perpanjangan pajak</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Daftar berkas pembayaran pajak tahunan dan 5 tahunan STNK</p>
-            </div>
             <EnhancedTableWithDialogs
               columns={perpanjanganColumns}
               data={perpanjangan}
               subTabTitle="Data Penjualan - Perpanjangan Pajak"
+              bypassInternalDeleteDialog={true}
               onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Perpanjangan Pajak", columns: perpanjanganColumns })}
+              onPrint={(item) => setPrintingItem(item)}
               onAdd={() => setIsAdding(true)}
               onEdit={(item, updated) => updateContractData("perpanjangan-pajak", item.id, updated)}
-              onDelete={(item) => deleteContractData("perpanjangan-pajak", item.id)}
+              onDelete={handleInitiateCancel}
               searchPlaceholder="Cari data perpanjangan pajak..."
-              editFields={buildFieldsFromContract(PERPANJANGAN_PAJAK_COLUMNS_CONTRACT)}
+              editFields={buildFieldsFromContract(PERPANJANGAN_PAJAK_COLUMNS_CONTRACT, "perpanjangan-pajak")}
             />
           </Card>
         </TabsContent>
@@ -353,87 +399,128 @@ export function DataPenjualan() {
         {/* 5. Lain-Lain */}
         <TabsContent value="lain-lain" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
           <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data layanan lain-lain</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Pengurusan duplikat STNK, plat nomor, ganti plat, dan administrasi lainnya</p>
-            </div>
             <EnhancedTableWithDialogs
               columns={lainLainColumns}
               data={lainLain}
               subTabTitle="Data Penjualan - Lain-Lain"
+              bypassInternalDeleteDialog={true}
               onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Lain-Lain", columns: lainLainColumns })}
+              onPrint={(item) => setPrintingItem(item)}
               onAdd={() => setIsAdding(true)}
               onEdit={(item, updated) => updateContractData("lain-lain", item.id, updated)}
-              onDelete={(item) => deleteContractData("lain-lain", item.id)}
+              onDelete={handleInitiateCancel}
               searchPlaceholder="Cari data layanan lain-lain..."
-              editFields={buildFieldsFromContract(LAIN_LAIN_COLUMNS_CONTRACT)}
-            />
-          </Card>
-        </TabsContent>
-
-        {/* 6. Belum & Kurang Bayar */}
-        <TabsContent value="belum-kurang-bayar" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
-          <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data belum & kurang bayar</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Monitoring transaksi customer yang masih memiliki kekurangan pembayaran</p>
-            </div>
-            <EnhancedTableWithDialogs
-              columns={belumBayarColumns}
-              data={belumBayar}
-              subTabTitle="Data Penjualan - Belum & Kurang Bayar"
-              onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Belum & Kurang Bayar", columns: belumBayarColumns })}
-              onAdd={() => setIsAdding(true)}
-              onEdit={(item, updated) => updateContractData("belum-kurang-bayar", item.id, updated)}
-              onDelete={(item) => deleteContractData("belum-kurang-bayar", item.id)}
-              searchPlaceholder="Cari data belum & kurang bayar..."
-              editFields={buildFieldsFromContract(BELUM_KURANG_BAYAR_COLUMNS_CONTRACT)}
-            />
-          </Card>
-        </TabsContent>
-
-        {/* 7. Profit Terpending */}
-        <TabsContent value="profit-terpending" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
-          <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data profit terpending</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Transaksi dengan margin profit yang masih tertahan verifikasi atau administrasi</p>
-            </div>
-            <EnhancedTableWithDialogs
-              columns={profitPendingColumns}
-              data={profitPending}
-              subTabTitle="Data Penjualan - Profit Terpending"
-              onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Profit Terpending", columns: profitPendingColumns })}
-              onAdd={() => setIsAdding(true)}
-              onEdit={(item, updated) => updateContractData("profit-terpending", item.id, updated)}
-              onDelete={(item) => deleteContractData("profit-terpending", item.id)}
-              searchPlaceholder="Cari data profit terpending..."
-              editFields={buildFieldsFromContract(PROFIT_TERPENDING_COLUMNS_CONTRACT)}
-            />
-          </Card>
-        </TabsContent>
-
-        {/* 8. Cashback Terpending */}
-        <TabsContent value="cashback-terpending" className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden">
-          <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-            <div className="mb-4 shrink-0">
-              <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Data cashback terpending</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Daftar alokasi cashback rekanan atau customer yang menunggu pencairan</p>
-            </div>
-            <EnhancedTableWithDialogs
-              columns={cashbackPendingColumns}
-              data={cashbackPending}
-              subTabTitle="Data Penjualan - Cashback Terpending"
-              onView={(item) => setViewingItem({ item, subTabTitle: "Data Penjualan - Cashback Terpending", columns: cashbackPendingColumns })}
-              onAdd={() => setIsAdding(true)}
-              onEdit={(item, updated) => updateContractData("cashback-terpending", item.id, updated)}
-              onDelete={(item) => deleteContractData("cashback-terpending", item.id)}
-              searchPlaceholder="Cari data cashback terpending..."
-              editFields={buildFieldsFromContract(CASHBACK_TERPENDING_COLUMNS_CONTRACT)}
+              editFields={buildFieldsFromContract(LAIN_LAIN_COLUMNS_CONTRACT, "lain-lain")}
             />
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Invoice A5 Print Dialog */}
+      <InvoiceA5Dialog
+        open={!!printingItem}
+        onOpenChange={(open) => {
+          if (!open) setPrintingItem(null);
+        }}
+        data={printingItem}
+      />
+
+      {/* Cancellation Confirmation Dialog (Soft Delete / Pembatalan Resmi) */}
+      <AlertDialog
+        open={!!cancelTargetItem}
+        onOpenChange={(open) => {
+          if (!open && !isSubmittingCancel) {
+            setCancelTargetItem(null);
+            setCancelReason("");
+          }
+        }}
+      >
+        <AlertDialogContent className="border-border sm:max-w-md bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base font-semibold flex items-center gap-2 text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              Batalkan Transaksi / Order Resmi
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
+              Pembatalan akan menandai order kanonis sebagai <strong>DIBATALKAN</strong> dan membatalkan invoice terkait sehingga tidak lagi menjadi piutang aktif. Berkas dokumen dan riwayat pembayaran yang telah terjadi tetap tersimpan untuk audit pembukuan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {cancelTargetItem && (
+            <div className="rounded-lg border border-border/80 bg-muted/30 p-3 space-y-2 text-xs my-2">
+              <div className="flex justify-between items-center py-0.5 border-b border-border/40">
+                <span className="text-muted-foreground">Nomor Order:</span>
+                <span className="font-mono font-semibold text-foreground">
+                  {cancelTargetItem.orderNo || cancelTargetItem["Nomor Order"] || (cancelTargetItem.id?.startsWith("ord:") ? cancelTargetItem.id.slice(4) : "-")}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-0.5 border-b border-border/40">
+                <span className="text-muted-foreground">Customer:</span>
+                <span className="font-medium text-foreground">{cancelTargetItem["Nama Customer"] || cancelTargetItem.customer}</span>
+              </div>
+              <div className="flex justify-between items-center py-0.5 border-b border-border/40">
+                <span className="text-muted-foreground">Nomor Polisi:</span>
+                <span className="font-mono font-medium text-foreground">{cancelTargetItem["Plat No"] || cancelTargetItem.nopol}</span>
+              </div>
+              <div className="flex justify-between items-center py-0.5">
+                <span className="text-muted-foreground">Layanan:</span>
+                <span className="font-medium text-foreground">{cancelTargetItem["Jenis Pengurusan"] || cancelTargetItem.layanan}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-foreground flex items-center justify-between">
+              <span>Alasan Pembatalan <span className="text-destructive">*</span></span>
+              {!cancelReason.trim() && (
+                <span className="text-[10px] text-destructive font-normal">Wajib diisi sebelum konfirmasi</span>
+              )}
+            </label>
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Contoh: Permintaan pembatalan customer, berkas ditolak Samsat, dll."
+              rows={3}
+              className={cn(
+                "w-full p-2.5 rounded-md border text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 resize-none",
+                !cancelReason.trim()
+                  ? "border-destructive/60 bg-destructive/5 focus:ring-destructive"
+                  : "border-border bg-background focus:ring-rose-500"
+              )}
+            />
+          </div>
+
+          <AlertDialogFooter className="mt-4 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSubmittingCancel}
+              onClick={() => {
+                setCancelTargetItem(null);
+                setCancelReason("");
+              }}
+              className="h-8 text-xs font-medium"
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              disabled={isSubmittingCancel || !cancelReason.trim()}
+              onClick={handleConfirmCancel}
+              className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmittingCancel ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Memproses Pembatalan...
+                </>
+              ) : (
+                "Ya, Batalkan Transaksi"
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

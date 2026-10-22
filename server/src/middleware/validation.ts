@@ -5,6 +5,13 @@
 
 import { Request, Response, NextFunction } from "express";
 import { STAGES, StageName } from "../../../src/domain/order/types";
+import {
+  assertNoProtectedFieldViolations,
+  normalizeOrderPayload,
+  normalizeInvoicePaymentPayload,
+  normalizeServicePricingPayload,
+  normalizeSamsatPricingPayload,
+} from "../utils/aliasNormalizer";
 
 /**
  * Validates Auth Login Payload
@@ -37,6 +44,17 @@ export function validateLoginPayload(req: Request, res: Response, next: NextFunc
  * Validates Order Creation Payload
  */
 export function validateOrderCreatePayload(req: Request, res: Response, next: NextFunction): void {
+  try {
+    normalizeOrderPayload(req.body);
+  } catch (err: any) {
+    res.status(err.statusCode || 400).json({
+      success: false,
+      error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
   const { customer, nomorHP, layanan, nopol } = req.body || {};
 
   if (!customer || typeof customer !== "string" || !customer.trim()) {
@@ -83,10 +101,11 @@ export function validateOrderCreatePayload(req: Request, res: Response, next: Ne
  * Strips server-owned protected fields:
  * - orderNo, currentStep, currentStageName, isArchived, createdAt, updatedAt
  * - payment.isPaymentVerified, payment.statusPembayaran, payment.dibayar, payment.kurang
+ * Enforces strict rejection across all camelCase, snake_case, and alias variants (P1-B/P1-C)
  */
 export function validateOrderUpdatePayload(req: Request, res: Response, next: NextFunction): void {
   const body = req.body;
-  if (!body || typeof body !== "object") {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
     res.status(400).json({
       success: false,
       error: { code: "VALIDATION_ERROR", message: "Request body harus berupa JSON object." },
@@ -95,22 +114,44 @@ export function validateOrderUpdatePayload(req: Request, res: Response, next: Ne
     return;
   }
 
-  // Reject explicit tampering with server-controlled root fields
-  const forbiddenKeys = ["orderNo", "currentStep", "currentStageName", "isArchived", "createdAt", "updatedAt"];
-  for (const key of forbiddenKeys) {
-    if (key in body && body[key] !== undefined) {
-      delete body[key];
-    }
+  // 1. Check URL param orderNo vs body orderNo/order_no
+  const paramOrderNo = req.params?.orderNo?.trim();
+  const bodyOrderNo = body.orderNo || body.order_no;
+  if (paramOrderNo && bodyOrderNo && String(bodyOrderNo).trim().toUpperCase() !== paramOrderNo.toUpperCase()) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: "CONFLICTING_ALIASES",
+        message: `Nomor order di URL '${paramOrderNo}' tidak cocok dengan orderNo di body '${bodyOrderNo}'.`,
+      },
+      timestamp: new Date().toISOString(),
+    });
+    return;
   }
 
-  // Reject tampering with payment state directly through PUT order
-  if (body.payment && typeof body.payment === "object") {
-    const forbiddenPaymentKeys = ["isPaymentVerified", "statusPembayaran", "dibayar", "kurang"];
-    for (const key of forbiddenPaymentKeys) {
-      if (key in body.payment && body.payment[key] !== undefined) {
-        delete body.payment[key];
-      }
-    }
+  // 2. Strict rejection of server-controlled and approval/workflow-gated root & payment fields
+  // Catches all camelCase, snake_case, and alias variants with HTTP 403 PROTECTED_FIELD_VIOLATION
+  try {
+    assertNoProtectedFieldViolations(body);
+  } catch (err: any) {
+    res.status(err.statusCode || 403).json({
+      success: false,
+      error: { code: err.code || "PROTECTED_FIELD_VIOLATION", message: err.message },
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  // 3. Canonicalize allowed fields and detect alias conflicts
+  try {
+    normalizeOrderPayload(body);
+  } catch (err: any) {
+    res.status(err.statusCode || 400).json({
+      success: false,
+      error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+      timestamp: new Date().toISOString(),
+    });
+    return;
   }
 
   next();
@@ -141,12 +182,23 @@ export function validateStageTransitionPayload(req: Request, res: Response, next
  * Validates Finance Invoice Payment Payload
  */
 export function validateInvoicePaymentPayload(req: Request, res: Response, next: NextFunction): void {
+  try {
+    normalizeInvoicePaymentPayload(req.body);
+  } catch (err: any) {
+    res.status(err.statusCode || 400).json({
+      success: false,
+      error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
   const { amount } = req.body || {};
 
-  if (amount === undefined || amount === null) {
+  if (amount === undefined || amount === null || amount === "") {
     res.status(400).json({
       success: false,
-      error: { code: "VALIDATION_ERROR", message: "Nominal pembayaran (amount) wajib diisi." },
+      error: { code: "VALIDATION_ERROR", message: "Nominal pembayaran (amount/nominal) wajib diisi." },
       timestamp: new Date().toISOString(),
     });
     return;
@@ -250,19 +302,32 @@ export function validatePengeluaranPayload(req: Request, res: Response, next: Ne
  * Validates Pricing Samsat Update Payload
  */
 export function validatePricingUpdatePayload(req: Request, res: Response, next: NextFunction): void {
-  const { basePrice } = req.body || {};
+  try {
+    normalizeSamsatPricingPayload(req.body);
+  } catch (err: any) {
+    res.status(err.statusCode || 400).json({
+      success: false,
+      error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
 
-  if (basePrice !== undefined) {
-    const numPrice = Number(basePrice);
+  const { basePrice, biayaDasar } = req.body || {};
+  const price = basePrice !== undefined ? basePrice : biayaDasar;
+
+  if (price !== undefined && price !== null && price !== "") {
+    const numPrice = Number(price);
     if (!Number.isFinite(numPrice) || numPrice < 0) {
       res.status(400).json({
         success: false,
-        error: { code: "VALIDATION_ERROR", message: "Harga dasar (basePrice) harus berupa angka non-negatif yang valid." },
+        error: { code: "VALIDATION_ERROR", message: "Harga dasar (basePrice/biayaDasar) harus berupa angka non-negatif yang valid." },
         timestamp: new Date().toISOString(),
       });
       return;
     }
     req.body.basePrice = numPrice;
+    req.body.biayaDasar = numPrice;
   }
 
   next();
@@ -316,6 +381,73 @@ export function validateUserMutationPayload(req: Request, res: Response, next: N
       });
       return;
     }
+  }
+
+  next();
+}
+
+/**
+ * Validates Service Pricing (Biaya Layanan) Payload
+ */
+export function validateServicePricingPayload(req: Request, res: Response, next: NextFunction): void {
+  try {
+    normalizeServicePricingPayload(req.body);
+  } catch (err: any) {
+    res.status(err.statusCode || 400).json({
+      success: false,
+      error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const isPost = req.method === "POST";
+  const { serviceName, wilayah, biayaJasa, biayaAntarJemput } = req.body || {};
+
+  if (isPost) {
+    if (!serviceName || typeof serviceName !== "string" || !serviceName.trim()) {
+      res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "Nama layanan (serviceName) wajib diisi." },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    if (!wilayah || typeof wilayah !== "string" || !wilayah.trim()) {
+      res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "Wilayah Samsat (wilayah) wajib diisi." },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+  }
+
+  if (biayaJasa !== undefined && biayaJasa !== null && biayaJasa !== "") {
+    const numJasa = Number(biayaJasa);
+    if (!Number.isFinite(numJasa) || numJasa < 0) {
+      res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "Biaya jasa harus berupa nominal angka non-negatif yang valid." },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+    req.body.biayaJasa = numJasa;
+  }
+
+  if (biayaAntarJemput !== undefined && biayaAntarJemput !== null && biayaAntarJemput !== "") {
+    const numCourier = Number(biayaAntarJemput);
+    if (!Number.isFinite(numCourier) || numCourier < 0) {
+      res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "Biaya antar jemput harus berupa nominal angka non-negatif yang valid." },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+    req.body.biayaAntarJemput = numCourier;
   }
 
   next();

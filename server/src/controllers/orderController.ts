@@ -98,12 +98,87 @@ export async function archiveOrder(req: AuthenticatedRequest, res: Response, nex
   }
 }
 
+export async function approveOrderDocuments(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new ApiError(401, "UNAUTHENTICATED", "Autentikasi diperlukan.");
+    }
+    const { orderNo } = req.params;
+    const { stage, snapshotDocs } = req.body;
+    if (stage !== 5 && stage !== 6) {
+      throw new ApiError(400, "VALIDATION_ERROR", "Field 'stage' harus bernilai 5 atau 6.");
+    }
+    if (stage === 6) {
+      const isSpv = req.user.role === "administrator" || req.user.jabatan === "SVP" || req.user.role === "svp";
+      if (!isSpv) {
+        throw new ApiError(403, "FORBIDDEN", "Hanya Supervisor / SVP yang berwenang menyetujui dokumen Stage 6.");
+      }
+    }
+    const order = orderService.approveOrderDocuments(orderNo, stage, req.user, snapshotDocs || []);
+    res.json({
+      success: true,
+      message: `Dokumen untuk order ${orderNo} berhasil disetujui (Stage ${stage}).`,
+      data: order,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteArchivedOrder(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { orderNo } = req.params;
+    const success = orderService.deleteArchivedOrder(orderNo, req.user);
+    if (!success) {
+      res.status(404).json({ success: false, message: "Rekap order arsip tidak ditemukan" });
+      return;
+    }
+    res.json({ success: true, message: "Rekap order berhasil dihapus", timestamp: new Date().toISOString() });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function clearArchivedOrders(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const clearedCount = orderService.clearArchivedOrders(req.user);
+    res.json({
+      success: true,
+      message: "Rekap Order berhasil dibersihkan.",
+      data: { clearedCount },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function verifyPayment(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const { orderNo } = req.params;
-    const verifierName = req.body.verifierName || req.user?.nama || "Admin";
-    const order = orderService.verifyPayment(orderNo, verifierName, req.user);
+    const verifierName = req.user?.nama || req.body.verifierName || "Admin";
+    const confirmedAmount = req.body.confirmedAmount !== undefined ? Number(req.body.confirmedAmount) : undefined;
+    const notes = req.body.notes;
+    const proofPayload = req.body.buktiPembayaran || req.body.proofPayload || req.body.proof;
+    const order = orderService.verifyPayment(orderNo, verifierName, req.user, confirmedAmount, notes, proofPayload);
     res.json({ success: true, message: "Pembayaran berhasil diverifikasi.", data: order, timestamp: new Date().toISOString() });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function cancelOrder(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { orderNo } = req.params;
+    const reason = req.body.reason || req.body.alasan || "";
+    const order = orderService.cancelOrder(orderNo, reason, req.user);
+    res.json({
+      success: true,
+      message: `Order ${orderNo} berhasil dibatalkan.`,
+      data: order,
+      timestamp: new Date().toISOString(),
+    });
   } catch (err) {
     next(err);
   }

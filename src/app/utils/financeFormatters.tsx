@@ -268,14 +268,68 @@ export function PlainTextStatus({ status }: { status: string | null | undefined 
     );
   }
 
+  // Canonical Financial & Payment Statuses (Separated authoritatively)
+  if (s === "lunas") {
+    return (
+      <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+        Lunas
+      </span>
+    );
+  }
+
+  if (s === "kurang bayar") {
+    return (
+      <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+        Kurang Bayar
+      </span>
+    );
+  }
+
+  if (s === "belum bayar" || s === "belum lunas") {
+    return (
+      <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+        Belum Bayar
+      </span>
+    );
+  }
+
+  if (s === "belum & kurang bayar") {
+    return (
+      <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+        Belum & Kurang Bayar
+      </span>
+    );
+  }
+
+  if (s === "profit terpending" || s === "profit pending") {
+    return (
+      <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+        Profit Terpending
+      </span>
+    );
+  }
+
+  if (s === "cashback terpending" || s === "cashback pending") {
+    return (
+      <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 whitespace-nowrap">
+        Cashback Terpending
+      </span>
+    );
+  }
+
+  if (s === "dibatalkan" || s === "batal") {
+    return (
+      <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 whitespace-nowrap">
+        Dibatalkan
+      </span>
+    );
+  }
+
   // Phase 9.1: Canonical Dual Status Title Case formatting
   const CANONICAL_MAP: Record<string, string> = {
     "dalam proses": "Dalam Proses",
     "menunggu arsip": "Menunggu Arsip",
     "selesai": "Selesai",
-    "belum lunas": "Belum Lunas",
-    "kurang bayar": "Kurang Bayar",
-    "lunas": "Lunas",
     "kelebihan bayar": "Kelebihan Bayar",
     "tagihan tidak tersedia": "Tagihan Tidak Tersedia",
   };

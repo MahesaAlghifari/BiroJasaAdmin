@@ -8,19 +8,20 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { TablePagination } from "./ui/TablePagination";
-import { Search, Eye, KeyRound, CheckCircle2, UserCheck, UserX, Shield, Copy, Check } from "lucide-react";
+import { EmptyState } from "./ui/empty-state";
+import { Search, Eye, KeyRound, CheckCircle2, UserCheck, UserX, Shield, Copy, Check, RotateCcw, AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useKaryawanPengguna, PenggunaRecord, karyawanPenggunaAdapter } from "../data/karyawanPenggunaAdapter";
 import { cn } from "./ui/utils";
 
 export function ManajemenPengguna() {
-  const { pengguna, activateAccount, deactivateAccount, resetPassword } = useKaryawanPengguna();
+  const { pengguna, isLoading, error, isStale, refresh, activateAccount, deactivateAccount, resetPassword } = useKaryawanPengguna();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterJabatan, setFilterJabatan] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
 
   // Dialog States
   const [selectedUser, setSelectedUser] = useState<PenggunaRecord | null>(null);
@@ -45,6 +46,15 @@ export function ManajemenPengguna() {
       return matchSearch && matchStatus && matchJabatan;
     });
   }, [pengguna, searchTerm, filterStatus, filterJabatan]);
+
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("all");
+    setFilterJabatan("all");
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters = Boolean(searchTerm || filterStatus !== "all" || filterJabatan !== "all");
 
   // Pagination calculation
   const totalPages = Math.max(1, Math.ceil(filteredData.length / itemsPerPage));
@@ -96,9 +106,9 @@ export function ManajemenPengguna() {
     setIsResetPasswordDialogOpen(true);
   };
 
-  const handleConfirmResetPassword = () => {
+  const handleConfirmResetPassword = async () => {
     if (selectedUser) {
-      const res = resetPassword(selectedUser.id);
+      const res = await resetPassword(selectedUser.id);
       setIsResetPasswordDialogOpen(false);
 
       if (res.success && res.newPassword) {
@@ -153,23 +163,63 @@ export function ManajemenPengguna() {
     }
   };
 
-  return (
-    <div className="flex-1 flex flex-col min-h-full space-y-4 w-full min-w-0 text-left">
-      <div className="shrink-0">
-        <nav className="text-xs text-muted-foreground flex items-center gap-1.5 pb-2" aria-label="Breadcrumb">
-          <span>Manajemen</span>
-          <span>/</span>
-          <span className="text-foreground font-medium">Manajemen Pengguna</span>
-        </nav>
-        <div className="mb-2">
-          <h1 className="text-lg md:text-xl font-semibold text-foreground tracking-tight">Manajemen Pengguna</h1>
-          <p className="text-xs text-muted-foreground">
-            Kelola akses, status akun, dan reset kata sandi pengguna berdasarkan data Karyawan
-          </p>
-        </div>
+  if (isLoading && pengguna.length === 0) {
+    return (
+      <div className="space-y-4 w-full min-w-0 text-left content-fluid">
+        <Card className="p-8 border border-border/80 bg-card shadow-xs flex flex-col items-center justify-center text-center rounded-xl">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm font-medium text-foreground">Memuat data pengguna dari database...</p>
+          <p className="text-xs text-muted-foreground mt-1">Menghubungkan ke API server...</p>
+        </Card>
       </div>
+    );
+  }
 
-      <Card className="p-4 sm:p-5 border border-border/80 bg-card shadow-xs space-y-4 w-full flex-1 flex flex-col min-h-0">
+  if (error && pengguna.length === 0) {
+    return (
+      <div className="space-y-4 w-full min-w-0 text-left content-fluid">
+        <Card className="p-8 border border-red-500/20 bg-red-500/5 shadow-xs flex flex-col items-center justify-center text-center rounded-xl">
+          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 mb-3">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-foreground">Gagal Memuat Data Pengguna</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-md">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refresh()}
+            className="mt-4 gap-2 border-border text-xs"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Coba Lagi</span>
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 w-full min-w-0 text-left content-fluid">
+      <Card className="p-4 sm:p-5 border border-border/80 bg-card shadow-xs space-y-4 w-full rounded-xl">
+        {isStale && (
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>
+                <strong>Peringatan Sinkronisasi:</strong> Gagal memperbarui data dari server ({error}). Menampilkan data cache lokal terakhir.
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => refresh()}
+              className="h-7 text-xs gap-1 hover:bg-amber-500/20"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Coba Sinkron Ulang
+            </Button>
+          </div>
+        )}
         {/* COMPACT TOOLBAR (Judul, Search, Filters — strictly derived from Karyawan HR master) */}
         <div className="flex flex-col md:flex-row gap-2.5 justify-between items-stretch md:items-center shrink-0">
           <div className="relative flex-1">
@@ -208,6 +258,18 @@ export function ManajemenPengguna() {
                 <SelectItem value="CLILEN" className="text-xs">CLILEN</SelectItem>
               </SelectContent>
             </Select>
+
+            {hasActiveFilters && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResetFilters}
+                className="border-border text-xs h-8 px-2.5 gap-1 text-muted-foreground hover:text-foreground shrink-0"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset
+              </Button>
+            )}
           </div>
         </div>
 
@@ -319,8 +381,16 @@ export function ManajemenPengguna() {
                 })
               ) : (
                 <TableRow className="h-full hover:bg-transparent">
-                  <TableCell colSpan={8} className="text-center text-muted-foreground min-h-[200px] py-12 align-middle text-xs">
-                    Tidak ada data pengguna ditemukan
+                  <TableCell colSpan={8} className="p-6">
+                    <EmptyState
+                      icon={UserX}
+                      title="Data Pengguna Tidak Ditemukan"
+                      description={
+                        searchTerm
+                          ? `Tidak ditemukan akun pengguna yang cocok dengan "${searchTerm}".`
+                          : "Belum ada akun pengguna yang terdaftar atau sesuai dengan filter yang dipilih."
+                      }
+                    />
                   </TableCell>
                 </TableRow>
               )}

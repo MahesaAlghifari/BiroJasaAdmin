@@ -357,6 +357,9 @@ export function formatDobToPassword(dobInput: string): string {
 let isApiMode = APP_CONFIG.dataProvider === "api";
 let karyawanList: KaryawanRecord[] = isApiMode ? [] : [...INITIAL_KARYAWAN];
 let penggunaList: PenggunaRecord[] = isApiMode ? [] : [...INITIAL_PENGGUNA];
+let lastApiError: string | null = null;
+let isDataStale = false;
+let hasSuccessfullyLoaded = false;
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -364,8 +367,40 @@ function notify() {
 }
 
 export function syncFromUserRepository() {
+  const repoError = userRepository.getError ? userRepository.getError() : null;
+  const repoLoading = userRepository.isLoading ? userRepository.isLoading() : false;
+
+  if (repoError) {
+    lastApiError = repoError;
+    // If previously loaded data exists, keep it but mark as stale
+    if (karyawanList.length > 0 || hasSuccessfullyLoaded) {
+      isDataStale = true;
+    }
+    notify();
+    return;
+  }
+
+  if (repoLoading && !hasSuccessfullyLoaded) {
+    notify();
+    return;
+  }
+
   const users = userRepository.getAll();
-  if (!Array.isArray(users) || users.length === 0) return;
+  lastApiError = null;
+  isDataStale = false;
+
+  if (!Array.isArray(users)) {
+    return;
+  }
+
+  hasSuccessfullyLoaded = true;
+
+  if (users.length === 0) {
+    penggunaList = [];
+    karyawanList = [];
+    notify();
+    return;
+  }
 
   const roleMap: Record<string, "admin" | "finance" | "svp" | "messenger" | "clilen"> = {
     ADMIN: "admin",
@@ -403,13 +438,13 @@ export function syncFromUserRepository() {
       jabatan: rawJabatan,
       wilayah: (u as any).wilayah || "Jakarta",
       status: u.status === "Aktif" ? "Aktif" : "Nonaktif",
-      noHp: (u as any).noHp || (u as any).telepon || "081234567890",
+      noHp: (u as any).phone || (u as any).noHp || (u as any).telepon || "081234567890",
       email: u.email,
-      jenisKelamin: "Laki-laki",
-      alamat: "Kantor SUN89",
-      gajiPokok: 5000000,
-      tanggalBergabung: "2023-01-01",
-      tanggalLahir: "2000-01-01",
+      jenisKelamin: (u as any).jenisKelamin || (u as any).jenis_kelamin || "Laki-laki",
+      alamat: (u as any).alamat || "Kantor SUN89",
+      gajiPokok: (u as any).gajiPokok ? Number((u as any).gajiPokok) : ((u as any).gaji_pokok ? Number((u as any).gaji_pokok) : 5000000),
+      tanggalBergabung: (u as any).tanggalBergabung || (u as any).tanggal_bergabung || "2023-01-01",
+      tanggalLahir: (u as any).tanggalLahir || (u as any).tanggal_lahir || "2000-01-01",
     };
   });
 
@@ -476,6 +511,23 @@ export const karyawanPenggunaAdapter = {
       userRole: "admin",
     });
 
+    if (isApiMode) {
+      userRepository.createUser({
+        nama: data.nama,
+        email: data.email,
+        jabatan: data.jabatan,
+        status: data.status === "Aktif" ? "Aktif" : "Nonaktif",
+        employeeId: newId,
+        phone: data.noHp,
+        wilayah: data.wilayah,
+        alamat: data.alamat,
+        tanggalLahir: data.tanggalLahir,
+        gajiPokok: data.gajiPokok,
+        tanggalBergabung: data.tanggalBergabung,
+        jenisKelamin: data.jenisKelamin,
+      } as any);
+    }
+
     notify();
     return newKaryawan;
   },
@@ -510,6 +562,26 @@ export const karyawanPenggunaAdapter = {
       userRole: "admin",
     });
 
+    if (isApiMode) {
+      const match = userRepository.getAll().find((u: any) => u.employeeId === id || u.email === updated.email);
+      if (match) {
+        userRepository.updateUser(match.id, {
+          nama: updated.nama,
+          email: updated.email,
+          jabatan: updated.jabatan,
+          status: updated.status === "Aktif" ? "Aktif" : "Nonaktif",
+          employeeId: updated.id,
+          phone: updated.noHp,
+          wilayah: updated.wilayah,
+          alamat: updated.alamat,
+          tanggalLahir: updated.tanggalLahir,
+          gajiPokok: updated.gajiPokok,
+          tanggalBergabung: updated.tanggalBergabung,
+          jenisKelamin: updated.jenisKelamin,
+        } as any);
+      }
+    }
+
     notify();
     return true;
   },
@@ -530,6 +602,13 @@ export const karyawanPenggunaAdapter = {
       details: `Menghapus karyawan: ${target.nama} (${id})`,
       userRole: "admin",
     });
+
+    if (isApiMode) {
+      const match = userRepository.getAll().find((u: any) => u.employeeId === id || u.email === target.email);
+      if (match) {
+        userRepository.deleteUser(match.id);
+      }
+    }
 
     notify();
     return true;
@@ -614,6 +693,23 @@ export const karyawanPenggunaAdapter = {
     const idx = penggunaList.findIndex((p) => p.id === userId);
     if (idx === -1) return false;
 
+    const savedUserStr = typeof window !== "undefined" ? localStorage.getItem("auth_user") : null;
+    let currentUserRole = "admin";
+    if (savedUserStr) {
+      try { currentUserRole = JSON.parse(savedUserStr).role || "admin"; } catch {}
+    }
+    const isCallerSvp = currentUserRole === "administrator" || currentUserRole === "svp";
+
+    // Strictly protect SVP account from role change by non-SVP
+    if (penggunaList[idx].role === "svp" && !isCallerSvp) {
+      return false;
+    }
+
+    // Prevent non-SVP from elevating to SVP
+    if (role === "svp" && !isCallerSvp) {
+      return false;
+    }
+
     penggunaList[idx] = {
       ...penggunaList[idx],
       role,
@@ -646,9 +742,20 @@ export const karyawanPenggunaAdapter = {
    * Reset Password strictly using the Employee's Date of Birth formatted as DDMMYYYY
    * Returns the new plaintext password for feedback dialog
    */
-  resetPassword(userId: string): { success: boolean; newPassword?: string; error?: string } {
+  async resetPassword(userId: string): Promise<{ success: boolean; newPassword?: string; error?: string }> {
     const user = penggunaList.find((p) => p.id === userId);
     if (!user) return { success: false, error: "Pengguna tidak ditemukan." };
+
+    const savedUserStr = typeof window !== "undefined" ? localStorage.getItem("auth_user") : null;
+    let currentUserRole = "admin";
+    if (savedUserStr) {
+      try { currentUserRole = JSON.parse(savedUserStr).role || "admin"; } catch {}
+    }
+    const isCallerSvp = currentUserRole === "administrator" || currentUserRole === "svp";
+
+    if (user.role === "svp" && !isCallerSvp) {
+      return { success: false, error: "Akun SVP dilindungi oleh sistem dan tidak dapat direset oleh role lain." };
+    }
 
     const employee = karyawanList.find((k) => k.id === user.employeeId);
     if (!employee || !employee.tanggalLahir) {
@@ -656,6 +763,17 @@ export const karyawanPenggunaAdapter = {
     }
 
     const newPassword = formatDobToPassword(employee.tanggalLahir);
+
+    if (isApiMode && userRepository.resetPassword) {
+      try {
+        await userRepository.resetPassword(userId);
+      } catch (err: any) {
+        return {
+          success: false,
+          error: err.message || "Gagal mereset kata sandi pada server.",
+        };
+      }
+    }
 
     penggunaList = penggunaList.map((p) => {
       if (p.id === userId) {
@@ -703,6 +821,28 @@ export const karyawanPenggunaAdapter = {
     }
   },
 
+  isLoading(): boolean {
+    if (!isApiMode) return false;
+    return Boolean(userRepository.isLoading && userRepository.isLoading() && !hasSuccessfullyLoaded);
+  },
+
+  getError(): string | null {
+    if (!isApiMode) return null;
+    return lastApiError || (userRepository.getError ? userRepository.getError() : null);
+  },
+
+  isStale(): boolean {
+    return isDataStale;
+  },
+
+  async refresh(): Promise<void> {
+    const provider = (userRepository as any).getProvider ? (userRepository as any).getProvider() : null;
+    if (provider && typeof provider.initFromApi === "function") {
+      await provider.initFromApi();
+    }
+    syncFromUserRepository();
+  },
+
   subscribe(listener: () => void) {
     listeners.add(listener);
     return () => {
@@ -722,7 +862,13 @@ export function useKaryawanPengguna() {
 
   return {
     karyawan: karyawanPenggunaAdapter.getKaryawan(),
+    karyawanList: karyawanPenggunaAdapter.getKaryawan(),
     pengguna: karyawanPenggunaAdapter.getPengguna(),
+    penggunaList: karyawanPenggunaAdapter.getPengguna(),
+    isLoading: karyawanPenggunaAdapter.isLoading(),
+    error: karyawanPenggunaAdapter.getError(),
+    isStale: karyawanPenggunaAdapter.isStale(),
+    refresh: () => karyawanPenggunaAdapter.refresh(),
     activateAccount: karyawanPenggunaAdapter.activateAccount,
     deactivateAccount: karyawanPenggunaAdapter.deactivateAccount,
     resetPassword: karyawanPenggunaAdapter.resetPassword,

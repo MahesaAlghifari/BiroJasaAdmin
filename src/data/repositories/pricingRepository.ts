@@ -15,8 +15,14 @@ import { ApiPricingProvider } from "../api/apiPricingProvider";
 export interface IPricingRepository {
   getSamsatItems(): SamsatCostItem[];
   getSamsatItemById(id: string): SamsatCostItem | undefined;
-  updateSamsatItem(id: string, updates: Partial<SamsatCostItem>): boolean;
+  updateSamsatItem(id: string, updates: Partial<SamsatCostItem>): Promise<boolean> | boolean;
   addSamsatItem(item: Omit<SamsatCostItem, "id">): SamsatCostItem;
+  getServiceConfigs?(): any[];
+  getSamsatOffices?(): any[];
+  getAvailableServices?(): string[];
+  updateServicePricing?(id: string, config: any): Promise<boolean> | boolean;
+  createServicePricing?(config: any): Promise<any> | any;
+  deleteServicePricing?(id: string): Promise<boolean> | boolean;
   getServicePackages(): Record<string, ServicePackageConfig>;
   getServicePackage(serviceNameOrId: string): ServicePackageConfig | undefined;
   updateServicePackage(serviceNameOrId: string, updates: Partial<ServicePackageConfig>): boolean;
@@ -37,6 +43,7 @@ export interface IPricingRepository {
   getProvider?(): IPricingDataProvider;
   isLoading?(): boolean;
   getError?(): Error | null;
+  initFromApi?(): Promise<void>;
 }
 
 export class PricingRepository implements IPricingRepository {
@@ -68,12 +75,66 @@ export class PricingRepository implements IPricingRepository {
     return this.provider.getSamsatItemById(id);
   }
 
-  updateSamsatItem(id: string, updates: Partial<SamsatCostItem>): boolean {
+  updateSamsatItem(id: string, updates: Partial<SamsatCostItem>): Promise<boolean> | boolean {
     return this.provider.updateSamsatItem(id, updates);
   }
 
   addSamsatItem(item: Omit<SamsatCostItem, "id">): SamsatCostItem {
     return this.provider.addSamsatItem(item);
+  }
+
+  getServiceConfigs(): any[] {
+    return this.provider.getServiceConfigs ? this.provider.getServiceConfigs() : [];
+  }
+
+  getSamsatOffices(): any[] {
+    return this.provider.getSamsatOffices ? this.provider.getSamsatOffices() : [];
+  }
+
+  getAvailableServices(): string[] {
+    return pricingStore.getAvailableServices();
+  }
+
+  async updateServicePricing(id: string, config: any): Promise<boolean> {
+    if (this.provider.updateServicePricing) {
+      return await this.provider.updateServicePricing(id, config);
+    }
+    return false;
+  }
+
+  async createServicePricing(config: any): Promise<any> {
+    if (this.provider.createServicePricing) {
+      return await this.provider.createServicePricing(config);
+    }
+    return null;
+  }
+
+  async deleteServicePricing(id: string): Promise<boolean> {
+    if (this.provider.deleteServicePricing) {
+      return await this.provider.deleteServicePricing(id);
+    }
+    return true;
+  }
+
+  async createSamsatOffice(office: any): Promise<any> {
+    if (this.provider.createSamsatOffice) {
+      return await this.provider.createSamsatOffice(office);
+    }
+    return office;
+  }
+
+  async updateSamsatOffice(id: string, updates: any): Promise<boolean> {
+    if (this.provider.updateSamsatOffice) {
+      return await this.provider.updateSamsatOffice(id, updates);
+    }
+    return true;
+  }
+
+  async deleteSamsatOffice(id: string): Promise<boolean> {
+    if (this.provider.deleteSamsatOffice) {
+      return await this.provider.deleteSamsatOffice(id);
+    }
+    return true;
   }
 
   getServicePackages(): Record<string, ServicePackageConfig> {
@@ -102,6 +163,12 @@ export class PricingRepository implements IPricingRepository {
 
   public getError(): Error | null {
     return this.provider.getError ? this.provider.getError() : null;
+  }
+
+  public async initFromApi(): Promise<void> {
+    if (this.provider && typeof (this.provider as any).initFromApi === "function") {
+      await (this.provider as any).initFromApi();
+    }
   }
 }
 

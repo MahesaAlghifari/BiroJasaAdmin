@@ -173,7 +173,7 @@ export function EstimatorR2Tahunan({
             </h2>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Sumber Formula: Workbook Excel Sheet <code>PAJAK TAHUNAN R2</code>
+            Sumber Formula: Standar Perhitungan Pajak Tahunan R2 Resmi
           </p>
         </div>
 
@@ -194,7 +194,7 @@ export function EstimatorR2Tahunan({
             size="sm"
             onClick={handleResetTemplate}
             className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
-            title="Reset ke formula default Excel"
+            title="Reset ke formula default"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             Reset
@@ -225,7 +225,6 @@ export function EstimatorR2Tahunan({
                   <Label htmlFor="pkb-input" className="text-xs font-semibold text-foreground">
                     1. PKB Dasar Tahunan (STNK) *
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">Cell I14</span>
                 </div>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
@@ -251,7 +250,6 @@ export function EstimatorR2Tahunan({
                   <Label htmlFor="due-date-input" className="text-xs font-semibold text-foreground">
                     2. Tanggal Jatuh Tempo Pajak Terakhir *
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">Cell H21</span>
                 </div>
                 <Input
                   id="due-date-input"
@@ -268,7 +266,7 @@ export function EstimatorR2Tahunan({
                   <Label htmlFor="est-date-input" className="text-xs font-semibold text-foreground">
                     Tanggal Estimasi Perhitungan
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">Cell I21 (TODAY)</span>
+                  <span className="text-[10px] text-muted-foreground">Hari Ini</span>
                 </div>
                 <Input
                   id="est-date-input"
@@ -285,7 +283,6 @@ export function EstimatorR2Tahunan({
                   <Label className="text-xs font-semibold text-foreground">
                     3. Program Samsat *
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">Cell I11</span>
                 </div>
                 <RadioGroup
                   value={programSamsat}
@@ -398,7 +395,7 @@ export function EstimatorR2Tahunan({
                 </span>
                 <div>
                   <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                    Durasi Keterlambatan Kalender (Cell I22)
+                    Durasi Keterlambatan Kalender
                   </div>
                   <div className="text-base font-bold text-foreground">
                     {result.durasiKeterlambatan}
@@ -424,13 +421,13 @@ export function EstimatorR2Tahunan({
             <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 uppercase tracking-wider">
-                  Total Estimasi Akhir R2 (Cell C30)
+                  Total Estimasi Akhir R2
                 </span>
                 <div className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums text-foreground mt-1">
                   Rp {result.totalEstimasi.toLocaleString("id-ID")}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Termasuk Proses & ACC ID, Cetak SKP, Jasa, dan pembulatan kelipatan Rp 1.000 (ROUNDUP)
+                  Termasuk Proses & ACC ID, Cetak SKP, Jasa, dan pembulatan kelipatan Rp 1.000
                 </p>
               </div>
 
@@ -621,7 +618,7 @@ export function EstimatorR2Tahunan({
 
           <div className="space-y-3 py-2 text-xs">
             <div className="space-y-1">
-              <Label className="text-xs">Koefisien Denda (Cell I6, default 0.48)</Label>
+              <Label className="text-xs">Koefisien Denda (default 0.48)</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -631,7 +628,7 @@ export function EstimatorR2Tahunan({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Biaya Jasa Motor (Cell C29, default 200.000)</Label>
+              <Label className="text-xs">Biaya Jasa Motor (default Rp 200.000)</Label>
               <Input
                 type="number"
                 value={configForm.biayaJasa}
@@ -640,7 +637,7 @@ export function EstimatorR2Tahunan({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">SWDKLLJ Pokok Motor (Cell C21, default 35.000)</Label>
+              <Label className="text-xs">SWDKLLJ Pokok Motor (default Rp 35.000)</Label>
               <Input
                 type="number"
                 value={configForm.swdklljPokok}
@@ -649,7 +646,7 @@ export function EstimatorR2Tahunan({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Denda SWDKLLJ Pokok Motor (Cell F20, default 32.000)</Label>
+              <Label className="text-xs">Denda SWDKLLJ Pokok Motor (default Rp 32.000)</Label>
               <Input
                 type="number"
                 value={configForm.dendaSwdklljPokok}
@@ -658,7 +655,7 @@ export function EstimatorR2Tahunan({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Biaya Cetak SKP Motor (Cell C28, default 50.000)</Label>
+              <Label className="text-xs">Biaya Cetak SKP Motor (default Rp 50.000)</Label>
               <Input
                 type="number"
                 value={configForm.biayaCetakSkp}

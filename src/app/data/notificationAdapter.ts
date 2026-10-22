@@ -28,14 +28,38 @@ export interface NotificationItem {
   isRead?: boolean;
 }
 
+const STORAGE_KEY_READ_NOTIFS = "sun89_read_notification_ids";
+
 class NotificationService {
-  private readIds: Set<string | number> = new Set();
+  private readIds: Set<string | number>;
   private listeners: Set<() => void> = new Set();
 
   constructor() {
+    this.readIds = this.loadReadIds();
     // Re-notify when finance or order stores update
     financeStore.subscribe(() => this.notify());
     orderStore.subscribe(() => this.notify());
+  }
+
+  private loadReadIds(): Set<string | number> {
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY_READ_NOTIFS);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return new Set(parsed);
+        }
+      } catch {}
+    }
+    return new Set();
+  }
+
+  private saveReadIds(): void {
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        localStorage.setItem(STORAGE_KEY_READ_NOTIFS, JSON.stringify(Array.from(this.readIds)));
+      } catch {}
+    }
   }
 
   public subscribe(listener: () => void): () => void {
@@ -49,17 +73,20 @@ class NotificationService {
 
   public markAsRead(id: string | number): void {
     this.readIds.add(id);
+    this.saveReadIds();
     this.notify();
   }
 
   public markAllAsRead(): void {
     const notifs = this.getNotifications();
     notifs.forEach((n) => this.readIds.add(n.id));
+    this.saveReadIds();
     this.notify();
   }
 
   public clearReadState(): void {
     this.readIds.clear();
+    this.saveReadIds();
     this.notify();
   }
 

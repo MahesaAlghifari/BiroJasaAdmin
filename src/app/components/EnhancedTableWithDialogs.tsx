@@ -21,7 +21,13 @@ import {
   SlidersHorizontal,
   Download,
   FileText,
-  Printer
+  Printer,
+  Loader2,
+  Check,
+  Car,
+  CreditCard,
+  User,
+  AlertTriangle
 } from "lucide-react";
 import {
   exportToCSV,
@@ -45,6 +51,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { TablePagination } from "./ui/TablePagination";
+import { EmptyState } from "./ui/empty-state";
 import { cn } from "./ui/utils";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
@@ -62,6 +69,8 @@ import {
   FinanceDateFilterValue, 
   getWeekRange 
 } from "./FinanceDateFilter";
+import { PlateNumberInput } from "./PlateNumberInput";
+import { SearchableSamsatSelect } from "./SearchableSamsatSelect";
 
 export interface Column {
   key: string;
@@ -77,7 +86,7 @@ export interface Column {
 export interface FieldConfig {
   key: string;
   label: string;
-  type: "text" | "number" | "date" | "select";
+  type: "text" | "number" | "date" | "select" | "plate-number" | "samsat-select";
   options?: string[];
   placeholder?: string;
   readOnly?: boolean;
@@ -91,6 +100,7 @@ interface EnhancedTableWithDialogsProps {
   onEdit?: (item: any, updatedData: any) => void;
   onDelete?: (item: any) => void;
   onView?: (item: any) => void;
+  onPrint?: (item: any) => void;
   onExport?: (format: 'csv' | 'pdf') => void;
   searchPlaceholder?: string;
   itemsPerPageOptions?: number[];
@@ -98,6 +108,7 @@ interface EnhancedTableWithDialogsProps {
   hideAddButton?: boolean;
   hideEditButton?: boolean;
   hideDeleteButton?: boolean;
+  bypassInternalDeleteDialog?: boolean;
   subTabTitle?: string;
 }
 
@@ -110,6 +121,7 @@ export function EnhancedTableWithDialogs({
   onEdit,
   onDelete,
   onView,
+  onPrint,
   onExport,
   searchPlaceholder = "Cari nama / nopol...",
   itemsPerPageOptions = [10, 25, 50, 100],
@@ -117,6 +129,7 @@ export function EnhancedTableWithDialogs({
   hideAddButton = false,
   hideEditButton = false,
   hideDeleteButton = false,
+  bypassInternalDeleteDialog = false,
   subTabTitle
 }: EnhancedTableWithDialogsProps) {
   // Search inputs (Requirement 12: separate date and text searches)
@@ -131,7 +144,7 @@ export function EnhancedTableWithDialogs({
   const [customEndDate, setCustomEndDate] = useState<string>("");
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(itemsPerPageOptions[0]);
+  const [itemsPerPage, setItemsPerPage] = useState(itemsPerPageOptions.includes(25) ? 25 : itemsPerPageOptions[0]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filters, setFilters] = useState<Record<string, string>>({});
 
@@ -215,9 +228,43 @@ export function EnhancedTableWithDialogs({
 
   // Dialog states
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [initialEditSnapshot, setInitialEditSnapshot] = useState<string>("");
+  const [isDiscardDialogOpen, setIsDiscardDialogOpen] = useState<boolean>(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [editFormData, setEditFormData] = useState<any>({});
+
+  const isEditFormDirty = useMemo(() => {
+    if (!initialEditSnapshot) return false;
+    return JSON.stringify(editFormData) !== initialEditSnapshot;
+  }, [editFormData, initialEditSnapshot]);
+
+  const handleCancelEdit = () => {
+    if (isEditFormDirty) {
+      setIsDiscardDialogOpen(true);
+    } else {
+      setIsEditDialogOpen(false);
+    }
+  };
+
+  const handleConfirmDiscardEdit = () => {
+    setIsDiscardDialogOpen(false);
+    setIsEditDialogOpen(false);
+  };
+
+  // Contextual identifier for delete confirmation
+  const itemIdentifier = useMemo(() => {
+    if (!selectedItem) return "transaksi ini";
+    if (selectedItem.customer) {
+      return `${selectedItem.customer}${selectedItem.nopol ? ` (${selectedItem.nopol})` : ""}`;
+    }
+    if (selectedItem.keterangan) return selectedItem.keterangan;
+    if (selectedItem.invoice || selectedItem.invoiceNo) return selectedItem.invoice || selectedItem.invoiceNo;
+    if (selectedItem.nama) return selectedItem.nama;
+    if (selectedItem.orderNo) return `Order ${selectedItem.orderNo}`;
+    return "transaksi ini";
+  }, [selectedItem]);
 
   // Check if date column exists
   const hasDateColumn = useMemo(() => {
@@ -278,14 +325,21 @@ export function EnhancedTableWithDialogs({
   // Filter and search data
   const filteredData = useMemo(() => {
     return data.filter(item => {
-      // 1. Text Search (nama, nopol, etc.)
+      // 1. Text Search (nama, nopol, etc.) with space/punctuation tolerance
       if (searchTerm.trim() !== "") {
-        const query = searchTerm.toLowerCase();
+        const query = searchTerm.toLowerCase().trim();
+        const normQuery = query.replace(/[^a-z0-9]/g, "");
         const matchesQuery = Object.entries(item).some(([k, val]) => {
           if (val === null || val === undefined) return false;
           // Don't match internal ids
           if (k === "id") return false;
-          return String(val).toLowerCase().includes(query);
+          const strVal = String(val).toLowerCase();
+          if (strVal.includes(query)) return true;
+          if (normQuery.length >= 2) {
+            const normVal = strVal.replace(/[^a-z0-9]/g, "");
+            if (normVal.includes(normQuery)) return true;
+          }
+          return false;
         });
         if (!matchesQuery) return false;
       }
@@ -335,7 +389,14 @@ export function EnhancedTableWithDialogs({
         if (colDef?.filterType === "select") {
           return String(item[key]).toLowerCase() === value.toLowerCase();
         }
-        return String(item[key]).toLowerCase().includes(value.toLowerCase());
+        const rawItemVal = String(item[key] ?? "").toLowerCase();
+        const rawFilterVal = value.toLowerCase().trim();
+        if (rawItemVal.includes(rawFilterVal)) return true;
+        const normFilter = rawFilterVal.replace(/[^a-z0-9]/g, "");
+        if (normFilter.length >= 2) {
+          return rawItemVal.replace(/[^a-z0-9]/g, "").includes(normFilter);
+        }
+        return false;
       });
 
       return matchesFilters;
@@ -541,6 +602,24 @@ export function EnhancedTableWithDialogs({
       return <PlainTextStatus status={String(value)} />;
     }
 
+    // Dokumen indicator (digital documents count)
+    if (lowerKey === "dokumen") {
+      const count = item.attachedDocsCount || 0;
+      if (count > 0) {
+        return (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+            <FileText className="w-3 h-3" />
+            {value}
+          </span>
+        );
+      }
+      return (
+        <span className="text-[11px] text-muted-foreground/70 italic">
+          Belum Ada
+        </span>
+      );
+    }
+
     // Currency values
     if (typeof value === "number") {
       const isMonetary = 
@@ -577,10 +656,15 @@ export function EnhancedTableWithDialogs({
   const handleEditClick = (item: any) => {
     setSelectedItem(item);
     setEditFormData({ ...item });
+    setInitialEditSnapshot(JSON.stringify(item));
     setIsEditDialogOpen(true);
   };
 
   const handleDeleteClick = (item: any) => {
+    if (bypassInternalDeleteDialog && onDelete) {
+      onDelete(item);
+      return;
+    }
     setSelectedItem(item);
     setIsDeleteDialogOpen(true);
   };
@@ -588,9 +672,13 @@ export function EnhancedTableWithDialogs({
   const handleEditSubmit = () => {
     if (editFields) {
       for (const field of editFields) {
-        if (!field.readOnly && !editFormData[field.key] && editFormData[field.key] !== 0) {
-          toast.error(`${field.label} wajib diisi`);
-          return;
+        const isCoreRequired = field.key === "Plat No" || field.key === "Nama Customer";
+        if (field.required || isCoreRequired) {
+          const val = editFormData[field.key];
+          if (val === undefined || val === null || (typeof val === "string" && val.trim() === "")) {
+            toast.error(`${field.label} wajib diisi`);
+            return;
+          }
         }
       }
     }
@@ -602,12 +690,22 @@ export function EnhancedTableWithDialogs({
     toast.success("Data transaksi berhasil diperbarui");
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (onDelete && selectedItem) {
-      onDelete(selectedItem);
+      try {
+        setIsDeleting(true);
+        await Promise.resolve(onDelete(selectedItem));
+        setIsDeleteDialogOpen(false);
+        setSelectedItem(null);
+        toast.success("Data transaksi berhasil dihapus");
+      } catch (err: any) {
+        toast.error(err?.message || "Gagal menghapus data transaksi.");
+      } finally {
+        setIsDeleting(false);
+      }
+    } else {
+      setIsDeleteDialogOpen(false);
     }
-    setIsDeleteDialogOpen(false);
-    toast.success("Data transaksi berhasil dihapus");
   };
 
   const clearFilters = () => {
@@ -960,13 +1058,13 @@ export function EnhancedTableWithDialogs({
                 <TableRow className="h-full hover:bg-transparent">
                   <TableCell 
                     colSpan={columns.filter(c => visibleColumnKeys.has(c.key) || mobilePrimaryKeys.has(c.key)).length + 1} 
-                    className="h-full min-h-[200px] text-center text-muted-foreground py-12 align-middle"
+                    className="h-full min-h-[200px] text-center p-0 align-middle"
                   >
-                    <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                      <FileQuestion className="w-8 h-8 text-muted-foreground/60" />
-                      <p className="text-sm font-medium text-foreground/80">Tidak ada data transaksi yang ditemukan</p>
-                      <p className="text-xs text-muted-foreground">Periksa filter pencarian atau tambahkan transaksi baru</p>
-                    </div>
+                    <EmptyState
+                      icon={FileQuestion}
+                      title="Tidak ada data transaksi yang ditemukan"
+                      description="Periksa filter pencarian atau tambahkan transaksi baru."
+                    />
                   </TableCell>
                 </TableRow>
               ) : (
@@ -1013,6 +1111,19 @@ export function EnhancedTableWithDialogs({
                             className="finance-action-btn h-7 w-7 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors"
                           >
                             <Eye className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {onPrint && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onPrint(item)}
+                            aria-label="Cetak invoice A5"
+                            title="Cetak Invoice A5"
+                            className="finance-action-btn h-7 w-7 p-0 text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
                           </Button>
                         )}
                         {onEdit && !hideEditButton && (
@@ -1064,92 +1175,263 @@ export function EnhancedTableWithDialogs({
         />
       </div>
 
-      {/* Edit Data Modal (For surgical inline update) */}
+      {/* Edit Data Modal (For surgical inline update following Buat Order design standards) */}
       {editFields && (
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="border-border sm:max-w-xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="text-sm font-semibold">Ubah data transaksi</DialogTitle>
-              <DialogDescription className="text-xs">
-                Perbarui rincian informasi data transaksi
+        <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+          if (!open) {
+            handleCancelEdit();
+          }
+        }}>
+          <DialogContent className="border-border sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader className="pb-2 border-b border-border/60">
+              <DialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                <Edit className="w-4 h-4 text-primary" />
+                <span>Ubah Data Transaksi {subTabTitle ? `— ${subTabTitle}` : ""}</span>
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Perbarui rincian informasi data transaksi sesuai standar formulir operasional
               </DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              {editFields.map(field => (
-                <div key={field.key} className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium text-foreground/80">{field.label}</Label>
-                    {field.readOnly && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 bg-muted text-muted-foreground rounded border border-border">
-                        Read-only
-                      </span>
+
+            <div className="space-y-4 my-2">
+              {(() => {
+                const isCanonicalOrder = typeof selectedItem?.id === "string" && selectedItem.id.startsWith("ord:");
+                const isDerivedOrderField = (key: string) => {
+                  return isCanonicalOrder && (
+                    key === "Status Pengerjaan" ||
+                    key === "Status Pembayaran" ||
+                    key === "No Invoice"
+                  );
+                };
+
+                const renderSingleField = (field: any) => {
+                  const isReadOnly = Boolean(field.readOnly || isDerivedOrderField(field.key));
+                  const isOrderLocked = isDerivedOrderField(field.key);
+
+                  return (
+                    <div key={field.key} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold text-foreground/90">
+                          {field.label} {!isReadOnly && <span className="text-destructive">*</span>}
+                        </Label>
+                        {isReadOnly && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 bg-muted text-muted-foreground rounded border border-border">
+                            {isOrderLocked ? "Alur Order" : "Read-only"}
+                          </span>
+                        )}
+                      </div>
+                      {field.type === "plate-number" || (!isReadOnly && (field.key === "Plat No" || field.key === "Nomor Polisi" || field.key === "nopol")) ? (
+                        <PlateNumberInput
+                          value={editFormData[field.key] || ""}
+                          onChange={(val) => setEditFormData({ ...editFormData, [field.key]: val })}
+                          disabled={isReadOnly}
+                        />
+                      ) : field.type === "samsat-select" || (!isReadOnly && (field.key === "Samsat" || field.key === "Wilayah Samsat Asal" || field.key === "Wilayah Samsat" || field.key === "Samsat Tujuan")) ? (
+                        <SearchableSamsatSelect
+                          value={editFormData[field.key] || ""}
+                          onValueChange={(val) => setEditFormData({ ...editFormData, [field.key]: val })}
+                          disabled={isReadOnly}
+                          placeholder={`Pilih ${field.label.toLowerCase()}`}
+                        />
+                      ) : field.type === "select" && field.options && !isReadOnly ? (
+                        <Select
+                          value={editFormData[field.key] || ""}
+                          onValueChange={(value) => setEditFormData({ ...editFormData, [field.key]: value })}
+                        >
+                          <SelectTrigger className="bg-input-background border-border h-9 text-xs">
+                            <SelectValue placeholder={`Pilih ${field.label.toLowerCase()}`} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {field.options.map((opt: string) => (
+                              <SelectItem key={opt} value={opt} className="text-xs">{opt}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          type={field.type === "select" ? "text" : field.type}
+                          readOnly={isReadOnly}
+                          disabled={isReadOnly}
+                          placeholder={field.placeholder || (isReadOnly ? "Diturunkan otomatis" : `Masukkan ${field.label.toLowerCase()}`)}
+                          className={cn(
+                            "bg-input-background border-border h-9 text-xs",
+                            isReadOnly && "bg-muted/40 text-muted-foreground cursor-not-allowed select-none opacity-80"
+                          )}
+                          value={editFormData[field.key] !== undefined ? editFormData[field.key] : ""}
+                          onChange={(e) => {
+                            if (!isReadOnly) {
+                              setEditFormData({ ...editFormData, [field.key]: e.target.value });
+                            }
+                          }}
+                        />
+                      )}
+                      {(field.helpText || isOrderLocked) && (
+                        <p className="text-[10px] text-muted-foreground leading-tight">
+                          {isOrderLocked
+                            ? "Ditentukan otomatis oleh tahapan proses order tracking kanonis."
+                            : field.helpText}
+                        </p>
+                      )}
+                    </div>
+                  );
+                };
+
+                const berkasKeys = ["polisi", "plat", "nopol", "customer", "pemilik", "kendaraan", "samsat", "telp", "hp", "r4", "r2"];
+                const keuanganKeys = ["uang", "bayar", "biaya", "tagihan", "profit", "saldo", "masuk", "keluar", "nominal", "rekening", "bank", "invoice", "ttb"];
+
+                const berkasFields = editFields.filter((f) => {
+                  const k = f.key.toLowerCase();
+                  return berkasKeys.some((bk) => k.includes(bk));
+                });
+
+                const keuanganFields = editFields.filter((f) => {
+                  const k = f.key.toLowerCase();
+                  return !berkasKeys.some((bk) => k.includes(bk)) && keuanganKeys.some((fk) => k.includes(fk));
+                });
+
+                const operasionalFields = editFields.filter((f) => {
+                  const k = f.key.toLowerCase();
+                  return !berkasKeys.some((bk) => k.includes(bk)) && !keuanganKeys.some((fk) => k.includes(fk));
+                });
+
+                const hasSections = (berkasFields.length > 0 && (keuanganFields.length > 0 || operasionalFields.length > 0)) ||
+                                    (keuanganFields.length > 0 && operasionalFields.length > 0);
+
+                if (!hasSections) {
+                  return (
+                    <div className="p-4 rounded-xl border border-border/70 bg-card shadow-2xs space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        {editFields.map(renderSingleField)}
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    {berkasFields.length > 0 && (
+                      <div className="space-y-3 p-4 rounded-xl border border-border/70 bg-card shadow-2xs">
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
+                          <Car className="w-3.5 h-3.5 text-primary" />
+                          Data Klien & Kendaraan
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                          {berkasFields.map(renderSingleField)}
+                        </div>
+                      </div>
+                    )}
+
+                    {operasionalFields.length > 0 && (
+                      <div className="space-y-3 p-4 rounded-xl border border-border/70 bg-card shadow-2xs">
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
+                          <FileText className="w-3.5 h-3.5 text-primary" />
+                          Layanan & Operasional
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                          {operasionalFields.map(renderSingleField)}
+                        </div>
+                      </div>
+                    )}
+
+                    {keuanganFields.length > 0 && (
+                      <div className="space-y-3 p-4 rounded-xl border border-border/70 bg-card shadow-2xs">
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
+                          <CreditCard className="w-3.5 h-3.5 text-primary" />
+                          Keuangan & Administrasi
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                          {keuanganFields.map(renderSingleField)}
+                        </div>
+                      </div>
                     )}
                   </div>
-                  {field.type === "select" && field.options && !field.readOnly ? (
-                    <Select
-                      value={editFormData[field.key] || ""}
-                      onValueChange={(value) => setEditFormData({ ...editFormData, [field.key]: value })}
-                    >
-                      <SelectTrigger className="bg-background border-border h-8 text-xs">
-                        <SelectValue placeholder={`Pilih ${field.label.toLowerCase()}`} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {field.options.map(opt => (
-                          <SelectItem key={opt} value={opt} className="text-xs">{opt}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      type={field.type === "select" ? "text" : field.type}
-                      readOnly={field.readOnly}
-                      disabled={field.readOnly}
-                      className={cn(
-                        "bg-background border-border h-8 text-xs",
-                        field.readOnly && "bg-muted/40 text-muted-foreground cursor-not-allowed select-none opacity-80"
-                      )}
-                      value={editFormData[field.key] !== undefined ? editFormData[field.key] : ""}
-                      onChange={(e) => {
-                        if (!field.readOnly) {
-                          setEditFormData({ ...editFormData, [field.key]: e.target.value });
-                        }
-                      }}
-                    />
-                  )}
-                  {field.helpText && (
-                    <p className="text-[10px] text-muted-foreground leading-tight">{field.helpText}</p>
-                  )}
-                </div>
-              ))}
+                );
+              })()}
             </div>
-            <DialogFooter className="mt-3 gap-2">
-              <Button variant="outline" size="sm" onClick={() => setIsEditDialogOpen(false)} className="text-xs h-8">
+
+            <DialogFooter className="mt-4 gap-2 pt-3 border-t border-border/60">
+              <Button variant="outline" size="sm" onClick={handleCancelEdit} className="text-xs h-9 px-4">
                 Batal
               </Button>
-              <Button size="sm" className="bg-primary hover:bg-primary/90 text-xs h-8" onClick={handleEditSubmit}>
-                Simpan perubahan
+              <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs h-9 px-4 font-semibold shadow-xs flex items-center gap-1.5" onClick={handleEditSubmit}>
+                <Check className="w-3.5 h-3.5" />
+                Simpan Perubahan
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
 
-      {/* Delete Confirmation Alert Dialog */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent className="border-border">
+      {/* Discard Confirmation Alert Dialog */}
+      <AlertDialog open={isDiscardDialogOpen} onOpenChange={setIsDiscardDialogOpen}>
+        <AlertDialogContent className="border-border sm:max-w-md bg-card">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-sm font-semibold">Hapus data transaksi?</AlertDialogTitle>
-            <AlertDialogDescription className="text-xs">
-              Apakah Anda yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.
+            <AlertDialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+              Perubahan Belum Disimpan
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              Anda memiliki perubahan pada data yang belum disimpan. Jika Anda membatalkan sekarang, semua perubahan yang Anda lakukan akan dibuang.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="text-xs h-8">Batal</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleDeleteConfirm}
-              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground text-xs h-8"
+          <AlertDialogFooter className="mt-4 gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8.5 text-xs font-medium"
+              onClick={() => setIsDiscardDialogOpen(false)}
             >
-              Hapus
+              Lanjutkan Mengedit
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-8.5 text-xs bg-red-600 hover:bg-red-700 text-white font-semibold"
+              onClick={handleConfirmDiscardEdit}
+            >
+              Buang Perubahan
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Confirmation Alert Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={(open) => { if (!open && !isDeleting) setIsDeleteDialogOpen(false); }}>
+        <AlertDialogContent className="border-border sm:max-w-md bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm sm:text-base font-semibold text-foreground flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-destructive" />
+              Hapus Data Transaksi?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground pt-1 space-y-2">
+              <p>
+                Apakah Anda yakin ingin menghapus data <strong className="text-foreground">{itemIdentifier}</strong>?
+              </p>
+              <p className="p-2.5 rounded-lg border border-destructive/20 bg-destructive/5 text-destructive text-[11px] font-medium leading-relaxed">
+                Tindakan ini tidak dapat dibatalkan dan akan menghapus catatan transaksi dari modul {subTabTitle || "keuangan"}.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel disabled={isDeleting} className="text-xs h-8">
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              disabled={isDeleting}
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteConfirm();
+              }}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground text-xs h-8 font-semibold shadow-xs flex items-center gap-1.5"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Menghapus...
+                </>
+              ) : (
+                "Ya, Hapus Data"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

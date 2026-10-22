@@ -16,21 +16,24 @@ import {
 import { ThemeProvider, useTheme } from "./components/ThemeProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Auth } from "./components/Auth";
-import { NotificationDialog } from "./components/NotificationDialog";
+import { NotificationPopover } from "./components/NotificationPopover";
 import { useNotifications } from "./data/notificationAdapter";
 import { Button } from "./components/ui/button";
 import { NotFoundPage } from "./components/NotFoundPage";
+import { HeaderReloadButton } from "./utils/useLiveSync";
 
 // Page-level code splitting for on-demand bundle delivery
 const Dashboard = lazy(() => import("./components/Dashboard").then(m => ({ default: m.Dashboard })));
 const Finance = lazy(() => import("./components/Finance").then(m => ({ default: m.Finance })));
 const MasterData = lazy(() => import("./components/MasterData").then(m => ({ default: m.MasterData })));
 const MessengerTask = lazy(() => import("./components/MessengerTask").then(m => ({ default: m.MessengerTask })));
+const MessengerHistory = lazy(() => import("./components/MessengerHistory").then(m => ({ default: m.MessengerHistory })));
 const MessengerWorkspace = lazy(() => import("./components/messenger/MessengerWorkspace").then(m => ({ default: m.MessengerWorkspace })));
 const BuatOrder = lazy(() => import("./components/BuatOrder").then(m => ({ default: m.BuatOrder })));
 const OrderTracking = lazy(() => import("./components/OrderTracking").then(m => ({ default: m.OrderTracking })));
 const OrderHistory = lazy(() => import("./components/OrderHistory").then(m => ({ default: m.OrderHistory })));
 const SettingsPage = lazy(() => import("./components/Settings").then(m => ({ default: m.Settings })));
+const NotificationHistory = lazy(() => import("./components/NotificationHistory").then(m => ({ default: m.NotificationHistory })));
 const Profile = lazy(() => import("./components/Profile").then(m => ({ default: m.Profile })));
 const AuditLog = lazy(() => import("./components/AuditLog").then(m => ({ default: m.AuditLog })));
 const AccessManagement = lazy(() => import("./components/AccessManagement").then(m => ({ default: m.AccessManagement })));
@@ -49,8 +52,12 @@ function PageLoadingFallback() {
 import { Avatar, AvatarFallback } from "./components/ui/avatar";
 import { Badge } from "./components/ui/badge";
 import { cn } from "./components/ui/utils";
-import { usePermissionStore } from "./data/permissionStore";
+import { usePermissionStore, permissionStore } from "./data/permissionStore";
 import { orderStore } from "./data/orderStore";
+import { financeStore } from "./data/financeStore";
+import { pricingStore } from "./data/pricingStore";
+import { auditLog } from "./utils/auditLog";
+import { APP_CONFIG } from "./config/appConfig";
 import { menuItems, MenuItem } from "./config/navigationConfig";
 import { getRouteMeta } from "./config/routeConfig";
 
@@ -105,7 +112,9 @@ function AppContent() {
       const savedUserStr = localStorage.getItem("auth_user");
       if (savedUserStr) {
         const savedUser = JSON.parse(savedUserStr);
-        return savedUser.employeeId || (savedUser.role === 'messenger' ? 'EMP-MSG-001' : '');
+        const uName = (savedUser.nama || savedUser.name || "").toLowerCase();
+        const defaultMsgId = uName.includes("andi") ? 'EMP-MSG-002' : 'EMP-MSG-001';
+        return savedUser.employeeId || (savedUser.role === 'messenger' ? defaultMsgId : '');
       }
     } catch {}
     return "";
@@ -145,12 +154,68 @@ function AppContent() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMobileSidebarOpen]);
 
-  // Sync with API on mount if authenticated
+  // Verify token on mount and initialize stores if authenticated
   useEffect(() => {
-    if (isAuthenticated) {
-      orderStore.initFromApi().catch(() => {});
+    if (!isAuthenticated) return;
+
+    const token = localStorage.getItem("auth_token");
+    if (!token) {
+      handleLogout();
+      return;
     }
+
+    // Verify token validity against backend /api/auth/me
+    fetch(`${APP_CONFIG.apiBaseUrl}/auth/me`, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          handleLogout();
+        } else if (res.ok) {
+          try {
+            const payload = await res.json();
+            if (payload?.success && payload.data) {
+              if (payload.data.role && payload.data.role !== userRole) {
+                setUserRole(payload.data.role);
+                const savedUserStr = localStorage.getItem("auth_user");
+                if (savedUserStr) {
+                  try {
+                    const saved = JSON.parse(savedUserStr);
+                    saved.role = payload.data.role;
+                    localStorage.setItem("auth_user", JSON.stringify(saved));
+                  } catch {}
+                }
+              }
+            }
+          } catch {}
+
+          // Initialize all core stores in parallel with valid token
+          Promise.allSettled([
+            orderStore.initFromApi(),
+            financeStore.initFromApi(),
+            pricingStore.initFromApi(),
+            auditLog.initFromApi(),
+            permissionStore.initFromApi(),
+          ]).catch(() => {});
+        }
+      })
+      .catch(() => {
+        // Network fallback
+        orderStore.initFromApi().catch(() => {});
+      });
   }, [isAuthenticated]);
+
+  // Global listener for 401 Unauthorized events from background API requests
+  useEffect(() => {
+    const onUnauthorized = () => {
+      handleLogout();
+    };
+    window.addEventListener("sun89_auth_unauthorized", onUnauthorized);
+    return () => window.removeEventListener("sun89_auth_unauthorized", onUnauthorized);
+  }, []);
 
   const handleLogin = (
     role: 'administrator' | 'finance' | 'admin' | 'messenger',
@@ -161,9 +226,36 @@ function AppContent() {
     setUserRole(role);
     setUserName(name);
     setUserId(id);
-    setEmployeeId(empId || (role === 'messenger' ? 'EMP-MSG-001' : ''));
+    const defaultMsgId = name?.toLowerCase().includes("andi") ? 'EMP-MSG-002' : 'EMP-MSG-001';
+    const finalEmpId = empId || (role === 'messenger' ? defaultMsgId : '');
+    setEmployeeId(finalEmpId);
     setIsAuthenticated(true);
-    orderStore.initFromApi().catch(() => {});
+
+    try {
+      localStorage.setItem(
+        "auth_user",
+        JSON.stringify({
+          role,
+          jabatan: role.toUpperCase(),
+          nama: name,
+          name,
+          userId: id,
+          id,
+          employeeId: finalEmpId,
+        })
+      );
+    } catch {
+      // ignore
+    }
+
+    // Initialize all core stores in parallel with fresh session
+    Promise.allSettled([
+      orderStore.initFromApi(),
+      financeStore.initFromApi(),
+      pricingStore.initFromApi(),
+      auditLog.initFromApi(),
+      permissionStore.initFromApi(),
+    ]).catch(() => {});
 
     // Target route after login
     const targetPath = (location.state as any)?.from?.pathname || (role === 'messenger' ? '/messenger/workspace' : '/dashboard');
@@ -210,7 +302,7 @@ function AppContent() {
             userId,
             userName,
             role: 'messenger',
-            employeeId: employeeId || 'EMP-MSG-001',
+            employeeId: employeeId || (userName?.toLowerCase().includes("andi") ? 'EMP-MSG-002' : 'EMP-MSG-001'),
           }}
         />
       </Suspense>
@@ -230,7 +322,7 @@ function AppContent() {
   };
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-background">
+    <div className="flex h-screen h-[100dvh] max-h-screen w-full overflow-hidden overscroll-none bg-background">
       {/* Mobile Sidebar */}
       <AnimatePresence>
         {isMobileSidebarOpen && (
@@ -275,7 +367,7 @@ function AppContent() {
         animate={{
           width: isSidebarOpen ? 280 : 80,
         }}
-        className="glass-sidebar hidden lg:flex flex-col relative z-30 transition-all duration-300 shrink-0"
+        className="glass-sidebar hidden lg:flex flex-col relative z-30 transition-all duration-300 shrink-0 h-full max-h-screen overflow-visible"
       >
         <SidebarContent 
           isSidebarOpen={isSidebarOpen}
@@ -292,9 +384,9 @@ function AppContent() {
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           aria-label={isSidebarOpen ? "Kecilkan menu samping" : "Perluas menu samping"}
           aria-expanded={isSidebarOpen}
-          className="hidden lg:flex absolute -right-3 top-7 w-6 h-6 items-center justify-center rounded-full bg-card border border-border/80 shadow-xs hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          className="hidden lg:flex absolute -right-3 top-5 w-6 h-6 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted text-muted-foreground hover:text-foreground transition-all z-40 cursor-pointer"
         >
-          <ChevronRight className={cn("w-4 h-4 transition-transform", !isSidebarOpen && "rotate-180")} />
+          <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", isSidebarOpen ? "rotate-180" : "")} />
         </button>
       </motion.aside>
 
@@ -314,9 +406,9 @@ function AppContent() {
               <Menu className="w-4 h-4" />
             </Button>
             <div className="min-w-0 flex-1">
-              <h2 className="text-sm md:text-base leading-tight font-semibold text-foreground truncate">
+              <h1 className="text-sm md:text-base leading-tight font-semibold text-foreground truncate">
                 {routeMeta.title}
-              </h2>
+              </h1>
               <p className="text-[11px] text-muted-foreground hidden sm:block truncate">
                 {routeMeta.description}
               </p>
@@ -324,21 +416,34 @@ function AppContent() {
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Realtime Live Sync Indicator & Reload Button */}
+            <HeaderReloadButton
+              variant="admin"
+              toastMessage="Data order & status operasional diperbarui"
+            />
             <ThemeToggle />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="relative h-8 w-8 p-0 shrink-0"
-              onClick={() => setIsNotificationOpen(true)}
-              aria-label={`Notifikasi sistem${unreadCount > 0 ? `, ${unreadCount} belum dibaca` : ""}`}
+            <NotificationPopover
+              open={isNotificationOpen}
+              onOpenChange={setIsNotificationOpen}
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onMarkAllAsRead={markAllAsRead}
+              onMarkAsRead={markAsRead}
             >
-              <Bell className="w-4 h-4" />
-              {unreadCount > 0 && (
-                <Badge className="absolute -top-1 -right-1 min-w-4 h-4 p-0 flex items-center justify-center bg-rose-500 text-white text-[10px] font-semibold rounded-full px-1 border-0">
-                  {unreadCount}
-                </Badge>
-              )}
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="relative h-8 w-8 p-0 shrink-0"
+                aria-label={`Notifikasi sistem${unreadCount > 0 ? `, ${unreadCount} belum dibaca` : ""}`}
+              >
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && (
+                  <Badge className="absolute -top-1 -right-1 min-w-4 h-4 p-0 flex items-center justify-center bg-rose-500 text-white text-[10px] font-semibold rounded-full px-1 border-0">
+                    {unreadCount}
+                  </Badge>
+                )}
+              </Button>
+            </NotificationPopover>
             <Button
               variant="ghost"
               size="sm"
@@ -367,15 +472,37 @@ function AppContent() {
           </div>
         </header>
 
+        {/* Breadcrumb Bar (Below Header - No border line, compact spacing) */}
+        {routeMeta.breadcrumbs && routeMeta.breadcrumbs.length > 1 && (
+          <div className="px-3 sm:px-4 pt-2 pb-0 md:px-6 shrink-0 flex items-center">
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[11px] md:text-xs text-muted-foreground truncate">
+              {routeMeta.breadcrumbs.map((crumb, idx) => {
+                const isLast = idx === routeMeta.breadcrumbs.length - 1;
+                return (
+                  <span key={crumb} className="inline-flex items-center gap-1.5">
+                    {idx > 0 && <span className="opacity-40">/</span>}
+                    <span className={cn(isLast ? "text-foreground font-medium" : "text-muted-foreground")}>
+                      {crumb}
+                    </span>
+                  </span>
+                );
+              })}
+            </nav>
+          </div>
+        )}
+
         {/* Page Content */}
-        <main className="flex-1 overflow-auto min-w-0 w-full">
+        <main className="flex-1 overflow-auto overscroll-contain min-w-0 w-full">
           <ErrorBoundary
             resetKey={location.pathname}
             fallbackTitle={`Terjadi kendala saat memuat ${routeMeta.title}`}
             onReset={() => navigate("/dashboard")}
           >
             <Suspense fallback={<PageLoadingFallback />}>
-              <div className="min-h-full w-full min-w-0 animate-in fade-in duration-150 text-left flex flex-col">
+              <div className={cn(
+                "min-h-full w-full min-w-0 animate-in fade-in duration-150 text-left flex flex-col page-shell",
+                routeMeta.breadcrumbs && routeMeta.breadcrumbs.length > 1 && "pt-1.5 sm:pt-2 md:pt-2.5"
+              )}>
                 {!isAllowed && routeMeta.id !== "unknown" ? (
                   <div className="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center space-y-4">
                     <div className="w-16 h-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
@@ -409,11 +536,15 @@ function AppContent() {
                     <Route path="/finance/pengeluaran" element={<Finance defaultTab="pengeluaran" />} />
                     <Route path="/finance/data-penjualan" element={<Navigate to="/finance/data-penjualan/mutasi-ld" replace />} />
                     <Route path="/finance/data-penjualan/:category" element={<Finance defaultTab="penjualan" />} />
-                    <Route path="/finance/tagihan" element={<Finance defaultTab="tagihan" />} />
+                    <Route path="/finance/belum-bayar" element={<Finance defaultTab="belum-bayar" />} />
+                    <Route path="/finance/profit-pending" element={<Finance defaultTab="profit-pending" />} />
+                    <Route path="/finance/cashback-pending" element={<Finance defaultTab="cashback-pending" />} />
+                    <Route path="/finance/tagihan" element={<Navigate to="/finance/belum-bayar" replace />} />
                     <Route path="/finance/laba-rugi" element={<Finance defaultTab="laba-rugi" />} />
 
                     {/* Master Data Routes */}
                     <Route path="/master-data/samsat" element={<MasterData defaultTab="samsat" />} />
+                    <Route path="/master-data/metode-pembayaran" element={<MasterData defaultTab="metode-pembayaran" />} />
                     <Route path="/master-data/biaya-layanan" element={<MasterData defaultTab="biaya-layanan" />} />
                     <Route path="/master-data/harga-dasar" element={<MasterData defaultTab="harga-dasar-samsat" />} />
 
@@ -423,8 +554,9 @@ function AppContent() {
                     <Route path="/manajemen/hak-akses" element={<AccessManagement currentUserId={userId} currentUserName={userName} />} />
                     <Route path="/manajemen/riwayat-aktivitas" element={<AuditLog currentUserRole={userRole || 'admin'} />} />
 
-                    {/* Messenger Tasks (Admin View) */}
+                    {/* Messenger Tasks & History (Admin View) */}
                     <Route path="/messenger/tasks" element={<MessengerTask />} />
+                    <Route path="/messenger/history" element={<MessengerHistory />} />
                     <Route path="/messenger/workspace" element={<MessengerWorkspace onLogout={handleLogout} currentUser={{ userId, userName, role: userRole || 'admin', employeeId }} />} />
 
                     {/* Order Routes */}
@@ -441,6 +573,7 @@ function AppContent() {
 
                     {/* Utility Routes */}
                     <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/notifikasi" element={<NotificationHistory />} />
                     <Route path="/profile" element={<Profile />} />
 
                     {/* 404 Catch-All */}
@@ -452,15 +585,6 @@ function AppContent() {
           </ErrorBoundary>
         </main>
       </div>
-
-      {/* Notification Dialog */}
-      <NotificationDialog 
-        open={isNotificationOpen}
-        onOpenChange={setIsNotificationOpen}
-        notifications={notifications}
-        onMarkAllAsRead={markAllAsRead}
-        onMarkAsRead={markAsRead}
-      />
     </div>
   );
 }
@@ -545,7 +669,7 @@ function SidebarContent({
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto overscroll-contain">
         {filteredMenuItems.map((item) => {
           const Icon = item.icon;
           const isActive = isParentActive(item);

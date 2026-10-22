@@ -13,6 +13,7 @@
 
 import { useState, useEffect } from "react";
 import { MenuItem } from "../config/navigationConfig";
+import { APP_CONFIG } from "../config/appConfig";
 
 export type Role = "svp" | "administrator" | "admin" | "finance" | "messenger";
 
@@ -64,11 +65,15 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       "finance-kas-kantor": { view: true, manage: true },
       "finance-pengeluaran": { view: true, manage: true },
       "finance-penjualan": { view: true, manage: true },
+      "finance-belum-bayar": { view: true, manage: true },
+      "finance-profit-pending": { view: true, manage: true },
+      "finance-cashback-pending": { view: true, manage: true },
       "finance-tagihan": { view: true, manage: true },
       "finance-laba-rugi": { view: true, manage: true },
       // Master Data
       "master-data": { view: true, manage: true },
       "master-samsat": { view: true, manage: true },
+      "master-metode-pembayaran": { view: true, manage: true },
       "master-biaya-layanan": { view: true, manage: true },
       "master-harga-dasar-samsat": { view: true, manage: true },
       // Manajemen
@@ -82,6 +87,7 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       // Messenger
       "messenger-menu": { view: true, manage: true },
       "messenger-task": { view: true, manage: true },
+      "messenger-history": { view: true, manage: true },
       // Order
       "order-menu": { view: true, manage: true },
       "buat-order": { view: true, manage: true },
@@ -113,10 +119,14 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       "finance-kas-kantor": { view: true, manage: true },
       "finance-pengeluaran": { view: true, manage: true },
       "finance-penjualan": { view: true, manage: true },
+      "finance-belum-bayar": { view: true, manage: true },
+      "finance-profit-pending": { view: true, manage: true },
+      "finance-cashback-pending": { view: true, manage: true },
       "finance-tagihan": { view: true, manage: true },
       "finance-laba-rugi": { view: true, manage: true },
       "master-data": { view: true, manage: true },
       "master-samsat": { view: true, manage: true },
+      "master-metode-pembayaran": { view: true, manage: true },
       "master-biaya-layanan": { view: true, manage: true },
       "master-harga-dasar-samsat": { view: true, manage: true },
       manajemen: { view: true, manage: true },
@@ -128,6 +138,7 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       "audit-log": { view: true, manage: true },
       "messenger-menu": { view: true, manage: true },
       "messenger-task": { view: true, manage: true },
+      "messenger-history": { view: true, manage: true },
       "order-menu": { view: true, manage: true },
       "buat-order": { view: true, manage: true },
       "order-tracking": { view: true, manage: true },
@@ -161,11 +172,15 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       "finance-kas-kantor": { view: false, manage: false },
       "finance-pengeluaran": { view: false, manage: false },
       "finance-penjualan": { view: false, manage: false },
+      "finance-belum-bayar": { view: false, manage: false },
+      "finance-profit-pending": { view: false, manage: false },
+      "finance-cashback-pending": { view: false, manage: false },
       "finance-tagihan": { view: false, manage: false },
       "finance-laba-rugi": { view: false, manage: false },
       // Master Data: FULL ACCESS
       "master-data": { view: true, manage: true },
       "master-samsat": { view: true, manage: true },
+      "master-metode-pembayaran": { view: true, manage: true },
       "master-biaya-layanan": { view: true, manage: true },
       "master-harga-dasar-samsat": { view: true, manage: true },
       // Manajemen: ONLY KARYAWAN
@@ -179,6 +194,7 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       // Messenger
       "messenger-menu": { view: true, manage: true },
       "messenger-task": { view: true, manage: true },
+      "messenger-history": { view: true, manage: true },
       // Order: FULL ACCESS
       "order-menu": { view: true, manage: true },
       "buat-order": { view: true, manage: true },
@@ -213,11 +229,15 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       "finance-kas-kantor": { view: true, manage: true },
       "finance-pengeluaran": { view: true, manage: true },
       "finance-penjualan": { view: true, manage: true },
+      "finance-belum-bayar": { view: true, manage: true },
+      "finance-profit-pending": { view: true, manage: true },
+      "finance-cashback-pending": { view: true, manage: true },
       "finance-tagihan": { view: true, manage: true },
       "finance-laba-rugi": { view: true, manage: true },
       // Master Data: NO ACCESS
       "master-data": { view: false, manage: false },
       "master-samsat": { view: false, manage: false },
+      "master-metode-pembayaran": { view: false, manage: false },
       "master-biaya-layanan": { view: false, manage: false },
       "master-harga-dasar-samsat": { view: false, manage: false },
       // Manajemen: NO ACCESS
@@ -228,9 +248,10 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       "master-pengguna": { view: false, manage: false },
       "access-management": { view: false, manage: false },
       "audit-log": { view: false, manage: false },
-      // Messenger: NO ACCESS
-      "messenger-menu": { view: false, manage: false },
+      // Messenger
+      "messenger-menu": { view: true, manage: false },
       "messenger-task": { view: false, manage: false },
+      "messenger-history": { view: true, manage: false },
       // Order: View-Only tracking & Rekap (No Buat Order, No Mutation)
       "order-menu": { view: true, manage: false },
       "buat-order": { view: false, manage: false },
@@ -265,11 +286,15 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       "finance-kas-kantor": { view: false, manage: false },
       "finance-pengeluaran": { view: false, manage: false },
       "finance-penjualan": { view: false, manage: false },
+      "finance-belum-bayar": { view: false, manage: false },
+      "finance-profit-pending": { view: false, manage: false },
+      "finance-cashback-pending": { view: false, manage: false },
       "finance-tagihan": { view: false, manage: false },
       "finance-laba-rugi": { view: false, manage: false },
       // Master Data: NO ACCESS
       "master-data": { view: false, manage: false },
       "master-samsat": { view: false, manage: false },
+      "master-metode-pembayaran": { view: false, manage: false },
       "master-biaya-layanan": { view: false, manage: false },
       "master-harga-dasar-samsat": { view: false, manage: false },
       // Manajemen: NO ACCESS
@@ -283,6 +308,7 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
       // Messenger: FULL ACCESS TO TASKS
       "messenger-menu": { view: true, manage: true },
       "messenger-task": { view: true, manage: true },
+      "messenger-history": { view: true, manage: true },
       // Order: NO ACCESS TO ORDER ENTRY
       "order-menu": { view: false, manage: false },
       "buat-order": { view: false, manage: false },
@@ -308,6 +334,10 @@ const DEFAULT_PERMISSIONS: PermissionMatrix = {
 class PermissionStore {
   private matrix: PermissionMatrix;
   private listeners: Set<() => void> = new Set();
+  private isLoadingState = false;
+  private lastError: string | null = null;
+  private isDataStale = false;
+  private hasSuccessfullyLoaded = false;
 
   constructor() {
     this.matrix = this.loadFromStorage();
@@ -403,8 +433,8 @@ class PermissionStore {
       return perms.modules["manajemen-pengguna"]?.view ?? false;
     }
 
-    // Profile & settings default
-    if (pageId === "profile") return true;
+    // Profile, notifikasi & settings default
+    if (pageId === "profile" || pageId === "notifikasi") return true;
     if (pageId === "settings") return norm === "admin";
 
     return false;
@@ -422,30 +452,38 @@ class PermissionStore {
   }
 
   /**
-   * Check if a role can execute actions / mutations on a specific workflow stage
+   * Check if a role can execute actions / mutations on a specific workflow stage.
+   * Built-in Policy:
+   * - SVP has full mutation access on all stages (including Stage 4 & Stage 6).
+   * - Non-SVP roles are strictly View-Only for Stage 4 (Proses Samsat) and Stage 6 (Supervisi).
    */
   public canManageStage(role: string | null | undefined, stageNumber: number): boolean {
     const norm = normalizeRole(role);
     if (norm === "svp") return true;
 
+    // Built-in system policy: Non-SVP roles are strictly view-only for Stage 4 and Stage 6
+    if (stageNumber === 4 || stageNumber === 6) {
+      return false;
+    }
+
     const stages = this.getRolePermissions(norm).stages;
     switch (stageNumber) {
       case 1:
-        return stages.stage1_verifikasi;
+        return stages.stage1_verifikasi ?? true;
       case 2:
-        return stages.stage2_penjadwalan;
+        return stages.stage2_penjadwalan ?? true;
       case 3:
-        return stages.stage3_verifikasiFisik;
+        return stages.stage3_verifikasiFisik ?? true;
       case 4:
-        return stages.stage4_prosesSamsat; // FALSE for Admin
+        return false; // Strictly non-SVP view only
       case 5:
-        return stages.stage5_verifikasiUlang;
+        return stages.stage5_verifikasiUlang ?? true;
       case 6:
-        return stages.stage6_supervisi;   // FALSE for Admin
+        return false; // Strictly non-SVP view only
       case 7:
-        return stages.stage7_pengantaran;
+        return stages.stage7_pengantaran ?? true;
       case 8:
-        return stages.stage8_diterima;
+        return stages.stage8_diterima ?? true;
       default:
         return false;
     }
@@ -534,27 +572,130 @@ class PermissionStore {
   }
 
   /**
-   * Save entire role permissions structure (used by AccessManagement)
+   * Fetch authoritative permissions matrix from backend API
    */
-  public saveRolePermissions(role: Role, permissions: RolePermissions): void {
-    const targetRole = role === "administrator" ? "svp" : role;
-    this.matrix[targetRole] = JSON.parse(JSON.stringify(permissions));
+  public async initFromApi(): Promise<void> {
+    const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+    if (!token) return;
 
-    if (targetRole === "svp") {
-      this.matrix.administrator = JSON.parse(JSON.stringify(permissions));
+    this.isLoadingState = true;
+    try {
+      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/permissions`, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        throw new Error(`Gagal memuat konfigurasi hak akses dari server (HTTP ${res.status})`);
+      }
+
+      const payload = await res.json();
+      if (payload.success && payload.data) {
+        this.matrix = {
+          ...this.matrix,
+          ...payload.data,
+          // Guarantee SVP and administrator are unconditionally full privilege
+          svp: JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS.svp)),
+          administrator: JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS.administrator)),
+        };
+        this.lastError = null;
+        this.isDataStale = false;
+        this.hasSuccessfullyLoaded = true;
+        this.isLoadingState = false;
+        this.saveToStorage();
+        this.notify();
+      } else {
+        throw new Error(payload.message || "Data permissions tidak valid dari server");
+      }
+    } catch (err: any) {
+      this.isLoadingState = false;
+      this.lastError = err?.message || "Gagal menghubungkan ke backend konfigurasi hak akses";
+      this.isDataStale = true;
+      this.notify();
+    }
+  }
+
+  public isLoading(): boolean {
+    return this.isLoadingState && !this.hasSuccessfullyLoaded;
+  }
+
+  public getError(): string | null {
+    return this.lastError;
+  }
+
+  public isStale(): boolean {
+    return this.isDataStale;
+  }
+
+  /**
+   * Save entire role permissions structure (used by AccessManagement)
+   * Strictly prohibits modifying SVP / Administrator.
+   */
+  public async saveRolePermissions(role: Role, permissions: RolePermissions): Promise<void> {
+    const cleanRole = role.toLowerCase().trim() as Role;
+    if (cleanRole === "svp" || cleanRole === "administrator") {
+      throw new Error("Hak akses role SVP bersifat absolut dan tidak dapat diubah.");
     }
 
+    if (!["admin", "finance", "messenger"].includes(cleanRole)) {
+      throw new Error(`Role '${role}' tidak dapat dikonfigurasi.`);
+    }
+
+    this.matrix[cleanRole] = JSON.parse(JSON.stringify(permissions));
     this.saveToStorage();
     this.notify();
+
+    // Persist to backend database
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      if (token) {
+        const res = await fetch(`${APP_CONFIG.apiBaseUrl}/permissions/${cleanRole}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ permissions }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error?.message || errData.message || "Gagal menyimpan ke server backend.");
+        }
+      }
+    } catch (err: any) {
+      console.warn("Backend permissions sync error:", err);
+      throw err;
+    }
   }
 
   /**
    * Reset all permissions to canonical defaults
    */
-  public resetToDefaults(): void {
+  public async resetToDefaults(): Promise<void> {
     this.matrix = JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS));
     this.saveToStorage();
     this.notify();
+
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      if (token) {
+        const res = await fetch(`${APP_CONFIG.apiBaseUrl}/permissions/reset`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error?.message || errData.message || "Gagal mereset di server backend.");
+        }
+      }
+    } catch (err: any) {
+      console.warn("Backend permissions reset error:", err);
+      throw err;
+    }
   }
 }
 
@@ -574,6 +715,10 @@ export function usePermissionStore() {
 
   return {
     matrix: permissionStore.getMatrix(),
+    isLoading: permissionStore.isLoading(),
+    error: permissionStore.getError(),
+    isStale: permissionStore.isStale(),
+    refresh: () => permissionStore.initFromApi(),
     canViewPage: (role: string | null | undefined, pageId: string) =>
       permissionStore.canViewPage(role, pageId),
     canManageModule: (role: string | null | undefined, moduleId: string) =>
@@ -586,5 +731,6 @@ export function usePermissionStore() {
     updateStagePermission: permissionStore.updateStagePermission.bind(permissionStore),
     saveRolePermissions: permissionStore.saveRolePermissions.bind(permissionStore),
     resetToDefaults: permissionStore.resetToDefaults.bind(permissionStore),
+    initFromApi: permissionStore.initFromApi.bind(permissionStore),
   };
 }

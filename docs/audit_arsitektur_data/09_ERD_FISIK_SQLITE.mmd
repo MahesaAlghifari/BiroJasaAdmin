@@ -1,0 +1,322 @@
+erDiagram
+    %% =========================================================================
+    %% 09 — ERD FISIK BASIS DATA SQLITE (server/data/database.sqlite)
+    %% 20 Tabel Aktual, Kolom, Tipe Data SQLite, PK, FK Fisik vs Relasi Logis
+    %% =========================================================================
+
+    %% -------------------------------------------------------------------------
+    %% 1. RELASI DENGAN FOREIGN KEY FISIK AKTUAL DI SQLITE (DDL ENFORCED)
+    %% -------------------------------------------------------------------------
+    orders ||--o{ documents : "FK: documents.order_no -> orders.order_no"
+    finance_invoices ||--o{ documents : "FK: documents.invoice_id -> finance_invoices.invoice_no"
+    
+    finance_invoices ||--o{ invoice_payments : "FK: invoice_payments.invoice_no -> finance_invoices.invoice_no"
+    orders ||--o{ invoice_payments : "FK: invoice_payments.order_no -> orders.order_no"
+    documents ||--o{ invoice_payments : "FK: invoice_payments.document_id -> documents.id"
+    kas_kantor ||--o{ invoice_payments : "FK: invoice_payments.kas_kantor_id -> kas_kantor.id"
+
+    wilayah_administratif ||--o{ samsat_offices : "FK: samsat_offices.kode_kabupaten_kota -> wilayah.kode"
+
+    %% -------------------------------------------------------------------------
+    %% 2. RELASI LOGIS APLIKASI (KODE JS ONLY — TIDAK ADA DDL FOREIGN KEY)
+    %% -------------------------------------------------------------------------
+    orders ||..|| finance_invoices : "LOGICAL: 1-to-1 order_no"
+    orders ||..o{ kas_kantor : "LOGICAL: kas_kantor.order_no"
+    finance_invoices ||..o{ kas_kantor : "LOGICAL: kas_kantor.invoice_no"
+    
+    users ||..o{ kas_messenger : "LOGICAL: kas_messenger.messenger_id"
+    users ||..o{ messenger_reimbursements : "LOGICAL: messenger_reimbursements.messenger_id"
+    orders ||..o{ messenger_reimbursements : "LOGICAL: messenger_reimbursements.order_no"
+    
+    users ||..o{ audit_logs : "LOGICAL: audit_logs.user_id"
+    orders ||..o{ notification_logs : "LOGICAL: notification_logs.order_no"
+    samsat_offices ||..o{ samsat_pricing : "LOGICAL: samsat_pricing.samsat_id"
+
+    %% -------------------------------------------------------------------------
+    %% DEFINISI 20 TABEL LENGKAP DENGAN TIPE DATA SQLITE
+    %% -------------------------------------------------------------------------
+
+    orders {
+        TEXT order_no PK "Nomor unik order (ORD-...)"
+        TEXT customer "Nama klien pemohon"
+        TEXT nomor_hp "Nomor telepon WhatsApp"
+        TEXT layanan "Paket layanan pengurusan"
+        INTEGER current_step "Tahapan aktif (1 s.d 8)"
+        TEXT current_stage_name "Label nama tahapan"
+        TEXT nopol "Nomor plat polisi"
+        TEXT wilayah_samsat_asal "Kantor Samsat asal"
+        TEXT wilayah_samsat_tujuan "Kantor Samsat tujuan"
+        REAL biaya_jasa "Biaya jasa pokok biro"
+        REAL biaya_antar_jemput "Biaya kurir antar jemput"
+        REAL total_biaya "Total estimasi awal"
+        TEXT status_order "active, archived, cancelled"
+        TEXT data_json "Blob JSON lengkap OperationalOrder"
+        TEXT created_at "Timestamp pembuatan"
+        TEXT updated_at "Timestamp pembaruan"
+        INTEGER is_archived "Flag arsip (0/1)"
+        TEXT archived_at "Timestamp arsip"
+        TEXT archived_by "Staf yang mengarsipkan"
+    }
+
+    finance_invoices {
+        INTEGER id PK "ID internal auto-increment"
+        TEXT invoice_no UK "Nomor resmi invoice (INV-...)"
+        TEXT order_no "Nomor order relasi logis"
+        TEXT customer "Nama klien"
+        TEXT nopol "Nomor plat polisi"
+        TEXT layanan "Jenis layanan"
+        REAL total_tagihan "Total nominal piutang"
+        REAL terbayar "Nominal yang telah dibayar"
+        REAL sisa "Sisa piutang tertunggak"
+        TEXT status "Belum Bayar, Kurang Bayar, Lunas"
+        REAL biaya_samsat "Realisasi pengeluaran loket"
+        REAL profit_final "Laba kotor biro jasa"
+        TEXT profit_status "PENDING, REALIZED"
+        REAL cashback_nominal "Nominal komisi pemohon"
+        TEXT cashback_status "PENDING, REALIZED"
+        TEXT jatuh_tempo "Batas akhir bayar"
+        TEXT billing_status "ACTIVE, COMPLETED"
+        TEXT completed_at "Timestamp finalisasi"
+        TEXT completed_by "Staf finance"
+        TEXT alasan_pending "Catatan pending"
+        TEXT created_at "Timestamp buat"
+        TEXT updated_at "Timestamp update"
+        INTEGER is_archived "Flag arsip (0/1)"
+        TEXT archived_at "Timestamp arsip"
+        TEXT archived_by "Staf pengarsip"
+        TEXT data_json "Blob JSON InvoiceBillingRecord"
+    }
+
+    invoice_payments {
+        TEXT id PK "UUID transaksi setoran"
+        TEXT invoice_no FK "FK fisik ke finance_invoices"
+        TEXT order_no FK "FK fisik ke orders"
+        REAL nominal "Nilai uang disetor"
+        TEXT tanggal_bayar "Tanggal pembayaran"
+        TEXT metode_pembayaran "Transfer, Tunai, QRIS"
+        TEXT nama_bank "Bank tujuan"
+        TEXT nama_rekening "Atas nama penyetor"
+        TEXT no_rekening "Nomor rekening penyetor"
+        TEXT document_id FK "FK fisik ke documents"
+        TEXT status_verifikasi "MENUNGGU_VERIFIKASI, TERVERIFIKASI"
+        TEXT verified_at "Waktu verifikasi"
+        TEXT verified_by "Staf pemverifikasi"
+        TEXT alasan_penolakan "Catatan tolak bukti"
+        TEXT catatan "Catatan pembayaran"
+        INTEGER kas_kantor_id FK "FK fisik ke kas_kantor"
+    }
+
+    documents {
+        TEXT id PK "UUID berkas berkas fisik"
+        TEXT order_no FK "FK fisik ke orders"
+        TEXT invoice_id FK "FK fisik ke finance_invoices"
+        TEXT file_name "Nama berkas di disk uploads"
+        TEXT original_name "Nama berkas asli klien"
+        TEXT file_path "Path absolut penyimpanan"
+        INTEGER file_size "Ukuran file dalam bytes"
+        TEXT mime_type "image/jpeg, application/pdf"
+        TEXT document_type "KTP, STNK, BPKB, SKKP, BUKTI_BAYAR"
+        TEXT phase "BEFORE_SAMSAT, AFTER_SAMSAT"
+        TEXT uploaded_by "Staf pengunggah"
+        TEXT created_at "Timestamp upload"
+        TEXT status "active, deleted"
+        TEXT deleted_at "Timestamp soft delete"
+        TEXT deleted_by "Staf penghapus"
+        TEXT checksum "Hash integritas SHA256"
+    }
+
+    kas_kantor {
+        INTEGER id PK "ID buku kas umum"
+        TEXT tanggal "Tanggal mutasi"
+        TEXT jenis_transaksi "MASUK atau KELUAR"
+        REAL nominal "Nilai uang Rupiah"
+        REAL saldo_berjalan "Saldo kas kumulatif biro"
+        TEXT order_no "Nomor order rujukan"
+        TEXT invoice_no "Nomor invoice rujukan"
+        TEXT keterangan "Uraian mutasi kas"
+        TEXT metode "Kasir Tunai, Bank BCA, Bank Mandiri"
+        TEXT created_by "Staf pembuat entri"
+        TEXT created_at "Timestamp buat"
+        TEXT bukti_id "ID berkas bukti setor"
+    }
+
+    kas_messenger {
+        INTEGER id PK "ID buku kas kurir"
+        TEXT messenger_id "ID akun kurir"
+        TEXT tanggal "Tanggal transaksi"
+        TEXT jenis_transaksi "TOPUP atau PENGELUARAN"
+        REAL nominal "Jumlah uang kasbon/jalan"
+        REAL saldo_berjalan "Sisa kas di tangan kurir"
+        TEXT order_no "Nomor order terkait"
+        TEXT reimbursement_id "ID klaim reimburse"
+        TEXT keterangan "Uraian keperluan jalan"
+        TEXT metode "TUNAI, TRANSFER"
+        TEXT created_by "Staf kasir"
+        TEXT created_at "Timestamp catat"
+        TEXT bukti_dokumen_id "Bukti foto pengeluaran"
+        TEXT status "ACTIVE, VOID"
+    }
+
+    messenger_reimbursements {
+        TEXT id PK "UUID pengajuan klaim"
+        TEXT reimbursement_no UK "Nomor klaim (RMB-...)"
+        TEXT messenger_id "ID kurir pemohon"
+        TEXT order_no "Nomor order terkait"
+        TEXT tanggal "Tanggal pengeluaran"
+        TEXT kategori "BENSIN, PARKIR, TOL, LAINNYA"
+        REAL nominal "Jumlah klaim uang"
+        TEXT keterangan "Keterangan pengeluaran"
+        TEXT status "PENDING, APPROVED, REJECTED, PAID"
+        TEXT approved_by "Staf penyetuju"
+        TEXT approved_at "Waktu approval"
+        TEXT paid_by "Kasir pembayar"
+        TEXT paid_at "Waktu pencairan uang"
+        TEXT bukti_dokumen_id "ID berkas foto struk"
+        TEXT created_at "Timestamp pengajuan"
+        TEXT updated_at "Timestamp update"
+        TEXT data_json "Blob data pendukung"
+    }
+
+    pengeluaran {
+        INTEGER id PK "ID pengeluaran operasional umum"
+        TEXT tanggal "Tanggal pengeluaran"
+        TEXT kategori "SEWA, LISTRIK, ATK, GAJI"
+        REAL nominal "Jumlah uang keluar"
+        TEXT keterangan "Deskripsi pengeluaran"
+        TEXT metode_pembayaran "KAS_KANTOR, BANK"
+        TEXT bukti_dokumen_id "ID bukti kwitansi"
+        TEXT created_by "Staf finance"
+        TEXT created_at "Timestamp pencatatan"
+    }
+
+    users {
+        TEXT id PK "ID staf (USR-...)"
+        TEXT username UK "Nama akun login"
+        TEXT password_hash "Bcrypt hash terenkripsi"
+        TEXT nama_lengkap "Nama resmi karyawan"
+        TEXT role "administrator, admin, svp, finance, messenger"
+        TEXT status "active, inactive"
+        TEXT nomor_hp "Kontak WhatsApp staf"
+        TEXT email "Alamat email resmi"
+        TEXT jabatan "Jabatan struktural"
+        TEXT cabang "Kantor cabang penempatan"
+        TEXT created_at "Timestamp pembuatan"
+        TEXT updated_at "Timestamp update"
+    }
+
+    role_permissions {
+        TEXT role PK "administrator, admin, finance, messenger"
+        TEXT permissions_json "Array hak akses JSON"
+        TEXT created_at "Timestamp buat"
+        TEXT updated_at "Timestamp update"
+    }
+
+    payment_methods {
+        TEXT id PK "ID metode bayar (bca, mandiri, tunai)"
+        TEXT nama_metode "Nama kanal bayar"
+        TEXT tipe "BANK_TRANSFER, CASH, QRIS"
+        TEXT nama_bank "Bank Central Asia, Mandiri"
+        TEXT nomor_rekening "Nomor rekening tujuan"
+        TEXT atas_nama "Nama pemilik rekening"
+        INTEGER status_aktif "Status aktif (1/0)"
+        INTEGER urutan "Prioritas urutan di UI"
+    }
+
+    samsat_offices {
+        TEXT id PK "Slug unik (samsat-jakarta-timur)"
+        TEXT kode_kabupaten_kota FK "FK fisik ke wilayah_administratif"
+        TEXT nama_samsat "Nama unit layanan Samsat"
+        TEXT wilayah "Nama Kabupaten/Kota"
+        TEXT alamat "Alamat fisik gedung Samsat"
+        INTEGER is_verified "Verifikasi kantor (1/0)"
+        INTEGER status_aktif "Status operasional (1/0)"
+        TEXT created_at "Timestamp input"
+        TEXT updated_at "Timestamp update"
+    }
+
+    wilayah_administratif {
+        TEXT kode_kabupaten_kota PK "Kode resmi Kemendagri (e.g. 31.75)"
+        TEXT kode_provinsi "Kode resmi provinsi (e.g. 31)"
+        TEXT nama_provinsi "Nama provinsi"
+        TEXT nama_kabupaten_kota "Nama Kabupaten / Kota"
+        TEXT jenis_wilayah "Kabupaten atau Kota"
+        INTEGER status_aktif "Status aktif (1/0)"
+        TEXT sumber_referensi "Dasar regulasi"
+        INTEGER tahun_referensi "Tahun ketetapan"
+        TEXT created_at "Timestamp input"
+        TEXT updated_at "Timestamp update"
+    }
+
+    samsat_pricing {
+        TEXT id PK "ID unik tarif loket"
+        TEXT samsat_id "ID kantor Samsat terkait"
+        TEXT category "Mutasi Keluar, Mutasi Masuk, Standar"
+        TEXT service_code "Kode tarif loket"
+        TEXT service_name "Nama proses loket"
+        REAL base_price "Harga dasar resmi loket"
+        INTEGER status_aktif "Status aktif (1/0)"
+        TEXT data_json "Blob data tarif pendukung"
+    }
+
+    service_pricing_configs {
+        TEXT service_id PK "ID paket layanan biro"
+        TEXT service_name "Nama paket layanan biro"
+        REAL selling_price "Margin keuntungan jasa biro"
+        INTEGER status_aktif "Status aktif (1/0)"
+        TEXT created_at "Timestamp buat"
+        TEXT updated_at "Timestamp update"
+        TEXT data_json "Blob data konfigurasi"
+    }
+
+    estimation_templates {
+        TEXT id PK "ID template estimasi"
+        TEXT service_key UK "Kunci pengenal jenis layanan"
+        TEXT name "Nama template perhitungan"
+        TEXT category "Kategori layanan"
+        TEXT data_json "Formula dan parameter kalkulasi"
+        TEXT created_at "Timestamp buat"
+        TEXT updated_at "Timestamp update"
+    }
+
+    audit_logs {
+        INTEGER id PK "ID log aktivitas auto-increment"
+        TEXT user_id "ID user pelaku aksi"
+        TEXT username "Nama akun staf"
+        TEXT action "CREATE, UPDATE, DELETE, LOGIN"
+        TEXT resource "ORDER, INVOICE, PRICING, USER"
+        TEXT resource_id "ID entitas yang dimutasi"
+        TEXT details "Detail perubahan data (JSON)"
+        TEXT ip_address "Alamat IP klien"
+        TEXT created_at "Timestamp pencatatan"
+    }
+
+    notification_settings {
+        TEXT id PK "ID konfigurasi notifikasi"
+        TEXT provider "WHATSAPP_GATEWAY, SMS_GATEWAY"
+        TEXT api_endpoint "URL gateway vendor"
+        TEXT api_key_masked "API key tersamar"
+        TEXT sender_number "Nomor pengirim resmi"
+        TEXT templates_json "Template teks notifikasi"
+        INTEGER status_aktif "Status aktif (1/0)"
+        TEXT updated_at "Timestamp update"
+    }
+
+    notification_logs {
+        INTEGER id PK "ID log pengiriman pesan"
+        TEXT order_no "Nomor order penerima"
+        TEXT recipient_phone "Nomor WhatsApp penerima"
+        TEXT message_type "TAGIHAN, PROSES, SELESAI"
+        TEXT status "SENT atau FAILED"
+        TEXT error_message "Catatan kegagalan kirim"
+        TEXT sent_at "Timestamp eksekusi kirim"
+    }
+
+    idempotency_keys {
+        TEXT key PK "UUID idempotency token header"
+        TEXT path "Endpoint URL yang diproteksi"
+        TEXT request_hash "SHA256 payload request"
+        INTEGER response_status "HTTP status code"
+        TEXT response_body "Payload respons tersimpan"
+        TEXT created_at "Timestamp pembuatan key"
+        TEXT expires_at "Batas kedaluwarsa key"
+    }

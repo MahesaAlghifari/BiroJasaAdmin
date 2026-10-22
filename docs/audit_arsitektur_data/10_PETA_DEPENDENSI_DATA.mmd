@@ -1,0 +1,117 @@
+flowchart TD
+    %% =========================================================================
+    %% 10 — PETA DEPENDENSI DATA & ALUR LINTAS MODUL ADMIN SUN89
+    %% Pemetaan hubungan dependensi dari antarmuka UI hingga basis data SQLite
+    %% =========================================================================
+
+    subgraph UI_LAYER ["1. LAPISAN FRONTEND UI (PAGES & FORMS)"]
+        UI_ORDER["BuatOrderSamsat.tsx / OrderTracking.tsx"]
+        UI_FIN["FinanceContent.tsx / DataPenjualanTable.tsx / LabaRugiTab.tsx"]
+        UI_MSG["MessengerWorkspace.tsx / MessengerTaskTable.tsx"]
+        UI_MST["HargaDasarSamsat.tsx / BiayaLayananTab.tsx"]
+        UI_USR["ManajemenPengguna.tsx / HakAksesTab.tsx"]
+        UI_DOC["DocumentPreviewModal.tsx / UploadBox.tsx"]
+    end
+
+    subgraph STORE_LAYER ["2. LAPISAN STATE STORE & ADAPTER (src/app/data/)"]
+        ST_ORD["orderStore.ts"]
+        ST_FIN["financeStore.ts"]
+        ST_MSG["messengerTaskAdapter.ts"]
+        ST_PRC["pricingStore.ts"]
+        ST_USR["karyawanPenggunaAdapter.ts / permissionStore.ts"]
+    end
+
+    subgraph PROVIDER_LAYER ["3. LAPISAN DATA PROVIDER (src/data/api/)"]
+        PRV_ORD["ApiOrderProvider.ts"]
+        PRV_FIN["ApiFinanceProvider.ts"]
+        PRV_PRC["ApiPricingProvider.ts"]
+        PRV_USR["ApiUserProvider.ts"]
+        PRV_DOC["ApiDocumentProvider.ts"]
+    end
+
+    subgraph ROUTE_LAYER ["4. LAPISAN EXPRESS API ROUTES (server/src/routes/)"]
+        RT_ORD["orderRoutes.ts (/api/orders)"]
+        RT_FIN["financeRoutes.ts (/api/finance)"]
+        RT_MSG["messengerRoutes.ts (/api/messenger)"]
+        RT_PRC["pricingRoutes.ts (/api/pricing)"]
+        RT_USR["userRoutes.ts (/api/users)"]
+        RT_DOC["documentRoutes.ts (/api/documents)"]
+    end
+
+    subgraph SERVICE_LAYER ["5. LAPISAN BUSINESS SERVICE & LOGIC (server/src/services/)"]
+        SRV_ORD["orderService.ts (Stage Transitions & Gating)"]
+        SRV_FIN["financeService.ts (Math Invoicing, Kas & PnL)"]
+        SRV_MSG["messengerService.ts (Task Allocation & Reimbursement)"]
+        SRV_AUTH["authService.ts (JWT & Bcrypt Hashing)"]
+        SRV_AUD["auditService.ts (Audit Trail Recorder)"]
+    end
+
+    subgraph REPO_LAYER ["6. LAPISAN REPOSITORY SQL (server/src/repositories/)"]
+        RP_ORD["DbOrderRepository.ts"]
+        RP_FIN["DbFinanceRepository.ts"]
+        RP_PRC["DbPricingRepository.ts"]
+        RP_USR["DbUserRepository.ts"]
+        RP_DOC["DbDocumentRepository.ts"]
+        RP_MSG["DbMessengerRepository.ts"]
+    end
+
+    subgraph DB_LAYER ["7. LAPISAN BASIS DATA SQLITE (database.sqlite)"]
+        DB_ORD[("orders (1 row)")]
+        DB_FIN[("finance_invoices (1 row)")]
+        DB_PAY[("invoice_payments (1 row)")]
+        DB_KAS[("kas_kantor (1 row)")]
+        DB_DOC[("documents (10 rows)")]
+        DB_PRC[("samsat_pricing (34 rows)")]
+        DB_SVC[("service_pricing_configs (1 row)")]
+        DB_USR[("users (6 rows)")]
+        DB_RMB[("messenger_reimbursements (0 rows)")]
+        DB_AUD[("audit_logs (115 rows)")]
+    end
+
+    %% KONEKSI LINTAS LAPISAN
+    UI_ORDER --> ST_ORD
+    UI_FIN --> ST_FIN
+    UI_MSG --> ST_MSG
+    UI_MST --> ST_PRC
+    UI_USR --> ST_USR
+    UI_DOC --> PRV_DOC
+
+    %% SINKRONISASI DUA ARAH ORDER DAN FINANCE
+    ST_ORD <-->|Payment Sync Payload| ST_FIN
+    ST_MSG -->|Task Status & Delivery| ST_ORD
+
+    ST_ORD --> PRV_ORD
+    ST_FIN --> PRV_FIN
+    ST_PRC --> PRV_PRC
+    ST_USR --> PRV_USR
+
+    PRV_ORD --> RT_ORD
+    PRV_FIN --> RT_FIN
+    PRV_PRC --> RT_PRC
+    PRV_USR --> RT_USR
+    PRV_DOC --> RT_DOC
+    ST_MSG --> RT_MSG
+
+    RT_ORD --> SRV_ORD
+    RT_FIN --> SRV_FIN
+    RT_MSG --> SRV_MSG
+    RT_USR --> SRV_AUTH
+    RT_DOC --> RP_DOC
+
+    SRV_ORD --> RP_ORD
+    SRV_ORD -.->|Audit Trail| SRV_AUD
+    SRV_FIN --> RP_FIN
+    SRV_FIN -.->|Audit Trail| SRV_AUD
+    SRV_MSG --> RP_MSG
+    SRV_AUTH --> RP_USR
+    SRV_AUD --> DB_AUD
+
+    RP_ORD --> DB_ORD
+    RP_FIN --> DB_FIN
+    RP_FIN --> DB_PAY
+    RP_FIN --> DB_KAS
+    RP_DOC --> DB_DOC
+    RP_PRC --> DB_PRC
+    RP_PRC --> DB_SVC
+    RP_USR --> DB_USR
+    RP_MSG --> DB_RMB

@@ -21,7 +21,9 @@ export class ApiUserProvider implements IUserDataProvider {
 
   constructor(baseUrl = APP_CONFIG.apiBaseUrl) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.initFromApi();
+    if (typeof window === "undefined" || (typeof window !== "undefined" && window.localStorage?.getItem("auth_token"))) {
+      this.initFromApi();
+    }
   }
 
   private getAuthHeader(): Record<string, string> {
@@ -42,13 +44,21 @@ export class ApiUserProvider implements IUserDataProvider {
   }
 
   public async initFromApi(): Promise<void> {
+    const authHeaders = this.getAuthHeader();
+    if (!authHeaders.Authorization) {
+      this.isLoadingState = false;
+      return;
+    }
     this.isLoadingState = true;
     this.lastError = null;
     try {
       const res = await fetch(`${this.baseUrl}/users`, {
-        headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+        headers: { "Content-Type": "application/json", ...authHeaders },
       });
       if (!res.ok) {
+        if (res.status === 401 && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("sun89_auth_unauthorized"));
+        }
         throw new Error(`Gagal memuat pengguna dari server (HTTP ${res.status})`);
       }
       const payload = await res.json();
@@ -102,9 +112,10 @@ export class ApiUserProvider implements IUserDataProvider {
   }
 
   public createUser(userData: Omit<SystemUser, "id">): SystemUser {
+    const tempId = `temp-${Date.now()}`;
     const newUser: SystemUser = {
       ...userData,
-      id: Date.now(),
+      id: tempId,
     };
     this.users.push(newUser);
     this.notify();
@@ -113,9 +124,28 @@ export class ApiUserProvider implements IUserDataProvider {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
       body: JSON.stringify(userData),
-    }).catch((err) => {
-      console.error("Failed to create user on server:", err);
-    });
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((payload) => {
+        if (payload?.success && payload.data) {
+          const idx = this.users.findIndex((u) => u.id === tempId);
+          if (idx !== -1) {
+            this.users[idx] = payload.data;
+            this.notify();
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to create user on server, rolling back:", err);
+        const idx = this.users.findIndex((u) => u.id === tempId);
+        if (idx !== -1) {
+          this.users.splice(idx, 1);
+          this.notify();
+        }
+      });
 
     return newUser;
   }
@@ -184,6 +214,19 @@ export class ApiUserProvider implements IUserDataProvider {
 
   public getDemoCredentials(): typeof DEMO_CREDENTIALS {
     return DEMO_CREDENTIALS;
+  }
+
+  public async resetPassword(id: number | string): Promise<{ success: boolean; message?: string }> {
+    const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(String(id))}/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...this.getAuthHeader() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || err.message || `Gagal mereset kata sandi (HTTP ${res.status})`);
+    }
+    const payload = await res.json();
+    return { success: true, message: payload.message };
   }
 
   public async authenticate(email: string, password: string): Promise<AuthUserSession | null> {

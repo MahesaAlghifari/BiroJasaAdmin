@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useParams } from "react-router";
+import { useParams, useNavigate, Navigate } from "react-router";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -29,24 +29,106 @@ import {
   Receipt,
   FileCheck,
   AlertCircle,
+  AlertTriangle,
   MessageSquare,
   CheckCircle,
-  Phone
+  CheckCircle2,
+  Phone,
+  Loader2,
+  User,
+  CreditCard,
+  FileText,
+  Plus,
+  Pencil,
+  Lock
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "./ui/dialog";
 import { formatRupiah, formatCustomerName, PlateNumberBadge } from "../utils/financeFormatters";
 import { useFinanceStore, InvoiceBillingRecord } from "../data/financeStore";
+import { APP_CONFIG } from "../config/appConfig";
 import { orderStore } from "../data/orderStore";
 import { useKaryawanPengguna } from "../data/karyawanPenggunaAdapter";
+import { documentRepository } from "../../data/repositories/documentRepository";
+import { processDocumentUpload, formatFileSize } from "../utils/fileCompressor";
+import { usePaymentMethods } from "../data/paymentMethodStore";
+import type { PaymentProof } from "../../domain/order/types";
+import { Upload, ImageIcon, FileIcon, Trash2, Eye } from "lucide-react";
+import {
+  PaymentFilterBar,
+  InflowSummaryCard,
+  matchesPaymentMethodFilter,
+  matchesDateRange,
+  normalizePaymentCategory,
+} from "./FinancePaymentMethodSummary";
+import { pricingStore } from "../data/pricingStore";
+import { orderRepository } from "../../data/repositories/orderRepository";
+import { derivePaymentStatus } from "../../domain/finance/types";
+import { DocumentPreviewModal } from "./DocumentPreviewModal";
+import { Badge } from "./ui/badge";
+import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
+import { Label } from "./ui/label";
+import type { ReimbursementRequest } from "../../domain/messenger/types";
+
+export const STANDARD_EXPENSE_CATEGORIES = [
+  "Operasional Kantor & Utilitas",
+  "Sewa & Pemeliharaan Gedung",
+  "Gaji & Tunjangan Karyawan",
+  "Perlengkapan & ATK Kantor",
+  "Dana Talangan Samsat",
+  "Bahan Bakar & Transportasi Kurir",
+  "Konsumsi & Keperluan Harian",
+  "Lain-lain / Biaya Tak Terduga",
+];
 
 interface FinanceContentProps {
   tab: string;
 }
 
 export function FinanceContent({ tab }: FinanceContentProps) {
+  const navigate = useNavigate();
   const [filterPeriod, setFilterPeriod] = useState("monthly");
   
+  // State for adding mode (switches from table view to standalone FinanceAddPage)
+  const [isAdding, setIsAdding] = useState(false);
+
   // Authoritative employee records for messenger & responsible selectors
   const { karyawan } = useKaryawanPengguna();
+
+  const allOrdersList = useMemo(() => {
+    try {
+      return orderRepository.getAllFlat();
+    } catch {
+      return [];
+    }
+  }, [tab, isAdding]);
+
+  const availableOrderOptions = useMemo(() => {
+    return ["-", ...allOrdersList.map((o) => `${o.orderNo} (${o.customer || o.namaPemilik || "Pelanggan"} - ${o.nopol || o.layanan})`)];
+  }, [allOrdersList]);
+
+  const extractOrderNo = (val: any): string | undefined => {
+    if (!val || typeof val !== "string" || val === "-" || val === "Semua") return undefined;
+    const match = val.match(/^([A-Za-z0-9\-_]+)/);
+    return match ? match[1] : undefined;
+  };
 
   const messengerOptions = useMemo(() => {
     const activeMessengers = karyawan.filter(
@@ -64,15 +146,388 @@ export function FinanceContent({ tab }: FinanceContentProps) {
     return names.length > 0 ? names : ["Siti Nurhaliza", "Andi Wijaya", "Dewi Lestari", "Maya Safitri"];
   }, [karyawan]);
   
-  // State for adding mode (switches from table view to standalone FinanceAddPage)
-  const [isAdding, setIsAdding] = useState(false);
-
   // State for viewing detail mode (switches from table view to standalone FinanceDetailPage)
   const [viewingItem, setViewingItem] = useState<{
     item: any;
     subTabTitle: string;
     columns?: { key: string; label: string }[];
   } | null>(null);
+
+  // Confirmation state for Tagihan: Pelunasan & Selesai (Requirement: Audit Tombol Lunas)
+  const [lunasTargetItem, setLunasTargetItem] = useState<InvoiceBillingRecord | null>(null);
+  const [isSubmittingLunas, setIsSubmittingLunas] = useState(false);
+  const [selesaiTargetItem, setSelesaiTargetItem] = useState<InvoiceBillingRecord | null>(null);
+  const [isSubmittingSelesai, setIsSubmittingSelesai] = useState(false);
+  const [selectedTagihanOrderNo, setSelectedTagihanOrderNo] = useState("");
+  const [tagihanJatuhTempo, setTagihanJatuhTempo] = useState("");
+  const [cashbackTargetItem, setCashbackTargetItem] = useState<any | null>(null);
+  const [isSubmittingCashback, setIsSubmittingCashback] = useState(false);
+  const { activeMethods } = usePaymentMethods();
+  const [lunasMethod, setLunasMethod] = useState("Transfer BCA");
+  const [lunasProof, setLunasProof] = useState<PaymentProof | null>(null);
+  const [lunasIdempotencyKey, setLunasIdempotencyKey] = useState<string>("");
+  const [isUploadingLunasProof, setIsUploadingLunasProof] = useState(false);
+  const [lunasAmount, setLunasAmount] = useState<number>(0);
+  const [lunasDate, setLunasDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [lunasNotes, setLunasNotes] = useState<string>("");
+
+  const [cashbackMethod, setCashbackMethod] = useState("Transfer BCA");
+  const [cashbackProof, setCashbackProof] = useState<PaymentProof | null>(null);
+  const [isUploadingCashbackProof, setIsUploadingCashbackProof] = useState(false);
+  const [cashbackDate, setCashbackDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [paidCashbackIds, setPaidCashbackIds] = useState<Set<string | number>>(new Set());
+  const [dismissedCashbackIds, setDismissedCashbackIds] = useState<Set<string | number>>(new Set());
+  const [selesaiInfoItem, setSelesaiInfoItem] = useState<any | null>(null);
+  const [editingCashbackItem, setEditingCashbackItem] = useState<any | null>(null);
+  const [editingCashbackForm, setEditingCashbackForm] = useState<any>({});
+  const [isCashbackToday, setIsCashbackToday] = useState<boolean>(true);
+  const [cashbackAmount, setCashbackAmount] = useState<number>(0);
+
+  const [targetPayments, setTargetPayments] = useState<any[]>([]);
+  const [isLoadingPayments, setIsLoadingPayments] = useState(false);
+
+  const handleUploadLunasProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingLunasProof(true);
+      toast.info(`Memproses bukti pelunasan ${file.name}...`);
+      const processed = await processDocumentUpload(file);
+      const uploaded = await documentRepository.uploadDocument(processed.file, {
+        orderNo: lunasTargetItem?.orderNo,
+        documentType: "BUKTI_PEMBAYARAN",
+      });
+      setLunasProof({
+        fileName: processed.fileName,
+        fileType: processed.fileType,
+        fileUrl: uploaded.fileUrl,
+        fileSize: formatFileSize(processed.fileSize),
+        documentId: uploaded.id,
+        uploadedAt: new Date().toISOString(),
+      });
+      toast.success(`Bukti pelunasan ${processed.fileName} berhasil diunggah.`);
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal mengunggah bukti pelunasan.");
+    } finally {
+      setIsUploadingLunasProof(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleUploadCashbackProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingCashbackProof(true);
+      toast.info(`Memproses bukti pencairan ${file.name}...`);
+      const processed = await processDocumentUpload(file);
+      const uploaded = await documentRepository.uploadDocument(processed.file, {
+        orderNo: cashbackTargetItem?.orderNo,
+        documentType: "BUKTI_CASHBACK",
+      });
+      setCashbackProof({
+        fileName: processed.fileName,
+        fileType: processed.fileType,
+        fileUrl: uploaded.fileUrl,
+        fileSize: formatFileSize(processed.fileSize),
+        documentId: uploaded.id,
+        uploadedAt: new Date().toISOString(),
+      });
+      toast.success(`Bukti pencairan ${processed.fileName} berhasil diunggah.`);
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal mengunggah bukti pencairan.");
+    } finally {
+      setIsUploadingCashbackProof(false);
+      e.target.value = "";
+    }
+  };
+
+  // Profit Payment Method & Date Filters (Requirement 2)
+  const [profitPaymentFilter, setProfitPaymentFilter] = useState("ALL");
+  const [profitStartDate, setProfitStartDate] = useState("");
+  const [profitEndDate, setProfitEndDate] = useState("");
+  const [profitPengurusanFilter, setProfitPengurusanFilter] = useState("ALL");
+
+  const [cashbackPenerima, setCashbackPenerima] = useState("");
+  const [cashbackBank, setCashbackBank] = useState("BCA");
+  const [cashbackNoRekening, setCashbackNoRekening] = useState("");
+  const [belumBayarFilter, setBelumBayarFilter] = useState<"ALL" | "BELUM" | "KURANG">("ALL");
+
+  // Kas Messenger & Reimbursement Review/Payout States
+  const [kasMessengerView, setKasMessengerView] = useState<"buku-kas" | "reimbursement">("buku-kas");
+  const [reimbFilterStatus, setReimbFilterStatus] = useState<string>("ALL");
+  const [reimbFilterMessenger, setReimbFilterMessenger] = useState<string>("ALL");
+  const [reimbSearchQuery, setReimbSearchQuery] = useState<string>("");
+
+  const [reviewTarget, setReviewTarget] = useState<ReimbursementRequest | null>(null);
+  const [reviewApprovedAmount, setReviewApprovedAmount] = useState<string>("");
+  const [reviewNotes, setReviewNotes] = useState<string>("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
+
+  const [payoutTarget, setPayoutTarget] = useState<ReimbursementRequest | null>(null);
+  const [payoutMethod, setPayoutMethod] = useState<string>("Kas Messenger (Tunai)");
+  const [isSubmittingPayout, setIsSubmittingPayout] = useState<boolean>(false);
+
+  const [previewReceiptDoc, setPreviewReceiptDoc] = useState<{ url: string; title: string } | null>(null);
+
+  const handleOpenCashbackConfirm = (item: any) => {
+    setCashbackTargetItem(item);
+    const amount = Number(item.nominalKelebihan || item.jumlahCashback || 0);
+    setCashbackAmount(amount);
+    setCashbackPenerima(item.customer || "Konsumen");
+    const today = new Date().toISOString().split("T")[0];
+    setCashbackDate(today);
+    setIsCashbackToday(true);
+
+    const initialMethod = activeMethods[0]?.nama_metode || "Transfer BCA";
+    const foundM = activeMethods.find((m) => m.nama_metode === initialMethod);
+    const isCashInitial = foundM?.bank === "Tunai" || initialMethod.toLowerCase().includes("cash") || initialMethod.toLowerCase().includes("tunai");
+
+    setCashbackMethod(initialMethod);
+    setCashbackBank(isCashInitial ? "Tunai" : (foundM?.bank || "BCA"));
+    setCashbackNoRekening("");
+    setCashbackProof(null);
+  };
+
+  const handleOpenEditCashback = (item: any) => {
+    setEditingCashbackItem(item);
+    setEditingCashbackForm({
+      orderNo: item.orderNo || item.invoice || "",
+      nopol: item.nopol || "",
+      customer: item.customer || "",
+      phone: item.phone || item.noHp || "",
+      tanggalMasukBerkas: item.tanggalMasukBerkas || item.tanggal || "",
+      totalTagihan: Number(item.totalTagihan || 0),
+      uangMasuk: Number(item.uangMasuk || item.terbayar || 0),
+      nominalKelebihan: Number(item.nominalKelebihan || item.jumlahCashback || 0),
+      status: item.status || "Pending",
+      alasanPending: item.alasanPending || item.alasan || "",
+    });
+  };
+
+  const handleSaveEditCashback = async () => {
+    if (!editingCashbackItem) return;
+    try {
+      const isPaid = editingCashbackItem.status === "Dibayar" || paidCashbackIds.has(editingCashbackItem.id);
+
+      const updates: any = {
+        nopol: editingCashbackForm.nopol,
+        customer: editingCashbackForm.customer,
+        phone: editingCashbackForm.phone,
+        tanggalMasukBerkas: editingCashbackForm.tanggalMasukBerkas,
+        alasan_pending: editingCashbackForm.alasanPending,
+        alasan: editingCashbackForm.alasanPending,
+      };
+
+      if (!isPaid) {
+        updates.totalTagihan = Number(editingCashbackForm.totalTagihan) || 0;
+        updates.terbayar = Number(editingCashbackForm.uangMasuk) || 0;
+        updates.dibayar = Number(editingCashbackForm.uangMasuk) || 0;
+        updates.overpayment = Number(editingCashbackForm.nominalKelebihan) || 0;
+        updates.cashback = Number(editingCashbackForm.nominalKelebihan) || 0;
+        updates.statusCashback = editingCashbackForm.status;
+      }
+
+      updateInvoice(editingCashbackItem.id, updates);
+
+      if (editingCashbackItem.orderNo) {
+        orderStore.updateOrder(editingCashbackItem.orderNo, {
+          customer: editingCashbackForm.customer,
+          nomorHP: editingCashbackForm.phone,
+          nopol: editingCashbackForm.nopol,
+          alasanPending: editingCashbackForm.alasanPending,
+          alasan_pending: editingCashbackForm.alasanPending,
+        });
+      }
+
+      toast.success(`Perubahan transaksi ${editingCashbackItem.orderNo || editingCashbackItem.invoice} berhasil disimpan.`);
+      setEditingCashbackItem(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal menyimpan perubahan transaksi.");
+    }
+  };
+
+  const handleConfirmCashbackPayment = async () => {
+    if (!cashbackTargetItem || isSubmittingCashback) return;
+
+    const maxAvailable = Number(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0);
+    const amount = Number(cashbackAmount) || 0;
+    if (amount <= 0) {
+      toast.error("Nominal yang dicairkan harus bernilai positif (lebih besar dari Rp 0).");
+      return;
+    }
+    if (amount > maxAvailable && maxAvailable > 0) {
+      toast.error(`Nominal yang dicairkan tidak boleh melebihi saldo yang berhak dicairkan (${formatRupiah(maxAvailable)}).`);
+      return;
+    }
+
+    const isCashbackCash =
+      cashbackMethod.toLowerCase().includes("cash") ||
+      cashbackMethod.toLowerCase().includes("tunai") ||
+      cashbackBank === "Tunai" ||
+      cashbackBank.toLowerCase().includes("cash") ||
+      cashbackBank.toLowerCase().includes("tunai");
+
+    if (!isCashbackCash) {
+      if (!cashbackBank.trim()) {
+        toast.error("Bank tujuan wajib diisi untuk transfer bank.");
+        return;
+      }
+      if (!cashbackNoRekening.trim()) {
+        toast.error("Nomor rekening tujuan wajib diisi untuk transfer bank.");
+        return;
+      }
+    }
+
+    try {
+      setIsSubmittingCashback(true);
+      const isOverpaymentOnly = cashbackTargetItem.nominalKelebihan > 0 && (cashbackTargetItem.nominalKomisi || 0) === 0;
+      const paymentType = isOverpaymentOnly ? "KELEBIHAN" : ((cashbackTargetItem.nominalKomisi || 0) > 0 && (cashbackTargetItem.nominalKelebihan || 0) === 0 ? "KOMISI" : "ALL");
+
+      const ok = await processCashbackPayment(cashbackTargetItem.id, {
+        processedBy: "Finance Admin",
+        paymentType,
+        penerima: cashbackPenerima || cashbackTargetItem.customer || "Konsumen",
+        tanggal: cashbackDate || new Date().toISOString().split("T")[0],
+        bank: isCashbackCash ? "Tunai" : cashbackBank.trim(),
+        noRekening: isCashbackCash ? "" : cashbackNoRekening.trim(),
+        nominal: amount,
+        bukti: cashbackProof ? cashbackProof.fileUrl : undefined,
+        buktiPembayaran: cashbackProof || undefined,
+        paymentMethod: cashbackMethod,
+      });
+
+      if (ok) {
+        toast.success(
+          `Pencairan dana untuk ${cashbackTargetItem.orderNo || cashbackTargetItem.invoice} sebesar ${formatRupiah(amount)} berhasil dicatat ke Kas Kantor.`
+        );
+        // Mark as paid so status becomes "Dibayar" and button becomes "Selesai"
+        setPaidCashbackIds((prev) => {
+          const next = new Set(prev);
+          next.add(cashbackTargetItem.id);
+          if (cashbackTargetItem.orderNo) next.add(cashbackTargetItem.orderNo);
+          return next;
+        });
+        setCashbackTargetItem(null);
+        setCashbackProof(null);
+      } else {
+        toast.error("Gagal memproses pencairan cashback / refund.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Terjadi kesalahan saat memproses pencairan.");
+    } finally {
+      setIsSubmittingCashback(false);
+    }
+  };
+
+  const handleOpenLunasConfirm = (item: any) => {
+    // Phase B Gating: Prevent payment if final cost is not set or Supervisi is not approved
+    if (item.isPaymentGated || !item.hasFinalCost || !item.isSupervisiApproved) {
+      const reason = item.paymentGatingReason || (!item.hasFinalCost ? "Biaya final belum ditetapkan (Stage 5)" : "Menunggu persetujuan Supervisi (Stage 6)");
+      toast.warning(`Pembayaran tidak dapat diproses: ${reason}.`);
+      return;
+    }
+
+    const sisa = Number(item.kekurangan ?? item.sisa ?? 0);
+    if (item.status === "Lunas" || sisa <= 0) {
+      toast.info(`Tagihan ${item.invoice || item.invoiceNo || item.orderNo} sudah berstatus Lunas. Kelebihan bayar dapat dikelola di Cashback Terpending.`);
+      return;
+    }
+    setLunasTargetItem(item);
+    setLunasAmount(sisa);
+    setLunasDate(new Date().toISOString().split("T")[0]);
+    setLunasMethod(activeMethods[0]?.nama_metode || "Transfer BCA");
+    setLunasProof(null);
+    setLunasNotes("");
+    setLunasIdempotencyKey(`pay-${item.id}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+
+    // Fetch previous payment history for this invoice / order
+    setTargetPayments([]);
+    setIsLoadingPayments(true);
+    const invoiceNum = item.invoice || item.invoiceNo || item.orderNo;
+    if (invoiceNum) {
+      fetch(`${APP_CONFIG.apiBaseUrl}/finance/invoices/${encodeURIComponent(invoiceNum)}/payments`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("sun89_auth_token") || ""}`,
+        },
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((payload) => {
+          if (payload?.success && Array.isArray(payload.data) && payload.data.length > 0) {
+            setTargetPayments(payload.data);
+          } else {
+            setTargetPayments(item.riwayatPembayaran || item.paymentRecords || []);
+          }
+        })
+        .catch(() => {
+          setTargetPayments(item.riwayatPembayaran || item.paymentRecords || []);
+        })
+        .finally(() => {
+          setIsLoadingPayments(false);
+        });
+    } else {
+      setTargetPayments(item.riwayatPembayaran || item.paymentRecords || []);
+      setIsLoadingPayments(false);
+    }
+  };
+
+  const handleConfirmLunas = async () => {
+    if (!lunasTargetItem || isSubmittingLunas) return;
+
+    // Phase B Gating: Strict UI pre-guard before triggering backend
+    if (lunasTargetItem.isPaymentGated || !lunasTargetItem.hasFinalCost || !lunasTargetItem.isSupervisiApproved) {
+      const reason = lunasTargetItem.paymentGatingReason || (!lunasTargetItem.hasFinalCost ? "Biaya final belum ditetapkan (Stage 5)" : "Menunggu persetujuan Supervisi (Stage 6)");
+      toast.error(`Pembayaran ditolak: ${reason}.`);
+      return;
+    }
+
+    const payAmount = Number(lunasAmount) || 0;
+    const currentSisa = Number(lunasTargetItem.kekurangan ?? lunasTargetItem.sisa ?? 0);
+    if (payAmount <= 0) {
+      toast.error("Nominal pembayaran harus lebih besar dari Rp 0.");
+      return;
+    }
+    if (payAmount > currentSisa) {
+      toast.error(
+        `Nominal pembayaran (${formatRupiah(payAmount)}) melebihi sisa tagihan (${formatRupiah(currentSisa)}). Untuk kelebihan bayar, silakan kelola pada alur Cashback / Pengembalian.`
+      );
+      return;
+    }
+    try {
+      setIsSubmittingLunas(true);
+      let key = lunasIdempotencyKey;
+      if (!key) {
+        key = `pay-${lunasTargetItem.id}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        setLunasIdempotencyKey(key);
+      }
+      const isFull = payAmount === currentSisa;
+      const ok = await recordPayment(lunasTargetItem.id, payAmount, {
+        paymentMethod: lunasMethod,
+        bank: lunasMethod,
+        tanggal: lunasDate || new Date().toISOString().split("T")[0],
+        buktiPembayaran: lunasProof,
+        catatan: lunasNotes.trim() || `${isFull ? "Pelunasan" : "Pembayaran tambahan"} tagihan ${lunasTargetItem.invoice || lunasTargetItem.invoiceNo || lunasTargetItem.orderNo}`,
+        idempotencyKey: key,
+      });
+      if (ok) {
+        toast.success(
+          `Pembayaran ${formatRupiah(payAmount)} untuk ${lunasTargetItem.invoice || lunasTargetItem.invoiceNo || lunasTargetItem.orderNo} (${lunasTargetItem.customer}) berhasil dicatat.`
+        );
+        setLunasTargetItem(null);
+        setLunasProof(null);
+        setLunasIdempotencyKey("");
+        setLunasAmount(0);
+        setLunasNotes("");
+        setTargetPayments([]);
+      } else {
+        toast.error("Gagal mencatat pembayaran tagihan. Silakan periksa kembali data transaksi.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Terjadi kesalahan saat memproses pembayaran.");
+    } finally {
+      setIsSubmittingLunas(false);
+    }
+  };
 
   // Datasets from central Single Source of Truth
   const {
@@ -85,9 +540,13 @@ export function FinanceContent({ tab }: FinanceContentProps) {
     profitPendingList: profitPendingData,
     cashbackPendingList: cashbackPendingData,
     labaRugiData,
+    getCanonicalLabaRugi,
     recordPayment,
     resolveInvoice,
     completeInvoice,
+    processRefund,
+    processCashbackPayment,
+    dismissCashback,
     addInvoice,
     updateInvoice,
     deleteInvoice,
@@ -100,27 +559,18 @@ export function FinanceContent({ tab }: FinanceContentProps) {
     addPengeluaran,
     updatePengeluaran,
     deletePengeluaran,
+    reimbursements,
+    reviewReimbursement,
+    payReimbursement,
   } = useFinanceStore();
 
   const { category } = useParams<{ category?: string }>();
   const activeCategoryLabel = category && DATA_PENJUALAN_CATEGORIES[category] ? DATA_PENJUALAN_CATEGORIES[category] : "Mutasi LD";
 
-  // Sub-tab Breadcrumb renderer (Requirements 1, 2, 3: Global header displays title, no duplication in content)
-  const renderSubTabHeader = (title: string, _description?: string, subCategory?: string) => (
-    <nav className="text-xs text-muted-foreground flex items-center gap-1.5 pb-2" aria-label="Breadcrumb">
-      <span>Finance</span>
-      <span>/</span>
-      {subCategory ? (
-        <>
-          <span>{title}</span>
-          <span>/</span>
-          <span className="text-foreground font-medium">{subCategory}</span>
-        </>
-      ) : (
-        <span className="text-foreground font-medium">{title}</span>
-      )}
-    </nav>
-  );
+  // Sub-tab Breadcrumb renderer (Global shell header already displays breadcrumbs cleanly below the header)
+  const renderSubTabHeader = (_title: string, _description?: string, _subCategory?: string) => {
+    return null;
+  };
 
   // If viewing detail, show the detail page (Requirement 18 & 19)
   if (viewingItem) {
@@ -138,50 +588,205 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   // 1. SUB-TAB: PROFIT (VIEW ONLY)
   // ==========================================
   if (tab === "profit") {
-    const totalUangMasuk = profitData.reduce((acc, item) => acc + (item.uangMasuk > 0 ? item.uangMasuk : 0), 0);
-    const totalBiayaSamsat = profitData.reduce((acc, item) => acc + item.biayaSamsat, 0);
-    const totalProfit = profitData.reduce((acc, item) => acc + item.profit, 0);
+    const filteredProfitData = profitData.filter((item) => {
+      const matchPayment = matchesPaymentMethodFilter(item, profitPaymentFilter);
+      const matchDate = matchesDateRange(item.tanggalUangMasuk || item.tanggal, profitStartDate, profitEndDate);
+      const matchPengurusan =
+        profitPengurusanFilter === "ALL" ||
+        (item.pengurusan || "").toUpperCase() === profitPengurusanFilter.toUpperCase();
+      return matchPayment && matchDate && matchPengurusan;
+    });
+
+    const totalUangMasuk = filteredProfitData.reduce((acc, item) => acc + (item.uangMasuk > 0 ? item.uangMasuk : 0), 0);
+    const totalBiayaSamsat = filteredProfitData.reduce((acc, item) => acc + item.biayaSamsat, 0);
+    const totalProfit = filteredProfitData.reduce((acc, item) => acc + item.profit, 0);
 
     const profitColumns: Column[] = [
-      { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" },
-      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" },
-      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" },
-      { key: "namaBerkas", label: "Nama berkas" },
-      { 
-        key: "pengurusan", 
-        label: "Jenis Pengurusan", 
-        filterable: true, 
-        filterType: "select", 
-        filterOptions: ["PAJAK TAHUNAN", "PAJAK 5 TAHUNAN", "MUTASI LD", "MUTASI AS", "BALIK NAMA", "BBN 1", "BBN 2"] 
+      { key: "tanggal", label: "Tanggal Order", filterable: true, filterType: "text" },
+      {
+        key: "tanggalUangMasuk",
+        label: "Tanggal Uang Masuk",
+        render: (_val: any, item: any) => {
+          const isPaid = Number(item.uangMasuk || 0) > 0;
+          if (!isPaid) return <span className="text-muted-foreground italic text-xs">-</span>;
+          return <span className="text-xs font-medium text-foreground">{item.tanggalUangMasuk || item.tanggal || "-"}</span>;
+        },
       },
-      { key: "uangMasuk", label: "Uang masuk" },
-      { key: "biayaSamsat", label: "Biaya samsat" },
-      { key: "profit", label: "Profit" },
-      { 
-        key: "rekening", 
-        label: "Rekening", 
-        filterable: true, 
-        filterType: "select", 
-        filterOptions: ["BCA", "Mandiri", "BRI", "BNI", "CIMB", "Cash"] 
+      {
+        key: "nopol",
+        label: "Nomor Polisi",
+        filterable: true,
+        filterType: "text",
+        render: (value: string) => <PlateNumberBadge plate={value || "-"} />,
       },
-      { key: "invoice", label: "Nomor invoice" },
+      {
+        key: "customer",
+        label: "Nama Customer",
+        filterable: true,
+        filterType: "text",
+        render: (value: string) => <span className="font-medium text-foreground">{formatCustomerName(value)}</span>,
+      },
+      { 
+        key: "namaBerkas", 
+        label: "Nama Pemilik (STNK/BPKB)",
+        render: (value: string) => <span className="text-xs text-foreground">{value && value !== "-" ? value : <span className="text-muted-foreground italic">—</span>}</span>
+      },
+      {
+        key: "pengurusan",
+        label: "Jenis Pengurusan",
+        filterable: true,
+        filterType: "select",
+        filterOptions: ["PAJAK TAHUNAN", "PAJAK 5 TAHUNAN", "MUTASI LD", "MUTASI AS", "BALIK NAMA", "BBN 1", "BBN 2"],
+      },
+      {
+        key: "metodePencairan",
+        label: "Metode Pencairan",
+        filterable: true,
+        filterType: "select",
+        filterOptions: ["Cash", "Transfer Bank"],
+        render: (_val: any, item: any) => {
+          const isPaid = Number(item.uangMasuk || 0) > 0;
+          if (!isPaid) {
+            return <span className="text-xs text-muted-foreground italic">Belum terverifikasi</span>;
+          }
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          const isCash = cat === "Cash";
+          return (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${
+              isCash
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+            }`}>
+              {isCash ? "Cash (Tunai)" : "Transfer Bank"}
+            </span>
+          );
+        },
+      },
+      {
+        key: "namaBank",
+        label: "Nama Bank",
+        filterable: true,
+        filterType: "text",
+        render: (_val: any, item: any) => {
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          if (cat === "Cash") {
+            return <span className="text-xs text-muted-foreground font-mono">—</span>;
+          }
+          const bankName = item.namaBank || item.bank || (item.rekening && item.rekening !== "Cash" ? item.rekening : "—");
+          return <span className="text-xs font-semibold text-foreground">{bankName || "—"}</span>;
+        },
+      },
+      {
+        key: "nomorRekening",
+        label: "Nomor Rekening",
+        render: (_val: any, item: any) => {
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          if (cat === "Cash") {
+            return <span className="text-xs text-muted-foreground font-mono">—</span>;
+          }
+          const noRek = item.nomorRekening || item.noRekening;
+          return noRek ? (
+            <span className="text-xs font-mono text-muted-foreground">{noRek}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground font-mono">—</span>
+          );
+        },
+      },
+      {
+        key: "namaPemilikRekening",
+        label: "Nama Pemilik Rekening",
+        render: (_val: any, item: any) => {
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          if (cat === "Cash") {
+            return <span className="text-xs text-muted-foreground font-mono">—</span>;
+          }
+          const namaRek = item.namaPemilikRekening || item.namaRekening;
+          return namaRek ? (
+            <span className="text-xs font-medium text-foreground">{namaRek}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground font-mono">—</span>
+          );
+        },
+      },
+      {
+        key: "uangMasuk",
+        label: "Total Terbayar",
+        align: "right",
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            {formatRupiah(val > 0 ? val : 0)}
+          </span>
+        ),
+      },
+      {
+        key: "biayaSamsat",
+        label: "Biaya Pokok Samsat",
+        align: "right",
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs text-rose-500">
+            {formatRupiah(val || 0)}
+          </span>
+        ),
+      },
+      {
+        key: "profit",
+        label: "Profit",
+        align: "right",
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs font-bold text-foreground">
+            {formatRupiah(val || 0)}
+          </span>
+        ),
+      },
+      { key: "invoice", label: "Nomor Invoice" },
       { key: "tanggalTTB", label: "Tanggal TTB" },
       { key: "ttb", label: "Nomor TTB" },
     ];
 
+    const pengurusanOptions = [
+      { value: "PAJAK TAHUNAN", label: "Pajak Tahunan" },
+      { value: "PAJAK 5 TAHUNAN", label: "Pajak 5 Tahunan" },
+      { value: "MUTASI LD", label: "Mutasi LD" },
+      { value: "MUTASI AS", label: "Mutasi AS" },
+      { value: "BALIK NAMA", label: "Balik Nama" },
+      { value: "BBN 1", label: "BBN 1" },
+      { value: "BBN 2", label: "BBN 2" },
+    ];
+
     return (
       <div className="flex-1 flex flex-col min-h-0 space-y-4">
-        {renderSubTabHeader("Profit", "Pantau margin keuntungan dan rincian transaksi per berkas")}
+        {/* 1. Filter Rekening & Periode Kas Masuk */}
+        <PaymentFilterBar
+          selectedMethod={profitPaymentFilter}
+          onMethodChange={setProfitPaymentFilter}
+          startDate={profitStartDate}
+          onStartDateChange={setProfitStartDate}
+          endDate={profitEndDate}
+          onEndDateChange={setProfitEndDate}
+          selectedStatus={profitPengurusanFilter}
+          onStatusChange={setProfitPengurusanFilter}
+          statusOptions={pengurusanOptions}
+          statusLabel="Pengurusan"
+          onReset={() => {
+            setProfitPaymentFilter("ALL");
+            setProfitStartDate("");
+            setProfitEndDate("");
+            setProfitPengurusanFilter("ALL");
+          }}
+        />
+
+        {/* Ringkasan Arus Kas Masuk per Rekening / Metode Pembayaran */}
+        <InflowSummaryCard
+          items={filteredProfitData}
+          selectedMethod={profitPaymentFilter}
+          title="Ringkasan Pemasukan per Rekening / Metode Pembayaran"
+        />
 
         {/* Level 3: Table Card */}
         <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-          <div className="mb-4 shrink-0">
-            <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Daftar transaksi profit</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Seluruh rekapitulasi data penjualan dan kalkulasi keuntungan samsat</p>
-          </div>
           <EnhancedTableWithDialogs
             columns={profitColumns}
-            data={profitData}
+            data={filteredProfitData}
             subTabTitle="Profit"
             onView={(item) => setViewingItem({ item, subTabTitle: "Profit", columns: profitColumns })}
             searchPlaceholder="Cari berdasarkan nomor polisi, nama customer, invoice..."
@@ -191,7 +796,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
           />
         </Card>
 
-        {/* Level 3: Summary Cards (Requirement 4: MOVED BELOW TABLE) */}
+        {/* Level 3: Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
           <Card className="p-4 border border-border bg-card shadow-2xs">
             <div className="flex items-center justify-between">
@@ -200,7 +805,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
                 <h3 className="text-xl font-bold text-foreground mt-1 tabular-nums">
                   {formatRupiah(totalUangMasuk)}
                 </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{profitData.length} transaksi tercatat</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{filteredProfitData.length} transaksi tercatat</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
                 <ArrowUpRight className="w-5 h-5" />
@@ -243,17 +848,17 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   }
 
   // ==========================================
-  // 2. SUB-TAB: KAS MESSENGER
+  // 2. SUB-TAB: KAS MESSENGER & REIMBURSEMENT
   // ==========================================
   if (tab === "kas-messenger") {
     const kasMessengerFields: FieldConfig[] = [
       { key: "tanggal", label: "Tanggal", type: "date" },
       { key: "jenis", label: "Jenis transaksi", type: "select", options: ["Petty cash", "Operasional", "Biaya Samsat"] },
       { key: "messenger", label: "Nama messenger", type: "select", options: messengerOptions, placeholder: "Pilih messenger" },
+      { key: "orderNo", label: "Nomor Order Terkait (Opsional)", type: "select", options: availableOrderOptions, placeholder: "Pilih order jika terkait berkas" },
       { key: "keterangan", label: "Keterangan", type: "text", placeholder: "Rincian keperluan kas" },
       { key: "in", label: "Kas masuk (in)", type: "number", placeholder: "0" },
       { key: "out", label: "Kas keluar (out)", type: "number", placeholder: "0" },
-      { key: "total", label: "Total saldo berjalan", type: "number", placeholder: "0" },
     ];
 
     const kasMessengerColumns: Column[] = [
@@ -280,15 +885,103 @@ export function FinanceContent({ tab }: FinanceContentProps) {
         filterType: "select", 
         filterOptions: messengerOptions 
       },
-      { key: "keterangan", label: "Keterangan" },
-      { key: "in", label: "Masuk" },
-      { key: "out", label: "Keluar" },
-      { key: "total", label: "Saldo akhir" },
+      { 
+        key: "keterangan", 
+        label: "Keterangan",
+        render: (val: any, row: any) => {
+          const reimbId = row.reimbursementId;
+          const ordNo = row.orderNo;
+          return (
+            <div className="flex flex-col gap-1 text-left">
+              <span className="text-foreground">{val || "-"}</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {reimbId && (
+                  <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 border-blue-200 font-mono">
+                    Ref: {reimbId}
+                  </Badge>
+                )}
+                {ordNo && (
+                  <Badge variant="outline" className="text-[10px] bg-muted text-muted-foreground font-mono">
+                    {ordNo}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          );
+        }
+      },
+      { 
+        key: "in", 
+        label: "Masuk",
+        render: (val: any) => (val > 0 ? <span className="text-emerald-600 font-medium">{formatRupiah(val)}</span> : <span className="text-muted-foreground">—</span>)
+      },
+      { 
+        key: "out", 
+        label: "Keluar",
+        render: (val: any) => (val > 0 ? <span className="text-rose-600 font-medium">{formatRupiah(val)}</span> : <span className="text-muted-foreground">—</span>)
+      },
+      { 
+        key: "total", 
+        label: "Saldo akhir",
+        render: (val: any) => <span className="font-semibold text-foreground">{formatRupiah(val)}</span>
+      },
+      {
+        key: "receiptUrl",
+        label: "Bukti Struk",
+        render: (val: any, row: any) => {
+          const url = val || row.receiptUrl;
+          if (!url) return <span className="text-muted-foreground text-xs">—</span>;
+          return (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs gap-1 text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewReceiptDoc({
+                  url,
+                  title: `Bukti Kuitansi ${row.reimbursementId || ""} (${row.messenger})`
+                });
+              }}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Foto
+            </Button>
+          );
+        }
+      }
     ];
 
     const totalKasMasuk = kasMessengerData.reduce((acc, item) => acc + item.in, 0);
     const totalKasKeluar = kasMessengerData.reduce((acc, item) => acc + item.out, 0);
     const sisaSaldoMessenger = totalKasMasuk - totalKasKeluar;
+
+    // Reimbursement KPIs
+    const pendingReimbList = reimbursements.filter((r) => r.status === "Diajukan" || r.status === "Sedang Ditinjau");
+    const approvedReimbList = reimbursements.filter((r) => r.status === "Disetujui");
+    const paidReimbList = reimbursements.filter((r) => r.status === "Dibayar");
+    const rejectedReimbList = reimbursements.filter((r) => r.status === "Ditolak");
+
+    const totalReimbSubmitted = reimbursements.reduce((acc, r) => acc + (r.amount || 0), 0);
+    const totalReimbPending = pendingReimbList.reduce((acc, r) => acc + (r.amount || 0), 0);
+    const totalReimbApproved = approvedReimbList.reduce((acc, r) => acc + (r.approvedAmount ?? r.amount ?? 0), 0);
+    const totalReimbPaid = paidReimbList.reduce((acc, r) => acc + (r.approvedAmount ?? r.amount ?? 0), 0);
+
+    // Filtered Reimbursements
+    const filteredReimbursements = reimbursements.filter((r) => {
+      if (reimbFilterStatus !== "ALL" && r.status !== reimbFilterStatus) return false;
+      if (reimbFilterMessenger !== "ALL" && r.messengerName !== reimbFilterMessenger) return false;
+      if (reimbSearchQuery.trim()) {
+        const q = reimbSearchQuery.toLowerCase();
+        const matchId = (r.id || "").toLowerCase().includes(q);
+        const matchMsg = (r.messengerName || "").toLowerCase().includes(q);
+        const matchOrder = (r.orderNo || "").toLowerCase().includes(q);
+        const matchNote = (r.note || "").toLowerCase().includes(q);
+        const matchCat = (r.category || "").toLowerCase().includes(q);
+        if (!matchId && !matchMsg && !matchOrder && !matchNote && !matchCat) return false;
+      }
+      return true;
+    });
 
     const handleAddSubmit = (rows: any[]) => {
       rows.forEach((row) => {
@@ -299,11 +992,106 @@ export function FinanceContent({ tab }: FinanceContentProps) {
           keterangan: row.keterangan || "",
           in: parseInt(row.in) || 0,
           out: parseInt(row.out) || 0,
-          total: parseInt(row.total) || undefined,
+          orderNo: extractOrderNo(row.orderNo),
+          total: undefined, // Dihitung otomatis oleh running total sistem
         });
       });
       setIsAdding(false);
       toast.success(`${rows.length} data kas messenger berhasil ditambahkan`);
+    };
+
+    const handleOpenReview = (r: ReimbursementRequest) => {
+      setReviewTarget(r);
+      setReviewApprovedAmount(String(r.approvedAmount !== undefined ? r.approvedAmount : r.amount));
+      setReviewNotes(r.reviewNotes || "");
+    };
+
+    const handleConfirmReview = (decision: "Disetujui" | "Ditolak") => {
+      if (!reviewTarget) return;
+      const cleanApproved = parseInt(String(reviewApprovedAmount).replace(/[^0-9]/g, ""), 10) || 0;
+
+      if (decision === "Disetujui") {
+        if (cleanApproved <= 0) {
+          toast.error("Nominal yang disetujui harus lebih besar dari Rp 0.");
+          return;
+        }
+        if (cleanApproved > reviewTarget.amount) {
+          toast.error(`Nominal disetujui tidak boleh melebihi nominal diajukan (${formatRupiah(reviewTarget.amount)}).`);
+          return;
+        }
+        if (cleanApproved < reviewTarget.amount && !reviewNotes.trim()) {
+          toast.error("Wajib memberikan catatan/alasan jika nominal yang disetujui lebih kecil dari yang diajukan.");
+          return;
+        }
+      } else if (decision === "Ditolak") {
+        if (!reviewNotes.trim()) {
+          toast.error("Wajib memberikan catatan/alasan penolakan pengajuan biaya.");
+          return;
+        }
+      }
+
+      setIsSubmittingReview(true);
+      try {
+        const rejectedAmt = decision === "Disetujui" 
+          ? Math.max(0, reviewTarget.amount - cleanApproved) 
+          : reviewTarget.amount;
+        const approvedAmt = decision === "Disetujui" ? cleanApproved : 0;
+
+        const ok = reviewReimbursement(
+          reviewTarget.id,
+          decision,
+          { role: "finance", userName: "Finance Admin" },
+          reviewNotes.trim() || undefined,
+          approvedAmt,
+          rejectedAmt
+        );
+
+        if (ok) {
+          toast.success(
+            decision === "Disetujui"
+              ? `Pengajuan ${reviewTarget.id} berhasil disetujui sebesar ${formatRupiah(approvedAmt)}. Siap dicairkan!`
+              : `Pengajuan ${reviewTarget.id} berhasil ditolak.`
+          );
+          setReviewTarget(null);
+        } else {
+          toast.error("Gagal memperbarui status pengajuan.");
+        }
+      } catch (err: any) {
+        toast.error(err?.message || "Terjadi kesalahan saat memproses review.");
+      } finally {
+        setIsSubmittingReview(false);
+      }
+    };
+
+    const handleOpenPayout = (r: ReimbursementRequest) => {
+      setPayoutTarget(r);
+      setPayoutMethod("Kas Messenger (Tunai)");
+    };
+
+    const handleConfirmPayout = () => {
+      if (!payoutTarget) return;
+      setIsSubmittingPayout(true);
+      try {
+        const ok = payReimbursement(
+          payoutTarget.id,
+          { role: "finance", userName: "Finance Admin" },
+          { paymentMethod: payoutMethod, channel: "Kas Messenger" }
+        );
+
+        if (ok) {
+          const amt = payoutTarget.approvedAmount || payoutTarget.amount;
+          toast.success(
+            `Pencairan reimbursement ${payoutTarget.id} sebesar ${formatRupiah(amt)} berhasil dicatat di Kas Messenger!`
+          );
+          setPayoutTarget(null);
+        } else {
+          toast.error("Gagal memproses pencairan reimbursement.");
+        }
+      } catch (err: any) {
+        toast.error(err?.message || "Terjadi kesalahan saat memproses pencairan.");
+      } finally {
+        setIsSubmittingPayout(false);
+      }
     };
 
     if (isAdding) {
@@ -319,75 +1107,645 @@ export function FinanceContent({ tab }: FinanceContentProps) {
     }
 
     return (
-      <div className="flex-1 flex flex-col min-h-0 space-y-4">
-        {renderSubTabHeader("Kas Messenger", "Kelola pencatatan kas petty cash dan operasional messenger")}
+      <div className="flex-1 flex flex-col min-h-0 space-y-4 text-left">
+        {renderSubTabHeader("Kas Messenger", "Kelola pencatatan kas petty cash, operasional, dan reimbursement messenger")}
 
-        {/* Level 3: Table */}
-        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-          <div className="mb-4 shrink-0">
-            <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Buku kas harian messenger</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Riwayat lengkap mutasi kas masuk dan keluar kurir/messenger di lapangan</p>
+        {/* Level 2 Sub-Nav: Buku Kas vs Pengajuan Biaya Reimbursement */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-card p-2 rounded-xl border border-border shadow-2xs">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setKasMessengerView("buku-kas")}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 ${
+                kasMessengerView === "buku-kas"
+                  ? "bg-primary text-primary-foreground shadow-2xs"
+                  : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              Buku Kas Messenger ({kasMessengerData.length})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setKasMessengerView("reimbursement")}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 ${
+                kasMessengerView === "reimbursement"
+                  ? "bg-primary text-primary-foreground shadow-2xs"
+                  : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <Receipt className="w-4 h-4" />
+              Pengajuan Biaya Operasional ({reimbursements.length})
+              {pendingReimbList.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white animate-pulse">
+                  {pendingReimbList.length} Menunggu
+                </span>
+              )}
+              {approvedReimbList.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white">
+                  {approvedReimbList.length} Siap Cair
+                </span>
+              )}
+            </button>
           </div>
-          <EnhancedTableWithDialogs
-            columns={kasMessengerColumns}
-            data={kasMessengerData}
-            subTabTitle="Kas Messenger"
-            onAdd={() => setIsAdding(true)}
-            onView={(item) => setViewingItem({ item, subTabTitle: "Kas messenger", columns: kasMessengerColumns })}
-            onEdit={(item, updated) => updateKasMessenger(item.id, updated)}
-            onDelete={(item) => deleteKasMessenger(item.id)}
-            searchPlaceholder="Cari berdasarkan messenger, keterangan, jenis..."
-            editFields={kasMessengerFields}
-          />
-        </Card>
 
-        {/* Level 3: Summary Cards (Requirement 4: MOVED BELOW TABLE) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
-          <Card className="p-4 border border-border bg-card shadow-2xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Total kas masuk</p>
-                <h3 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
-                  {formatRupiah(totalKasMasuk)}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Penerimaan kas & petty cash</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                <ArrowUpRight className="w-5 h-5" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4 border border-border bg-card shadow-2xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Total kas keluar</p>
-                <h3 className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
-                  {formatRupiah(totalKasKeluar)}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Operasional & biaya samsat</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-500">
-                <ArrowDownRight className="w-5 h-5" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4 border border-border bg-card shadow-2xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Sisa saldo kas messenger</p>
-                <h3 className="text-xl font-bold text-foreground mt-1 tabular-nums">
-                  {formatRupiah(sisaSaldoMessenger)}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Posisi saldo saat ini</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                <Wallet className="w-5 h-5" />
-              </div>
-            </div>
-          </Card>
+          {kasMessengerView === "buku-kas" && (
+            <Button
+              size="sm"
+              onClick={() => setIsAdding(true)}
+              className="h-8 text-xs font-semibold bg-primary text-primary-foreground gap-1.5 shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5" /> Tambah Transaksi Kas
+            </Button>
+          )}
         </div>
+
+        {/* VIEW 1: BUKU KAS MESSENGER */}
+        {kasMessengerView === "buku-kas" && (
+          <div className="flex-1 flex flex-col min-h-0 space-y-4">
+            <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
+              <EnhancedTableWithDialogs
+                columns={kasMessengerColumns}
+                data={kasMessengerData}
+                subTabTitle="Kas Messenger"
+                onAdd={() => setIsAdding(true)}
+                onView={(item) => setViewingItem({ item, subTabTitle: "Kas messenger", columns: kasMessengerColumns })}
+                onEdit={(item, updated) => updateKasMessenger(item.id, updated)}
+                onDelete={(item) => deleteKasMessenger(item.id)}
+                searchPlaceholder="Cari berdasarkan messenger, keterangan, jenis..."
+                editFields={kasMessengerFields}
+              />
+            </Card>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
+              <Card className="p-4 border border-border bg-card shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Total kas masuk</p>
+                    <h3 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
+                      {formatRupiah(totalKasMasuk)}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Penerimaan kas & petty cash</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                    <ArrowUpRight className="w-5 h-5" />
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-4 border border-border bg-card shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Total kas keluar</p>
+                    <h3 className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
+                      {formatRupiah(totalKasKeluar)}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Operasional & reimbursement messenger</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-500">
+                    <ArrowDownRight className="w-5 h-5" />
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-4 border border-border bg-card shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Sisa saldo kas messenger</p>
+                    <h3 className="text-xl font-bold text-foreground mt-1 tabular-nums">
+                      {formatRupiah(sisaSaldoMessenger)}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Posisi saldo saat ini</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 2: PENGAJUAN REIMBURSEMENT MESSENGER */}
+        {kasMessengerView === "reimbursement" && (
+          <div className="flex-1 flex flex-col min-h-0 space-y-4">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
+              <Card className="p-3.5 border border-border bg-card shadow-2xs">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  Total Diajukan
+                </span>
+                <p className="text-base sm:text-lg font-bold text-foreground mt-1 tabular-nums">
+                  {formatRupiah(totalReimbSubmitted)}
+                </p>
+                <span className="text-xs text-muted-foreground mt-0.5 block">
+                  {reimbursements.length} pengajuan
+                </span>
+              </Card>
+
+              <Card className="p-3.5 border border-amber-200/80 dark:border-amber-900/60 bg-amber-50/20 dark:bg-amber-950/15 shadow-2xs">
+                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">
+                  Menunggu Review
+                </span>
+                <p className="text-base sm:text-lg font-bold text-amber-800 dark:text-amber-300 mt-1 tabular-nums">
+                  {formatRupiah(totalReimbPending)}
+                </p>
+                <span className="text-xs text-amber-600/90 dark:text-amber-400 mt-0.5 block">
+                  {pendingReimbList.length} butuh persetujuan
+                </span>
+              </Card>
+
+              <Card className="p-3.5 border border-blue-200/80 dark:border-blue-900/60 bg-blue-50/20 dark:bg-blue-950/15 shadow-2xs">
+                <span className="text-[11px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider block">
+                  Siap Dicairkan
+                </span>
+                <p className="text-base sm:text-lg font-bold text-blue-800 dark:text-blue-300 mt-1 tabular-nums">
+                  {formatRupiah(totalReimbApproved)}
+                </p>
+                <span className="text-xs text-blue-600/90 dark:text-blue-400 mt-0.5 block">
+                  {approvedReimbList.length} disetujui (belum cair)
+                </span>
+              </Card>
+
+              <Card className="p-3.5 border border-emerald-200/80 dark:border-emerald-900/60 bg-emerald-50/20 dark:bg-emerald-950/15 shadow-2xs">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">
+                  Sudah Dicairkan
+                </span>
+                <p className="text-base sm:text-lg font-bold text-emerald-800 dark:text-emerald-300 mt-1 tabular-nums">
+                  {formatRupiah(totalReimbPaid)}
+                </p>
+                <span className="text-xs text-emerald-600/90 dark:text-emerald-400 mt-0.5 block">
+                  {paidReimbList.length} transaksi kas
+                </span>
+              </Card>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <Card className="p-3 border border-border bg-card shadow-2xs space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                {/* Status tabs */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+                  {[
+                    { id: "ALL", label: `Semua (${reimbursements.length})` },
+                    { id: "Diajukan", label: `Diajukan (${pendingReimbList.length})` },
+                    { id: "Disetujui", label: `Disetujui (${approvedReimbList.length})` },
+                    { id: "Dibayar", label: `Dibayar (${paidReimbList.length})` },
+                    { id: "Ditolak", label: `Ditolak (${rejectedReimbList.length})` },
+                  ].map((tabItem) => (
+                    <button
+                      key={tabItem.id}
+                      type="button"
+                      onClick={() => setReimbFilterStatus(tabItem.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+                        reimbFilterStatus === tabItem.id
+                          ? "bg-primary text-primary-foreground shadow-2xs"
+                          : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      {tabItem.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Messenger Filter & Search Input */}
+                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                  <Select value={reimbFilterMessenger} onValueChange={setReimbFilterMessenger}>
+                    <SelectTrigger className="w-[180px] h-8 text-xs bg-background">
+                      <SelectValue placeholder="Pilih Messenger" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">Semua Messenger</SelectItem>
+                      {messengerOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <input
+                    type="text"
+                    value={reimbSearchQuery}
+                    onChange={(e) => setReimbSearchQuery(e.target.value)}
+                    placeholder="Cari ref, order, catatan..."
+                    className="h-8 px-3 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-[200px]"
+                  />
+                </div>
+              </div>
+            </Card>
+
+            {/* Reimbursement Table */}
+            <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="overflow-x-auto flex-1">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-muted/50 border-b border-border text-muted-foreground uppercase text-[10px] tracking-wider sticky top-0">
+                    <tr>
+                      <th className="py-2.5 px-3">No. Ref & Tanggal</th>
+                      <th className="py-2.5 px-3">Messenger</th>
+                      <th className="py-2.5 px-3">Order Terkait</th>
+                      <th className="py-2.5 px-3">Kategori & Keterangan</th>
+                      <th className="py-2.5 px-3 text-center">Bukti Struk</th>
+                      <th className="py-2.5 px-3 text-right">Diajukan</th>
+                      <th className="py-2.5 px-3 text-right">Disetujui</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3 text-center">Aksi Tim Finance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {filteredReimbursements.length > 0 ? (
+                      filteredReimbursements.map((r) => {
+                        const isPartial = r.approvedAmount !== undefined && r.approvedAmount < r.amount;
+                        return (
+                          <tr key={r.id} className="hover:bg-muted/30 transition-colors">
+                            {/* Ref & Tanggal */}
+                            <td className="py-3 px-3 align-top font-mono">
+                              <span className="font-bold text-foreground block">{r.id}</span>
+                              <span className="text-[11px] text-muted-foreground block">{r.date}</span>
+                            </td>
+
+                            {/* Messenger */}
+                            <td className="py-3 px-3 align-top">
+                              <span className="font-semibold text-foreground block">{r.messengerName}</span>
+                              <span className="text-[10px] text-muted-foreground block font-mono">{r.employeeId}</span>
+                            </td>
+
+                            {/* Order */}
+                            <td className="py-3 px-3 align-top">
+                              {r.orderNo ? (
+                                <Badge variant="outline" className="text-[10px] bg-muted font-mono font-semibold">
+                                  {r.orderNo}
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+
+                            {/* Kategori & Keterangan */}
+                            <td className="py-3 px-3 align-top max-w-[220px]">
+                              <Badge variant="outline" className="text-[10px] font-semibold mb-1">
+                                {r.category}
+                              </Badge>
+                              {r.note && (
+                                <p className="text-foreground/90 leading-relaxed text-[11px] line-clamp-2" title={r.note}>
+                                  {r.note}
+                                </p>
+                              )}
+                              {r.reviewNotes && (
+                                <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-1 italic line-clamp-2" title={r.reviewNotes}>
+                                  Note: {r.reviewNotes}
+                                </p>
+                              )}
+                            </td>
+
+                            {/* Bukti Struk */}
+                            <td className="py-3 px-3 align-top text-center">
+                              {r.receiptUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewReceiptDoc({ url: r.receiptUrl!, title: `Bukti ${r.id} (${r.messengerName})` })}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 text-[11px] font-semibold transition-colors"
+                                  title="Lihat foto kuitansi/struk"
+                                >
+                                  <ImageIcon className="w-3.5 h-3.5" />
+                                  Foto
+                                </button>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">—</span>
+                              )}
+                            </td>
+
+                            {/* Nominal Diajukan */}
+                            <td className="py-3 px-3 align-top text-right font-medium text-foreground">
+                              {formatRupiah(r.amount)}
+                            </td>
+
+                            {/* Nominal Disetujui */}
+                            <td className="py-3 px-3 align-top text-right">
+                              {r.approvedAmount !== undefined && r.status !== "Diajukan" ? (
+                                <div>
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400 block">
+                                    {formatRupiah(r.approvedAmount)}
+                                  </span>
+                                  {isPartial && (
+                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 block font-semibold">
+                                      Parsial
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-3 px-3 align-top text-center">
+                              {r.status === "Diajukan" && (
+                                <Badge variant="outline" className="text-[10px] font-semibold bg-blue-500/10 text-blue-600 border-blue-200">
+                                  Diajukan
+                                </Badge>
+                              )}
+                              {r.status === "Sedang Ditinjau" && (
+                                <Badge variant="outline" className="text-[10px] font-semibold bg-amber-500/10 text-amber-600 border-amber-200">
+                                  Ditinjau
+                                </Badge>
+                              )}
+                              {r.status === "Disetujui" && (
+                                <Badge variant="outline" className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border-emerald-200">
+                                  Disetujui
+                                </Badge>
+                              )}
+                              {r.status === "Dibayar" && (
+                                <Badge variant="outline" className="text-[10px] font-semibold bg-purple-500/10 text-purple-600 border-purple-200">
+                                  Dibayar
+                                </Badge>
+                              )}
+                              {r.status === "Ditolak" && (
+                                <Badge variant="outline" className="text-[10px] font-semibold bg-rose-500/10 text-rose-600 border-rose-200">
+                                  Ditolak
+                                </Badge>
+                              )}
+                            </td>
+
+                            {/* Aksi */}
+                            <td className="py-3 px-3 align-top text-center">
+                              {(r.status === "Diajukan" || r.status === "Sedang Ditinjau") && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleOpenReview(r)}
+                                  className="h-7 px-2.5 text-xs font-semibold bg-primary text-primary-foreground shadow-2xs hover:bg-primary/90"
+                                >
+                                  Tinjau & Setujui
+                                </Button>
+                              )}
+
+                              {r.status === "Disetujui" && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleOpenPayout(r)}
+                                  className="h-7 px-2.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs gap-1"
+                                >
+                                  <Wallet className="w-3 h-3" /> Cairkan Kas
+                                </Button>
+                              )}
+
+                              {r.status === "Dibayar" && (
+                                <div className="text-[11px] text-muted-foreground flex flex-col items-center">
+                                  <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Cair
+                                  </span>
+                                  {r.kasMessengerId && (
+                                    <span className="text-[10px] font-mono text-muted-foreground">
+                                      Kas #{r.kasMessengerId}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              {r.status === "Ditolak" && (
+                                <span className="text-[11px] text-rose-600 font-medium">Ditolak</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={9} className="py-8 text-center text-muted-foreground">
+                          Tidak ada data pengajuan reimbursement yang sesuai filter.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* DIALOG 1: TINJAU & REVIEW PENGAJUAN BIAYA */}
+        <AlertDialog open={!!reviewTarget} onOpenChange={(open) => { if (!open && !isSubmittingReview) setReviewTarget(null); }}>
+          <AlertDialogContent className="border-border sm:max-w-md bg-card">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                <Receipt className="w-4 h-4 text-emerald-600" />
+                Tinjau Pengajuan Biaya: {reviewTarget?.id}
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground pt-1 space-y-3">
+                <p>
+                  Tentukan nominal yang disetujui untuk penggantian biaya operasional messenger. Nominal diajukan tidak akan hilang dan tercatat permanen.
+                </p>
+
+                {/* Information Card */}
+                <div className="p-3 rounded-lg border border-border bg-muted/30 space-y-2 text-left">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Nama Messenger</span>
+                      <span className="font-semibold text-foreground">{reviewTarget?.messengerName}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Tanggal Pengeluaran</span>
+                      <span className="font-medium text-foreground">{reviewTarget?.date}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Kategori</span>
+                      <span className="font-medium text-foreground">{reviewTarget?.category}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Nomor Order</span>
+                      <span className="font-mono text-foreground">{reviewTarget?.orderNo || "Tidak terikat order"}</span>
+                    </div>
+                  </div>
+
+                  {reviewTarget?.note && (
+                    <div className="pt-2 border-t border-border/50 text-xs">
+                      <span className="text-muted-foreground block text-[11px]">Keterangan Messenger</span>
+                      <p className="text-foreground italic">{reviewTarget.note}</p>
+                    </div>
+                  )}
+
+                  {reviewTarget?.receiptUrl && (
+                    <div className="pt-2 border-t border-border/50 flex items-center justify-between">
+                      <span className="text-xs font-medium text-foreground">Bukti Foto Struk / Kuitansi:</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        type="button"
+                        className="h-7 text-xs text-emerald-600 gap-1"
+                        onClick={() => setPreviewReceiptDoc({ url: reviewTarget.receiptUrl!, title: `Struk ${reviewTarget.id}` })}
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Lihat Foto Kuitansi
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Form Controls */}
+                <div className="space-y-3 pt-2 text-left">
+                  <div>
+                    <Label className="text-xs font-semibold text-foreground block mb-1">
+                      Nominal Diajukan Messenger
+                    </Label>
+                    <Input
+                      type="text"
+                      disabled
+                      value={formatRupiah(reviewTarget?.amount || 0)}
+                      className="bg-muted text-foreground font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-semibold text-foreground block mb-1">
+                      Nominal Disetujui Admin (Rp) *
+                    </Label>
+                    <Input
+                      type="number"
+                      value={reviewApprovedAmount}
+                      onChange={(e) => setReviewApprovedAmount(e.target.value)}
+                      placeholder="Masukkan nominal persetujuan"
+                      className="text-sm font-bold text-foreground"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Default sesuai pengajuan ({formatRupiah(reviewTarget?.amount || 0)}). Dapat disesuaikan lebih kecil jika disetujui sebagian.
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-semibold text-foreground block mb-1">
+                      Catatan / Alasan Tim Finance {parseInt(reviewApprovedAmount || "0", 10) < (reviewTarget?.amount || 0) ? "(Wajib)" : "(Opsional)"}
+                    </Label>
+                    <Textarea
+                      rows={2}
+                      value={reviewNotes}
+                      onChange={(e) => setReviewNotes(e.target.value)}
+                      placeholder="Misal: Biaya bensin disetujui Rp 50.000 sesuai struk resmi SPBU"
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="mt-4 gap-2">
+              <AlertDialogCancel disabled={isSubmittingReview} className="h-9 text-xs px-3 font-medium">
+                Batal
+              </AlertDialogCancel>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSubmittingReview}
+                onClick={() => handleConfirmReview("Ditolak")}
+                className="h-9 text-xs px-3 font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+              >
+                Tolak Pengajuan
+              </Button>
+              <Button
+                type="button"
+                disabled={isSubmittingReview}
+                onClick={() => handleConfirmReview("Disetujui")}
+                className="h-9 text-xs px-4 font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                {isSubmittingReview ? "Menyimpan..." : "Setujui Pengajuan"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* DIALOG 2: KONFIRMASI PENCAIRAN REIMBURSEMENT KE KAS MESSENGER */}
+        <AlertDialog open={!!payoutTarget} onOpenChange={(open) => { if (!open && !isSubmittingPayout) setPayoutTarget(null); }}>
+          <AlertDialogContent className="border-border sm:max-w-md bg-card">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                <Wallet className="w-4 h-4 text-emerald-600" />
+                Konfirmasi Pencairan Kas Messenger
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground pt-1 space-y-3">
+                <p>
+                  Pengeluaran kas sebesar nominal yang telah disetujui akan dibukukan secara otomatis ke dalam Buku Kas Messenger.
+                </p>
+
+                <div className="p-3 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40 bg-emerald-50/20 dark:bg-emerald-950/15 space-y-2 text-left">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">ID Pengajuan:</span>
+                    <span className="font-mono font-bold text-foreground">{payoutTarget?.id}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">Penerima (Messenger):</span>
+                    <span className="font-semibold text-foreground">{payoutTarget?.messengerName}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">Kategori Biaya:</span>
+                    <span className="font-medium text-foreground">{payoutTarget?.category}</span>
+                  </div>
+                  {payoutTarget?.orderNo && (
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-muted-foreground">Order Terkait:</span>
+                      <span className="font-mono text-foreground">{payoutTarget.orderNo}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-sm pt-2 border-t border-emerald-200/60 dark:border-emerald-900/40 font-bold">
+                    <span className="text-foreground">Nominal Pencairan:</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      {formatRupiah(payoutTarget?.approvedAmount || payoutTarget?.amount || 0)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 pt-1 text-left">
+                  <div>
+                    <Label className="text-xs font-semibold text-foreground block mb-1">
+                      Kanal Pembukuan
+                    </Label>
+                    <Input
+                      type="text"
+                      disabled
+                      value="Kas Messenger (Pengeluaran Operasional Kurir)"
+                      className="bg-muted text-xs font-medium text-foreground"
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-semibold text-foreground block mb-1">
+                      Metode Pembayaran
+                    </Label>
+                    <Select value={payoutMethod} onValueChange={setPayoutMethod}>
+                      <SelectTrigger className="w-full h-9 text-xs bg-background">
+                        <SelectValue placeholder="Pilih Metode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Kas Messenger (Tunai)">Kas Messenger (Tunai Lapangan)</SelectItem>
+                        <SelectItem value="Transfer BCA">Transfer Rekening BCA</SelectItem>
+                        <SelectItem value="Transfer Bank Lain">Transfer Bank Lain</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="mt-4 gap-2">
+              <AlertDialogCancel disabled={isSubmittingPayout} className="h-9 text-xs px-4 font-medium">
+                Batal
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isSubmittingPayout}
+                onClick={handleConfirmPayout}
+                className="h-9 text-xs px-4 font-semibold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+              >
+                {isSubmittingPayout ? "Membukukan..." : "Cairkan & Catat ke Kas"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* DIALOG 3: PREVIEW FOTO STRUK / KUITANSI */}
+        <DocumentPreviewModal
+          isOpen={!!previewReceiptDoc}
+          onClose={() => setPreviewReceiptDoc(null)}
+          title={previewReceiptDoc?.title || "Pratinjau Kuitansi"}
+          documentName="Foto Struk / Kuitansi Pengeluaran"
+          rawUrl={previewReceiptDoc?.url}
+          fileType="image"
+        />
       </div>
     );
   }
@@ -398,12 +1756,12 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   if (tab === "kas-kantor") {
     const kasKantorFields: FieldConfig[] = [
       { key: "tanggal", label: "Tanggal", type: "date" },
-      { key: "status", label: "Tipe arus kas", type: "select", options: ["Debit", "Kredit"] },
+      { key: "status", label: "Tipe arus kas", type: "select", options: ["Debit (Masuk)", "Kredit (Keluar)"] },
+      { key: "kategori", label: "Kategori Kas", type: "select", options: STANDARD_EXPENSE_CATEGORIES },
+      { key: "nominal", label: "Nominal transaksi", type: "number", placeholder: "0" },
       { key: "keterangan", label: "Keterangan", type: "text", placeholder: "Contoh: Pembayaran invoice atau biaya sewa" },
       { key: "penanggungJawab", label: "Penanggung jawab", type: "select", options: responsibleOptions, placeholder: "Pilih penanggung jawab" },
-      { key: "debit", label: "Debit (masuk)", type: "number", placeholder: "0" },
-      { key: "kredit", label: "Kredit (keluar)", type: "number", placeholder: "0" },
-      { key: "total", label: "Saldo akhir", type: "number", placeholder: "0" },
+      { key: "orderNo", label: "Nomor Order Terkait (Opsional)", type: "select", options: availableOrderOptions, placeholder: "Pilih order terkait jika ada" },
     ];
 
     const kasKantorColumns: Column[] = [
@@ -414,6 +1772,14 @@ export function FinanceContent({ tab }: FinanceContentProps) {
         filterable: true, 
         filterType: "select", 
         filterOptions: ["Debit", "Kredit"] 
+      },
+      { 
+        key: "kategori", 
+        label: "Kategori", 
+        filterable: true, 
+        filterType: "select", 
+        filterOptions: ["Semua", ...STANDARD_EXPENSE_CATEGORIES],
+        render: (val: any) => val || "Operasional"
       },
       { key: "keterangan", label: "Keterangan" },
       { 
@@ -435,14 +1801,18 @@ export function FinanceContent({ tab }: FinanceContentProps) {
 
     const handleAddSubmit = (rows: any[]) => {
       rows.forEach((row) => {
+        const isDebit = String(row.status || "").toLowerCase().includes("debit") || row.status === "Pemasukan";
+        const nominal = parseInt(row.nominal) || parseInt(row.debit) || parseInt(row.kredit) || 0;
         addKasKantor({
           tanggal: row.tanggal || new Date().toLocaleDateString("id-ID"),
-          status: row.status || "Debit",
+          status: isDebit ? "Debit" : "Kredit",
+          kategori: row.kategori || STANDARD_EXPENSE_CATEGORIES[0],
           keterangan: row.keterangan || "",
           penanggungJawab: row.penanggungJawab || undefined,
-          debit: parseInt(row.debit) || 0,
-          kredit: parseInt(row.kredit) || 0,
-          total: parseInt(row.total) || undefined,
+          debit: isDebit ? nominal : 0,
+          kredit: !isDebit ? nominal : 0,
+          orderNo: extractOrderNo(row.orderNo),
+          total: undefined, // Dihitung otomatis oleh saldo berjalan sistem
         });
       });
       setIsAdding(false);
@@ -467,10 +1837,6 @@ export function FinanceContent({ tab }: FinanceContentProps) {
 
         {/* Level 3: Table */}
         <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-          <div className="mb-4 shrink-0">
-            <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Buku kas besar kantor</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Jurnal pencatatan mutasi kas bank dan kas tunai perusahaan</p>
-          </div>
           <EnhancedTableWithDialogs
             columns={kasKantorColumns}
             data={kasKantorData}
@@ -541,13 +1907,23 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   if (tab === "pengeluaran") {
     const pengeluaranFields: FieldConfig[] = [
       { key: "tanggal", label: "Tanggal pengeluaran", type: "date" },
+      { key: "kategori", label: "Kategori Pengeluaran", type: "select", options: STANDARD_EXPENSE_CATEGORIES },
       { key: "keterangan", label: "Keterangan biaya", type: "text", placeholder: "Contoh: Listrik bulanan, ATK kantor" },
       { key: "penanggungJawab", label: "Penanggung jawab", type: "select", options: responsibleOptions, placeholder: "Pilih penanggung jawab" },
+      { key: "orderNo", label: "Nomor Order Terkait (Opsional)", type: "select", options: availableOrderOptions, placeholder: "Pilih order jika terkait berkas" },
       { key: "nominal", label: "Nominal pengeluaran", type: "number", placeholder: "0" },
     ];
 
     const pengeluaranColumns: Column[] = [
       { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" },
+      { 
+        key: "kategori", 
+        label: "Kategori", 
+        filterable: true, 
+        filterType: "select", 
+        filterOptions: ["Semua", ...STANDARD_EXPENSE_CATEGORIES],
+        render: (val: any) => val || "Operasional Kantor & Utilitas"
+      },
       { key: "keterangan", label: "Keterangan pengeluaran", filterable: true, filterType: "text" },
       { 
         key: "penanggungJawab", 
@@ -566,9 +1942,11 @@ export function FinanceContent({ tab }: FinanceContentProps) {
       rows.forEach((row) => {
         addPengeluaran({
           tanggal: row.tanggal || new Date().toLocaleDateString("id-ID"),
+          kategori: row.kategori || STANDARD_EXPENSE_CATEGORIES[0],
           keterangan: row.keterangan || "",
           penanggungJawab: row.penanggungJawab || undefined,
           nominal: parseInt(row.nominal) || 0,
+          orderNo: extractOrderNo(row.orderNo),
         });
       });
       setIsAdding(false);
@@ -593,10 +1971,6 @@ export function FinanceContent({ tab }: FinanceContentProps) {
 
         {/* Level 3: Table */}
         <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-          <div className="mb-4 shrink-0">
-            <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Daftar beban operasional</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Pencatatan rincian biaya tetap dan variabel operasional kantor</p>
-          </div>
           <EnhancedTableWithDialogs
             columns={pengeluaranColumns}
             data={pengeluaranData}
@@ -659,443 +2033,41 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   }
 
   // ==========================================
-  // 6. SUB-TAB: TAGIHAN
+  // 6. SUB-TAB: TAGIHAN (REMOVED & REDIRECTED TO BELUM & KURANG BAYAR)
   // ==========================================
   if (tab === "tagihan") {
-    const tagihanFields: FieldConfig[] = [
-      { key: "tanggal", label: "Tanggal tagihan", type: "date" },
-      { key: "customer", label: "Nama Customer", type: "text", placeholder: "Nama customer atau badan usaha" },
-      { key: "nopol", label: "Nomor Polisi", type: "text", placeholder: "Contoh: B 1234 ABC" },
-      { 
-        key: "jenisLayanan", 
-        label: "Jenis Pengurusan", 
-        type: "select", 
-        options: ["Mutasi LD", "Mutasi AS", "BBN 1", "BBN 2", "Pajak Tahunan", "Perpanjangan 5 Tahun", "Balik Nama", "Ganti Plat", "Duplikat STNK"] 
-      },
-      { key: "totalTagihan", label: "Total tagihan", type: "number", placeholder: "0" },
-      { key: "terbayar", label: "Terbayar", type: "number", placeholder: "0" },
-      { key: "sisa", label: "Sisa tagihan", type: "number", placeholder: "0" },
-      { key: "jatuhTempo", label: "Jatuh tempo", type: "date" },
-      { key: "status", label: "Status tagihan", type: "select", options: ["Belum Bayar", "Kurang Bayar", "Lunas"] },
-    ];
-
-    const tagihanBelumLunas = tagihanData.filter(d => d.status !== "Lunas");
-    const tagihanLunas = tagihanData.filter(d => d.status === "Lunas");
-
-    const totalPiutang = tagihanBelumLunas.reduce((acc, item) => acc + item.sisa, 0);
-    const totalTerbayar = tagihanLunas.reduce((acc, item) => acc + item.terbayar, 0);
-
-    const handleAddSubmit = (rows: any[]) => {
-      rows.forEach((row) => {
-        addInvoice({
-          tanggal: row.tanggal || new Date().toLocaleDateString("id-ID"),
-          customer: row.customer || "",
-          nopol: row.nopol || "",
-          jenisLayanan: row.jenisLayanan || "Pajak Tahunan",
-          totalTagihan: parseInt(row.totalTagihan) || 0,
-          terbayar: parseInt(row.terbayar) || 0,
-          jatuhTempo: row.jatuhTempo || new Date().toLocaleDateString("id-ID"),
-          status: row.status,
-        });
-      });
-      setIsAdding(false);
-      toast.success(`${rows.length} data tagihan berhasil ditambahkan`);
-    };
-
-    const handleHubungiWA = (item: InvoiceBillingRecord) => {
-      if (!item.phone || item.phone.trim().length < 8) {
-        toast.error(`Nomor WhatsApp untuk customer ${item.customer} tidak tersedia`);
-        return;
-      }
-      const cleanPhone = item.phone.replace(/^0/, "62").replace(/[^0-9]/g, "");
-      const msg = `Halo ${item.customer}, kami dari Biro Jasa SUN89 menginformasikan tagihan ${item.invoice} (${item.nopol} - ${item.jenisLayanan}) dengan sisa piutang sebesar ${formatRupiah(item.sisa)}. Mohon konfirmasi jadwal pelunasannya. Terima kasih.`;
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
-    };
-
-    const handleLunas = (item: InvoiceBillingRecord) => {
-      resolveInvoice(item.id);
-      toast.success(`Tagihan ${item.invoice} (${item.customer}) telah ditandai LUNAS. Penerimaan kas dicatat ke Kas Kantor.`);
-    };
-
-    const handleSelesai = (item: InvoiceBillingRecord) => {
-      completeInvoice(item.id, "Admin");
-      toast.success(`Tagihan ${item.invoice} (${item.customer}) telah SELESAI dan diarsipkan dari daftar aktif.`);
-    };
-
-    if (isAdding) {
-      return (
-        <FinanceAddPage
-          title="Tambah data tagihan"
-          description="Masukkan faktur tagihan invoice baru untuk customer atau mitra rekanan"
-          fields={tagihanFields}
-          onBack={() => setIsAdding(false)}
-          onSubmit={handleAddSubmit}
-        />
-      );
-    }
-
-    const tagihanColumns: Column[] = [
-      {
-        key: "orderNo",
-        label: "Order",
-        filterable: true,
-        filterType: "text" as const,
-        render: (_val: any, item: InvoiceBillingRecord) => (
-          <span className="font-mono text-xs font-semibold text-primary">
-            {item.orderNo || item.invoice || "-"}
-          </span>
-        ),
-      },
-      { 
-        key: "customer", 
-        label: "Nama Customer", 
-        filterable: true, 
-        filterType: "text" as const,
-        render: (value: string, item: InvoiceBillingRecord) => (
-          <div className="flex flex-col py-0.5">
-            <span className="text-foreground/90 font-medium">{formatCustomerName(value)}</span>
-            {item?.phone && (
-              <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
-                <Phone className="w-2.5 h-2.5 shrink-0 text-muted-foreground/60" />
-                {item.phone}
-              </span>
-            )}
-          </div>
-        )
-      },
-      { 
-        key: "nopol", 
-        label: "Nomor Polisi", 
-        filterable: true, 
-        filterType: "text" as const,
-        render: (value: string) => <PlateNumberBadge plate={value || "-"} />
-      },
-      { 
-        key: "totalTagihan", 
-        label: "Total Tagihan",
-        align: "right" as const,
-        render: (val: number) => (
-          <span className="font-mono tabular-nums text-xs font-medium text-foreground">
-            {formatRupiah(val)}
-          </span>
-        )
-      },
-      { 
-        key: "terbayar", 
-        label: "Terbayar",
-        align: "right" as const,
-        render: (val: number) => (
-          <span className="font-mono tabular-nums text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            {formatRupiah(val)}
-          </span>
-        )
-      },
-      { 
-        key: "sisa", 
-        label: "Sisa",
-        align: "right" as const,
-        render: (val: number) => (
-          <span className={`font-mono tabular-nums text-xs font-semibold ${val > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
-            {formatRupiah(val)}
-          </span>
-        )
-      },
-      { 
-        key: "status", 
-        label: "Status Pembayaran", 
-        filterable: true, 
-        filterType: "select" as const, 
-        filterOptions: ["Semua", "Lunas", "Kurang Bayar", "Belum Bayar"],
-        render: (value: string) => {
-          if (value === "Lunas") {
-            return (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                Lunas
-              </span>
-            );
-          }
-          if (value === "Kurang Bayar") {
-            return (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                Kurang Bayar
-              </span>
-            );
-          }
-          return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-              Belum Bayar
-            </span>
-          );
-        }
-      },
-      {
-        key: "collectionStatus",
-        label: "Status Penagihan",
-        filterable: true,
-        filterType: "select" as const,
-        filterOptions: ["Semua", "Jatuh Tempo", "Belum Jatuh Tempo", "Lunas"],
-        render: (_val: any, item: InvoiceBillingRecord) => {
-          let collState = item.collectionStatus;
-          if (item.orderNo) {
-            const ord = orderStore.getOrderByNo(item.orderNo);
-            if (ord) {
-              if (item.status === "Lunas" || (ord.payment?.kurang || 0) === 0) {
-                collState = "LUNAS";
-              } else if (ord.currentStep >= 8 || ord.currentStageName === "Dokumen Telah Diterima" || ord.currentStageName === "Selesai (Arsip)") {
-                collState = "JATUH_TEMPO";
-              } else {
-                collState = "BELUM_JATUH_TEMPO";
-              }
-            }
-          }
-          if (!collState) {
-            collState = item.status === "Lunas" || item.sisa === 0 ? "LUNAS" : "JATUH_TEMPO";
-          }
-
-          if (collState === "LUNAS") {
-            return (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Lunas
-              </span>
-            );
-          }
-          if (collState === "JATUH_TEMPO") {
-            return (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                Jatuh Tempo
-              </span>
-            );
-          }
-          return (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-              Belum Jatuh Tempo
-            </span>
-          );
-        }
-      },
-      {
-        key: "kontak",
-        label: "Kontak",
-        render: (_val: any, item: InvoiceBillingRecord) => {
-          const hasPhone = Boolean(item.phone && item.phone.trim().length >= 8);
-          if (!hasPhone) {
-            return (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled
-                className="h-6 px-2 text-[11px] gap-1 opacity-50 cursor-not-allowed border-border text-muted-foreground"
-                title="Nomor telepon WhatsApp tidak tersedia"
-              >
-                <Phone className="w-3 h-3 text-muted-foreground/60" />
-                <span>Tidak Ada Kontak</span>
-              </Button>
-            );
-          }
-          return (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[11px] gap-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleHubungiWA(item);
-              }}
-              title={`Hubungi WA (${item.phone})`}
-            >
-              <MessageSquare className="w-3 h-3" />
-              <span>Hubungi WA</span>
-            </Button>
-          );
-        }
-      },
-      {
-        key: "tindakan",
-        label: "Tindakan",
-        render: (_val: any, item: InvoiceBillingRecord) => {
-          const isLunas = item.status === "Lunas" || item.sisa === 0;
-
-          if (isLunas) {
-            return (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 px-2 text-[11px] gap-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-emerald-500/40 dark:border-emerald-600/40 font-medium"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleSelesai(item);
-                }}
-                title="Selesaikan & arsipkan tagihan dari daftar aktif"
-              >
-                <CheckCircle className="w-3 h-3 text-emerald-500" />
-                <span>Selesai</span>
-              </Button>
-            );
-          }
-
-          return (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[11px] gap-1 text-primary hover:text-primary hover:bg-primary/5 border-primary/40 font-medium"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleLunas(item);
-              }}
-              title="Lunaskan tagihan melalui kas kantor"
-            >
-              <CheckCircle className="w-3 h-3 text-primary" />
-              <span>Lunas</span>
-            </Button>
-          );
-        }
-      },
-    ];
-
-    return (
-      <div className="flex-1 flex flex-col min-h-0 space-y-4">
-        {renderSubTabHeader("Tagihan", "Monitoring status pelunasan dan piutang tagihan berkas")}
-
-        {/* Level 3: Merged Single Table (Requirement 8) */}
-        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-          <div className="mb-4 shrink-0">
-            <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Daftar tagihan</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Monitoring status pelunasan, sisa piutang, dan invoice tagihan berkas</p>
-          </div>
-          <EnhancedTableWithDialogs
-            columns={tagihanColumns}
-            data={tagihanData}
-            subTabTitle="Tagihan"
-            onAdd={() => setIsAdding(true)}
-            onView={(item) => setViewingItem({ item, subTabTitle: "Tagihan", columns: tagihanColumns })}
-            onEdit={(item, updated) => updateInvoice(item.id, updated)}
-            hideDeleteButton={true}
-            searchPlaceholder="Cari nama customer, nomor polisi, atau jenis pengurusan..."
-            editFields={tagihanFields}
-          />
-        </Card>
-
-        {/* Level 3: Summary Cards (Requirement 8: MOVED BELOW TABLE) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 shrink-0">
-          <Card className="p-4 border border-border bg-card shadow-2xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Total piutang belum lunas</p>
-                <h3 className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
-                  {formatRupiah(totalPiutang)}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{tagihanBelumLunas.length} tagihan menunggu pelunasan</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-500">
-                <AlertCircle className="w-5 h-5" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4 border border-border bg-card shadow-2xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Total tagihan terbayar lunas</p>
-                <h3 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
-                  {formatRupiah(totalTerbayar)}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{tagihanLunas.length} tagihan telah lunas</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                <FileCheck className="w-5 h-5" />
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-    );
+    return <Navigate to="/finance/belum-bayar" replace />;
   }
 
   // ==========================================
   // 7. SUB-TAB: LABA RUGI
   // ==========================================
   if (tab === "laba-rugi") {
-    // Total calculation preserving exact business logic
-    const totalPemasukan = profitData.reduce((acc, item) => {
-      return acc + (item.uangMasuk > 0 ? item.uangMasuk : 0);
-    }, 0);
-    
-    const pengeluaranKantor = pengeluaranData.reduce((acc, item) => acc + item.nominal, 0);
-    const pengeluaranMessenger = kasMessengerData.reduce((acc, item) => acc + item.out, 0);
-    const pengeluaranKasKantor = kasKantorData.reduce((acc, item) => acc + item.kredit, 0);
-    const biayaSamsat = profitData.reduce((acc, item) => acc + (item.biayaSamsat > 0 ? item.biayaSamsat : 0), 0);
-    
-    const totalPengeluaran = pengeluaranKantor + pengeluaranMessenger + pengeluaranKasKantor + biayaSamsat;
-    const labaRugiBersih = totalPemasukan - totalPengeluaran;
+    // Canonical Laba Rugi Calculation (P1 Single Source of Truth)
+    const canonicalSummary = getCanonicalLabaRugi(filterPeriod);
+    const {
+      totalPemasukan,
+      totalPengeluaran,
+      labaRugiBersih,
+      totalBiayaSamsat,
+      totalPendapatanJasa,
+      pengeluaranKantor,
+      pengeluaranMessenger,
+      combinedTableData,
+      chartData: canonicalChartData,
+      tablePemasukanCount,
+    } = canonicalSummary;
 
-    // Prepared data for transaction breakdown table
-    const tablePemasukan = profitData
-      .filter(item => item.uangMasuk > 0)
-      .map(item => ({
-        tanggal: item.tanggal,
-        kategori: "Pemasukan",
-        keterangan: `${item.pengurusan} - ${item.nopol} (${item.customer})`,
-        invoice: item.invoice,
-        nominal: item.uangMasuk,
-        type: "in" as const
-      }));
-    
-    const tablePengeluaranKantor = pengeluaranData.map(item => ({
-      tanggal: item.tanggal,
-      kategori: "Pengeluaran kantor",
-      keterangan: item.keterangan,
-      invoice: "-",
-      nominal: item.nominal,
-      type: "out" as const
-    }));
-    
-    const tablePengeluaranMessenger = kasMessengerData
-      .filter(item => item.out > 0)
-      .map(item => ({
-        tanggal: item.tanggal,
-        kategori: `Pengeluaran messenger - ${item.jenis}`,
-        keterangan: `${item.keterangan} (${item.messenger})`,
-        invoice: "-",
-        nominal: item.out,
-        type: "out" as const
-      }));
-    
-    const tablePengeluaranKasKantor = kasKantorData
-      .filter(item => item.kredit > 0)
-      .map(item => ({
-        tanggal: item.tanggal,
-        kategori: "Pengeluaran kas kantor",
-        keterangan: item.keterangan,
-        invoice: "-",
-        nominal: item.kredit,
-        type: "out" as const
-      }));
-
-    const tableBiayaSamsat = profitData
-      .filter(item => item.biayaSamsat > 0)
-      .map(item => ({
-        tanggal: item.tanggal,
-        kategori: "Biaya samsat",
-        keterangan: `${item.pengurusan} - ${item.nopol}`,
-        invoice: item.invoice,
-        nominal: item.biayaSamsat,
-        type: "out" as const
-      }));
-    
-    const combinedData = [
-      ...tablePemasukan,
-      ...tablePengeluaranKantor,
-      ...tablePengeluaranMessenger,
-      ...tablePengeluaranKasKantor,
-      ...tableBiayaSamsat
-    ];
+    const chartData = canonicalChartData && canonicalChartData.length > 0 
+      ? canonicalChartData 
+      : [
+          { bulan: "Jan", pendapatan: 0, pengeluaran: 0, laba: 0 },
+          { bulan: "Feb", pendapatan: 0, pengeluaran: 0, laba: 0 },
+          { bulan: "Mar", pendapatan: 0, pengeluaran: 0, laba: 0 },
+          { bulan: "Apr", pendapatan: 0, pengeluaran: 0, laba: 0 },
+          { bulan: "Mei", pendapatan: 0, pengeluaran: 0, laba: 0 },
+          { bulan: "Jun", pendapatan: 0, pengeluaran: 0, laba: 0 },
+        ];
 
     // Modern Chart Tooltip formatter
     const CustomChartTooltip = ({ active, payload, label }: any) => {
@@ -1155,27 +2127,20 @@ export function FinanceContent({ tab }: FinanceContentProps) {
 
     return (
       <div className="flex-1 flex flex-col min-h-0 space-y-4">
-        {/* Breadcrumb & Period Selector (Requirements 1, 2, 3: Header is in App.tsx) */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2">
-          <nav className="text-xs text-muted-foreground flex items-center gap-1.5" aria-label="Breadcrumb">
-            <span>Finance</span>
-            <span>/</span>
-            <span className="text-foreground font-medium">Laba Rugi</span>
-          </nav>
-
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <Select value={filterPeriod} onValueChange={setFilterPeriod}>
-              <SelectTrigger className="w-[130px] bg-background border-border h-8 text-xs font-normal">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="daily" className="text-xs">Harian</SelectItem>
-                <SelectItem value="weekly" className="text-xs">Mingguan</SelectItem>
-                <SelectItem value="monthly" className="text-xs">Bulanan</SelectItem>
-                <SelectItem value="yearly" className="text-xs">Tahunan</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        {/* Period Selector (Global breadcrumb is rendered in App.tsx shell) */}
+        <div className="flex items-center justify-end gap-2 pb-1">
+          <Select value={filterPeriod} onValueChange={setFilterPeriod}>
+            <SelectTrigger className="w-[140px] bg-background border-border h-8 text-xs font-normal">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">Semua Periode</SelectItem>
+              <SelectItem value="daily" className="text-xs">Harian</SelectItem>
+              <SelectItem value="weekly" className="text-xs">Mingguan</SelectItem>
+              <SelectItem value="monthly" className="text-xs">Bulanan</SelectItem>
+              <SelectItem value="yearly" className="text-xs">Tahunan</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Level 3: Modern Chart (Requirement 8) */}
@@ -1187,7 +2152,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
           
           <div className="h-[340px] w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={labaRugiData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }}>
+              <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
                 <XAxis 
                   dataKey="bulan" 
@@ -1199,7 +2164,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
                   tickLine={false} 
                   axisLine={false} 
                   fontSize={11} 
-                  tickFormatter={(val) => `${val / 1000000} jt`}
+                  tickFormatter={(val) => `${((Number(val) || 0) / 1000000).toLocaleString("id-ID")} jt`}
                 />
                 <Tooltip content={<CustomChartTooltip />} />
                 <Legend 
@@ -1232,13 +2197,9 @@ export function FinanceContent({ tab }: FinanceContentProps) {
 
         {/* Level 3: Table - Detail Transaksi Pemasukan & Pengeluaran */}
         <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-          <div className="mb-4 shrink-0">
-            <h3 className="text-base md:text-[17px] font-semibold tracking-tight text-foreground">Rincian mutasi transaksi kas</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Daftar gabungan pos arus kas masuk dan keluar bisnis</p>
-          </div>
           <EnhancedTableWithDialogs
             columns={labaRugiColumns}
-            data={combinedData.map((item, idx) => ({ id: idx + 1, ...item }))}
+            data={combinedTableData}
             subTabTitle="Laba Rugi"
             onView={(item) => setViewingItem({ item, subTabTitle: "Laba rugi", columns: labaRugiColumns })}
             searchPlaceholder="Cari tanggal, kategori, invoice, keterangan..."
@@ -1257,7 +2218,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
                 <h3 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
                   {formatRupiah(totalPemasukan)}
                 </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{tablePemasukan.length} transaksi pemasukan</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{tablePemasukanCount} transaksi pemasukan</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
                 <TrendingUp className="w-5 h-5" />
@@ -1272,7 +2233,7 @@ export function FinanceContent({ tab }: FinanceContentProps) {
                 <h3 className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
                   {formatRupiah(totalPengeluaran)}
                 </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Operasional, kas & samsat</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Operasional, messenger & samsat</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-500">
                 <TrendingDown className="w-5 h-5" />
@@ -1307,8 +2268,14 @@ export function FinanceContent({ tab }: FinanceContentProps) {
                   {formatRupiah(totalPemasukan)}
                 </span>
               </div>
+              <div className="flex justify-between items-center pb-2 border-b border-border/50">
+                <span className="text-muted-foreground">Pendapatan jasa usaha biro</span>
+                <span className="font-mono tabular-nums font-semibold text-foreground">
+                  {formatRupiah(totalPendapatanJasa)}
+                </span>
+              </div>
               <div className="flex justify-between items-center pt-1">
-                <span className="font-medium text-foreground">Total pendapatan kotor</span>
+                <span className="font-medium text-foreground">Total penerimaan kotor</span>
                 <span className="font-mono tabular-nums font-bold text-foreground">
                   {formatRupiah(totalPemasukan)}
                 </span>
@@ -1328,12 +2295,8 @@ export function FinanceContent({ tab }: FinanceContentProps) {
                 <span className="font-mono tabular-nums text-rose-500">{formatRupiah(pengeluaranMessenger)}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Pengeluaran kas kantor</span>
-                <span className="font-mono tabular-nums text-rose-500">{formatRupiah(pengeluaranKasKantor)}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Biaya samsat resmi</span>
-                <span className="font-mono tabular-nums text-rose-500">{formatRupiah(biayaSamsat)}</span>
+                <span className="text-muted-foreground">Biaya samsat resmi (dana titipan)</span>
+                <span className="font-mono tabular-nums text-rose-500">{formatRupiah(totalBiayaSamsat)}</span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-border/60">
                 <span className="font-medium text-foreground">Total beban pengeluaran</span>
@@ -1352,103 +2315,1641 @@ export function FinanceContent({ tab }: FinanceContentProps) {
   // DIRECT FALLBACK SUB-TABS: BELUM BAYAR, PROFIT PENDING, CASHBACK PENDING
   // ==========================================
   if (tab === "belum-bayar") {
-    const belumBayarColumns = [
-      { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" as const },
-      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" as const },
-      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" as const },
-      { key: "namaBerkas", label: "Nama berkas" },
+    const totalPiutangMurni = belumBayarData.filter((d: any) => (d.status || d.statusPembayaran) === "Belum Bayar").reduce((acc: number, item: any) => acc + (item.sisaTagihan ?? item.kekurangan ?? item.sisa ?? 0), 0);
+    const totalPiutangKurang = belumBayarData.filter((d: any) => (d.status || d.statusPembayaran) === "Kurang Bayar").reduce((acc: number, item: any) => acc + (item.sisaTagihan ?? item.kekurangan ?? item.sisa ?? 0), 0);
+    const totalSemuaPiutang = totalPiutangMurni + totalPiutangKurang;
+
+    const belumBayarColumns: Column[] = [
+      { 
+        key: "tanggalMasukBerkas", 
+        label: "Tanggal Masuk Berkas", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (val: string, item: any) => (
+          <span className="text-xs text-foreground font-medium">
+            {val || item.tanggal || "-"}
+          </span>
+        )
+      },
+      {
+        key: "orderNo",
+        label: "Nomor Order",
+        filterable: true,
+        filterType: "text" as const,
+        render: (_val: any, item: any) => (
+          <span className="font-mono text-xs font-semibold text-primary">
+            {item.orderNo || item.invoice || "-"}
+          </span>
+        ),
+      },
+      { 
+        key: "nopol", 
+        label: "Nomor Polisi", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (value: string) => <PlateNumberBadge plate={value || "-"} />
+      },
+      { 
+        key: "customer", 
+        label: "Nama Customer", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (value: string) => <span className="font-medium text-foreground">{formatCustomerName(value)}</span>
+      },
+      {
+        key: "phone",
+        label: "Nomor Telepon/WhatsApp",
+        render: (_val: any, item: any) => {
+          const phone = item.phone || item.nomorHp || item.noHp || "";
+          const hasPhone = phone && phone.replace(/[^0-9]/g, "").length >= 8;
+          if (!hasPhone) {
+            return <span className="text-muted-foreground text-xs italic">-</span>;
+          }
+          const cleanPhone = phone.replace(/[^0-9]/g, "");
+          const waPhone = cleanPhone.startsWith("0") ? `62${cleanPhone.slice(1)}` : cleanPhone;
+          const sisa = formatRupiah(item.sisaTagihan ?? item.kekurangan ?? item.sisa ?? 0);
+          const textMsg = encodeURIComponent(
+            `Halo ${item.customer}, kami dari Biro Jasa SUN89 menginformasikan tagihan pengurusan ${item.pengurusan || item.jenisLayanan} (No. Polisi: ${item.nopol || "-"}, Order: ${item.orderNo || item.invoice || "-"}) memiliki sisa tagihan sebesar ${sisa}. Mohon konfirmasi jadwal pelunasan. Terima kasih.`
+          );
+          return (
+            <div className="flex items-center gap-1.5 py-0.5">
+              <span className="text-xs font-mono text-muted-foreground">{phone}</span>
+              <a
+                href={`https://wa.me/${waPhone}?text=${textMsg}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center p-1 rounded text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+                title={`Hubungi WA (${phone})`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+              </a>
+            </div>
+          );
+        },
+      },
       { key: "pengurusan", label: "Jenis Pengurusan" },
-      { key: "uangMasuk", label: "Uang masuk" },
-      { key: "biayaSamsat", label: "Biaya samsat" },
-      { key: "profit", label: "Profit" },
-      { key: "kekurangan", label: "Kekurangan" },
-      { key: "status", label: "Status", filterable: true, filterType: "select" as const, filterOptions: ["Belum Bayar", "Kurang Bayar"] },
-      { key: "invoice", label: "Invoice" },
+      { 
+        key: "totalTagihan", 
+        label: "Total Tagihan",
+        align: "right" as const,
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs font-medium text-foreground">
+            {formatRupiah(val || 0)}
+          </span>
+        )
+      },
+      { 
+        key: "uangMasuk", 
+        label: "Uang Masuk dari Konsumen",
+        align: "right" as const,
+        render: (val: number, item: any) => (
+          <span className="font-mono tabular-nums text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            {formatRupiah(val ?? item.terbayar ?? item.dibayar ?? 0)}
+          </span>
+        )
+      },
+      { 
+        key: "sisaTagihan", 
+        label: "Sisa Tagihan",
+        align: "right" as const,
+        render: (val: number, item: any) => (
+          <span className="font-mono tabular-nums text-xs font-bold text-rose-600 dark:text-rose-400">
+            {formatRupiah(val ?? item.kekurangan ?? item.sisa ?? 0)}
+          </span>
+        )
+      },
+      { 
+        key: "status", 
+        label: "Status Pembayaran", 
+        filterable: true, 
+        filterType: "select" as const, 
+        filterOptions: ["Belum Bayar", "Kurang Bayar"],
+        render: (value: string, item: any) => {
+          const st = value || item.statusPembayaran || "Belum Bayar";
+          return (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
+              st === "Kurang Bayar" 
+                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" 
+                : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20"
+            }`}>
+              {st}
+            </span>
+          );
+        }
+      },
+      { 
+        key: "statusPengerjaan", 
+        label: "Status Pengerjaan",
+        render: (val: string, item: any) => (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+            {val || (item.currentStep ? `Tahap ${item.currentStep}` : "Dalam Proses")}
+          </span>
+        )
+      },
+      { 
+        key: "alasanPending", 
+        label: "Alasan / Sumber",
+        render: (val: string, item: any) => {
+          const text = val || item.alasan || item.alasan_pending || "Penetapan biaya final pengurusan";
+          return (
+            <span className="text-xs text-muted-foreground line-clamp-1" title={text}>
+              {text}
+            </span>
+          );
+        }
+      },
+      {
+        key: "aksi",
+        label: "Aksi",
+        render: (_val: any, item: any) => (
+          <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            {item.isPaymentGated ? (
+              <div 
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 cursor-not-allowed select-none whitespace-nowrap"
+                title={`Pembayaran belum dapat diproses: ${item.paymentGatingReason}`}
+              >
+                <Lock className="w-3 h-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>{!item.hasFinalCost ? "Biaya Final Belum Ada" : "Menunggu Supervisi"}</span>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] gap-1 text-primary hover:text-primary hover:bg-primary/5 border-primary/40 font-medium whitespace-nowrap"
+                onClick={() => handleOpenLunasConfirm(item)}
+                title="Catat pembayaran atau pelunasan tagihan"
+              >
+                <CheckCircle className="w-3 h-3 text-primary" />
+                <span>Bayar / Lunasi</span>
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted"
+              onClick={() => setViewingItem({ item, subTabTitle: "Belum & Kurang Bayar", columns: belumBayarColumns })}
+              title="Lihat rincian lengkap transaksi"
+            >
+              <Eye className="w-3 h-3" />
+              <span>Detail</span>
+            </Button>
+          </div>
+        )
+      }
     ];
 
     return (
-      <div className="space-y-6">
-        {renderSubTabHeader("Belum & kurang bayar", "Monitoring transaksi customer yang belum lunas")}
-        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs">
+      <div className="flex-1 flex flex-col min-h-0 space-y-4">
+        {renderSubTabHeader("Belum & Kurang Bayar", "Daftar tagihan customer yang memiliki sisa kewajiban pembayaran")}
+
+        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
           <EnhancedTableWithDialogs
             columns={belumBayarColumns}
             data={belumBayarData}
             subTabTitle="Belum & Kurang Bayar"
             onView={(item) => setViewingItem({ item, subTabTitle: "Belum & kurang bayar", columns: belumBayarColumns })}
             onEdit={(item, updated) => updateInvoice(item.id, updated)}
-            onDelete={(item) => deleteInvoice(item.id)}
-            searchPlaceholder="Cari nama customer, nomor polisi..."
+            hideDeleteButton={true}
+            searchPlaceholder="Cari nama customer, nomor polisi, nomor order..."
             hideAddButton={true}
+            hideEditButton={true}
           />
         </Card>
+
+        {/* Ringkasan Piutang Belum & Kurang Bayar */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 shrink-0">
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Total sisa piutang belum lunas</p>
+                <h3 className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
+                  {formatRupiah(totalSemuaPiutang)}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Akumulasi kewajiban tertagih customer
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-500">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Jumlah tagihan aktif</p>
+                <h3 className="text-xl font-bold text-foreground mt-1 tabular-nums">
+                  {belumBayarData.length} tagihan
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Menunggu pelunasan sisa pembayaran
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                <Receipt className="w-5 h-5" />
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Modal Catat Pembayaran / Pelunasan Tagihan */}
+        <AlertDialog
+          open={!!lunasTargetItem}
+          onOpenChange={(open) => {
+            if (!open && !isSubmittingLunas) {
+              setLunasTargetItem(null);
+              setLunasProof(null);
+              setTargetPayments([]);
+            }
+          }}
+        >
+          <AlertDialogContent className="border-border sm:max-w-lg bg-card max-h-[90vh] overflow-y-auto">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                <CheckCircle className="w-4 h-4 text-primary" />
+                Catat Pembayaran / Pelunasan Tagihan
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground pt-1 space-y-3">
+                <p className="leading-relaxed">
+                  Catat pembayaran cicilan atau pelunasan sisa tagihan customer. Setiap mutasi kas masuk wajib diverifikasi dengan bukti transfer/setoran valid.
+                </p>
+
+                {lunasTargetItem && (
+                  <div className="space-y-3">
+                    {/* Ringkasan Tagihan */}
+                    <div className="rounded-lg border border-border/80 bg-muted/30 p-3 space-y-2 text-xs">
+                      <div className="flex justify-between items-center py-0.5 border-b border-border/40">
+                        <span className="text-muted-foreground">No. Invoice / Order:</span>
+                        <div className="flex items-center gap-2">
+                          {lunasTargetItem.invoice && (
+                            <span className="font-mono font-semibold text-foreground">{lunasTargetItem.invoice}</span>
+                          )}
+                          {lunasTargetItem.orderNo && (
+                            <span className="font-mono text-muted-foreground text-[11px]">({lunasTargetItem.orderNo})</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center py-0.5 border-b border-border/40">
+                        <span className="text-muted-foreground">Customer & Kendaraan:</span>
+                        <span className="font-medium text-foreground">
+                          {lunasTargetItem.customer} {lunasTargetItem.nopol ? `— ${lunasTargetItem.nopol}` : ""}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center py-0.5 border-b border-border/40">
+                        <span className="text-muted-foreground">Jenis Pengurusan:</span>
+                        <span className="font-medium text-foreground">
+                          {lunasTargetItem.pengurusan || (lunasTargetItem as any).jenisLayanan || "Layanan Samsat"}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+                        <div className="p-2 rounded bg-background/60 border border-border/50">
+                          <p className="text-[10px] text-muted-foreground">Total Tagihan</p>
+                          <p className="text-xs font-semibold text-foreground font-mono mt-0.5">
+                            {formatRupiah(lunasTargetItem.totalTagihan || 0)}
+                          </p>
+                        </div>
+                        <div className="p-2 rounded bg-background/60 border border-border/50">
+                          <p className="text-[10px] text-muted-foreground">Sudah Terbayar</p>
+                          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+                            {formatRupiah(lunasTargetItem.terbayar ?? (lunasTargetItem as any).uangMasuk ?? 0)}
+                          </p>
+                        </div>
+                        <div className="p-2 rounded bg-rose-500/10 border border-rose-500/20">
+                          <p className="text-[10px] text-rose-600 dark:text-rose-400 font-medium">Sisa Tagihan</p>
+                          <p className="text-xs font-bold text-rose-600 dark:text-rose-400 font-mono mt-0.5">
+                            {formatRupiah(lunasTargetItem.kekurangan ?? lunasTargetItem.sisa ?? 0)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Status Approval Supervisi & Biaya Final */}
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300">
+                      <div className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span className="font-medium">Biaya Final & Supervisi Disetujui</span>
+                      </div>
+                      {lunasTargetItem.spvApprovedAt && (
+                        <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
+                          {lunasTargetItem.spvApprovedAt} {lunasTargetItem.spvName ? `(${lunasTargetItem.spvName})` : ""}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Input Nominal Pembayaran & Tombol Cepat Lunasi */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-semibold text-foreground block">
+                          Nominal Pembayaran <span className="text-destructive">*</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const curSisa = Number(lunasTargetItem.kekurangan ?? lunasTargetItem.sisa ?? 0);
+                            setLunasAmount(curSisa);
+                          }}
+                          className="text-[10px] text-primary hover:underline font-semibold flex items-center gap-1"
+                        >
+                          Lunasi Sisa ({formatRupiah(Number(lunasTargetItem.kekurangan ?? lunasTargetItem.sisa ?? 0))})
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
+                          Rp
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          max={Number(lunasTargetItem.kekurangan ?? lunasTargetItem.sisa ?? 0)}
+                          value={lunasAmount || ""}
+                          onChange={(e) => setLunasAmount(Math.max(0, Number(e.target.value)))}
+                          placeholder="0"
+                          className="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono font-semibold"
+                        />
+                      </div>
+                      {(() => {
+                        const curSisa = Number(lunasTargetItem.kekurangan ?? lunasTargetItem.sisa ?? 0);
+                        if (lunasAmount > curSisa) {
+                          return (
+                            <p className="text-[10px] text-destructive flex items-center gap-1 font-medium mt-1">
+                              <AlertCircle className="w-3 h-3" />
+                              Nominal melebihi sisa tagihan ({formatRupiah(curSisa)}). Kelebihan bayar dicatat di alur Cashback.
+                            </p>
+                          );
+                        }
+                        if (lunasAmount === curSisa && curSisa > 0) {
+                          return (
+                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium mt-1">
+                              <CheckCircle className="w-3 h-3" />
+                              Pembayaran ini akan melunasi seluruh sisa tagihan (Status akan menjadi Lunas).
+                            </p>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+
+                    {/* Baris Tanggal & Metode Pembayaran */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-foreground block">
+                          Tanggal Pembayaran <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={lunasDate}
+                          onChange={(e) => setLunasDate(e.target.value)}
+                          className="w-full h-9 px-3 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-foreground block">
+                          Metode / Bank Kas Masuk <span className="text-destructive">*</span>
+                        </label>
+                        <select
+                          value={lunasMethod}
+                          onChange={(e) => setLunasMethod(e.target.value)}
+                          className="w-full h-9 px-3 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-normal"
+                        >
+                          {activeMethods.length > 0 ? (
+                            activeMethods.map((m) => (
+                              <option key={m.id} value={m.nama_metode}>
+                                {m.nama_metode} ({m.bank}{m.nomor_rekening ? ` - ${m.nomor_rekening}` : ""})
+                              </option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="Transfer BCA">Transfer BCA</option>
+                              <option value="Transfer Mandiri">Transfer Mandiri</option>
+                              <option value="Transfer BRI">Transfer BRI</option>
+                              <option value="Kas Tunai">Kas Tunai</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Catatan Pembayaran */}
+                    <div className="space-y-1 pt-1">
+                      <label className="text-[11px] font-semibold text-foreground block">
+                        Catatan Transaksi <span className="text-muted-foreground font-normal">(Opsional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={lunasNotes}
+                        onChange={(e) => setLunasNotes(e.target.value)}
+                        placeholder="Contoh: DP Termin 2 / Pelunasan via Transfer M-Banking"
+                        className="w-full h-9 px-3 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+
+                    {/* Unggah Bukti Pembayaran (Opsional) */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+                          <Upload className="w-3.5 h-3.5 text-primary" />
+                          Bukti Pembayaran / Struk Transfer <span className="text-muted-foreground font-normal">(Opsional)</span>
+                        </label>
+                        <span className={lunasProof ? "text-emerald-600 font-medium text-[10px]" : "text-muted-foreground font-medium text-[10px]"}>
+                          {lunasProof ? "✓ Terlampir" : "Opsional"}
+                        </span>
+                      </div>
+
+                      {lunasProof ? (
+                        <div className="p-2 rounded border border-primary/30 bg-primary/10 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {lunasProof.fileType === "pdf" ? <FileIcon className="w-4 h-4 text-primary shrink-0" /> : <ImageIcon className="w-4 h-4 text-primary shrink-0" />}
+                            <span className="font-mono text-[11px] truncate text-foreground">{lunasProof.fileName}</span>
+                            <span className="text-[10px] text-muted-foreground uppercase">({lunasProof.fileType})</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setLunasProof(null)}
+                            className="text-destructive hover:text-destructive/80 p-1 text-xs"
+                            title="Hapus / ganti berkas"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center p-3 border border-dashed border-border rounded-lg bg-background hover:bg-muted/30 cursor-pointer transition-colors">
+                          <Upload className="w-4 h-4 text-muted-foreground mb-1" />
+                          <span className="text-[11px] font-medium text-foreground">
+                            {isUploadingLunasProof ? "Mengunggah..." : "Klik untuk upload struk transfer / bukti setoran (JPG, PNG, PDF, HEIC)"}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">Maksimal 5 MB (dikompres otomatis)</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.heic,.HEIC"
+                            className="hidden"
+                            disabled={isUploadingLunasProof}
+                            onChange={handleUploadLunasProof}
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* Riwayat Pembayaran Sebelumnya */}
+                    <div className="pt-2 border-t border-border/50 space-y-1.5">
+                      <p className="text-[11px] font-semibold text-foreground flex items-center justify-between">
+                        <span>Riwayat Pembayaran Terdaftar</span>
+                        {isLoadingPayments && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                      </p>
+                      {targetPayments.length > 0 ? (
+                        <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                          {targetPayments.map((p: any, idx: number) => (
+                            <div
+                              key={p.id || idx}
+                              className="p-2 rounded bg-muted/40 border border-border/40 text-[11px] flex items-center justify-between gap-2"
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-semibold text-foreground font-mono">
+                                  {formatRupiah(p.nominal || p.amount || 0)}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {p.tanggal_bayar || p.tanggal || "-"} • {p.metode_pembayaran || p.metodePembayaran || p.nama_bank || "Transfer"}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                  {p.status_verifikasi || p.statusVerifikasi || "TERVERIFIKASI"}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground italic bg-muted/20 p-2 rounded border border-border/30">
+                          {isLoadingPayments ? "Memuat riwayat pembayaran..." : "Belum ada riwayat pembayaran tambahan sebelumnya."}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="mt-4 gap-2">
+              <AlertDialogCancel
+                disabled={isSubmittingLunas}
+                onClick={() => {
+                  setLunasTargetItem(null);
+                  setLunasProof(null);
+                  setTargetPayments([]);
+                }}
+                className="h-9 text-xs px-4 font-medium"
+              >
+                Batal
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={
+                  isSubmittingLunas ||
+                  isUploadingLunasProof ||
+                  lunasAmount <= 0 ||
+                  (lunasTargetItem && lunasAmount > Number(lunasTargetItem.kekurangan ?? lunasTargetItem.sisa ?? 0))
+                }
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleConfirmLunas();
+                }}
+                className="h-9 text-xs px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmittingLunas ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Memproses...
+                  </>
+                ) : (
+                  "Simpan Pembayaran"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }
 
   if (tab === "profit-pending") {
-    const profitPendingColumns = [
-      { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" as const },
-      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" as const },
-      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" as const },
-      { key: "namaBerkas", label: "Nama berkas" },
+    const filteredProfitPendingData = profitPendingData;
+
+    const totalMasukPending = filteredProfitPendingData.reduce((acc: number, item: any) => acc + (item.totalUangMasuk || item.uangMasuk || 0), 0);
+    const totalDanaTitipan = filteredProfitPendingData.reduce((acc: number, item: any) => acc + (item.danaTitipanPajak || item.biayaSamsat || 0), 0);
+    const totalSelisihKas = filteredProfitPendingData.reduce((acc: number, item: any) => acc + (item.selisihKasSementara || 0), 0);
+    const totalEstimasiProfit = filteredProfitPendingData.reduce((acc: number, item: any) => acc + (item.estimasiProfit || item.profit || 0), 0);
+
+    const profitPendingColumns: Column[] = [
+      { key: "tanggal", label: "Tanggal Order", filterable: true, filterType: "text" as const },
+      {
+        key: "orderNo",
+        label: "Nomor Order",
+        filterable: true,
+        filterType: "text" as const,
+        render: (_val: any, item: any) => (
+          <span className="font-mono text-xs font-semibold text-primary">
+            {item.orderNo || item.invoice || "-"}
+          </span>
+        ),
+      },
+      {
+        key: "tanggalUangMasuk",
+        label: "Tanggal Uang Masuk",
+        render: (_val: any, item: any) => {
+          const isPaid = Number(item.totalUangMasuk || item.uangMasuk || 0) > 0;
+          if (!isPaid) return <span className="text-muted-foreground italic text-xs">-</span>;
+          return <span className="text-xs font-medium text-foreground">{item.tanggalUangMasuk || item.tanggal || "-"}</span>;
+        },
+      },
+      { 
+        key: "nopol", 
+        label: "Nomor Polisi", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (value: string) => <PlateNumberBadge plate={value || "-"} />
+      },
+      { 
+        key: "customer", 
+        label: "Nama Customer", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (value: string) => <span className="font-medium text-foreground">{formatCustomerName(value)}</span>
+      },
       { key: "pengurusan", label: "Jenis Pengurusan" },
-      { key: "uangMasuk", label: "Uang masuk" },
-      { key: "biayaSamsat", label: "Biaya samsat" },
-      { key: "profit", label: "Profit" },
-      { key: "status", label: "Status" },
-      { key: "invoice", label: "Invoice" },
-      { key: "alasan", label: "Alasan pending" },
+      {
+        key: "metodePencairan",
+        label: "Metode Pencairan",
+        filterable: true,
+        filterType: "select" as const,
+        filterOptions: ["Cash", "Transfer Bank"],
+        render: (_val: any, item: any) => {
+          const isPaid = Number(item.totalUangMasuk || item.uangMasuk || 0) > 0;
+          if (!isPaid) {
+            return <span className="text-xs text-muted-foreground italic">Belum terverifikasi</span>;
+          }
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          const isCash = cat === "Cash";
+          return (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${
+              isCash
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+            }`}>
+              {isCash ? "Cash (Tunai)" : "Transfer Bank"}
+            </span>
+          );
+        },
+      },
+      {
+        key: "namaBank",
+        label: "Nama Bank",
+        filterable: true,
+        filterType: "text" as const,
+        render: (_val: any, item: any) => {
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          if (cat === "Cash") {
+            return <span className="text-xs text-muted-foreground font-mono">—</span>;
+          }
+          const bankName = item.namaBank || item.bank || (item.rekening && item.rekening !== "Cash" ? item.rekening : "—");
+          return <span className="text-xs font-semibold text-foreground">{bankName || "—"}</span>;
+        },
+      },
+      {
+        key: "nomorRekening",
+        label: "Nomor Rekening",
+        render: (_val: any, item: any) => {
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          if (cat === "Cash") {
+            return <span className="text-xs text-muted-foreground font-mono">—</span>;
+          }
+          const noRek = item.nomorRekening || item.noRekening;
+          return noRek ? (
+            <span className="text-xs font-mono text-muted-foreground">{noRek}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground font-mono">—</span>
+          );
+        },
+      },
+      {
+        key: "namaPemilikRekening",
+        label: "Nama Pemilik Rekening",
+        render: (_val: any, item: any) => {
+          const cat = normalizePaymentCategory(item.metodePencairan || item.metodePembayaran || item.rekening || item.bank);
+          if (cat === "Cash") {
+            return <span className="text-xs text-muted-foreground font-mono">—</span>;
+          }
+          const namaRek = item.namaPemilikRekening || item.namaRekening;
+          return namaRek ? (
+            <span className="text-xs font-medium text-foreground">{namaRek}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground font-mono">—</span>
+          );
+        },
+      },
+      { 
+        key: "totalTagihan", 
+        label: "Total Tagihan",
+        align: "right" as const,
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs text-muted-foreground">
+            {formatRupiah(val || 0)}
+          </span>
+        )
+      },
+      { 
+        key: "totalUangMasuk", 
+        label: "Total Terbayar",
+        align: "right" as const,
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            {formatRupiah(val || 0)}
+          </span>
+        )
+      },
+      { 
+        key: "danaTitipanPajak", 
+        label: "Biaya Pokok Samsat",
+        align: "right" as const,
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs text-rose-500 font-medium" title="Biaya pokok resmi Samsat/Kas Negara (Pass-through)">
+            {formatRupiah(val || 0)}
+          </span>
+        )
+      },
+      { 
+        key: "totalUangKeluarAktual", 
+        label: "Uang Keluar Aktual",
+        align: "right" as const,
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs text-rose-600 dark:text-rose-400">
+            {formatRupiah(val || 0)}
+          </span>
+        )
+      },
+      { 
+        key: "selisihKasSementara", 
+        label: "Selisih Kas Sementara",
+        align: "right" as const,
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs font-bold text-foreground">
+            {formatRupiah(val || 0)}
+          </span>
+        )
+      },
+      { 
+        key: "estimasiProfit", 
+        label: "Estimasi Profit",
+        align: "right" as const,
+        render: (val: number) => (
+          <div className="flex flex-col items-end">
+            <span className="font-mono tabular-nums text-xs font-bold text-amber-600 dark:text-amber-400">
+              {formatRupiah(val || 0)}
+            </span>
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold">
+              (Estimasi)
+            </span>
+          </div>
+        )
+      },
+      { 
+        key: "statusPengerjaan", 
+        label: "Status Pengerjaan",
+        render: (val: string, item: any) => (
+          <div className="flex flex-col">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+              {val || (item.currentStep ? `Tahap ${item.currentStep}` : "Proses")}
+            </span>
+          </div>
+        )
+      },
+      { 
+        key: "invoice", 
+        label: "Invoice",
+        render: (val: string) => <span className="font-mono text-xs font-medium text-primary">{val || "-"}</span>
+      },
+      {
+        key: "tindakan",
+        label: "Tindakan",
+        render: (_val: any, item: any) => {
+          const ordNo = item.orderNo || item.invoice || "";
+          return (
+            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] gap-1 text-primary hover:text-primary hover:bg-primary/5 border-primary/40 font-medium whitespace-nowrap"
+                onClick={() => {
+                  const targetUrl = ordNo ? `/order/tracking?orderNo=${encodeURIComponent(ordNo)}` : `/order/tracking`;
+                  navigate(targetUrl);
+                }}
+                title="Lacak progres berkas di Order Tracking"
+              >
+                <ArrowUpRight className="w-3 h-3 text-primary" />
+                <span>Lihat Order Tracking</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted"
+                onClick={() => setViewingItem({ item, subTabTitle: "Profit Terpending", columns: profitPendingColumns })}
+                title="Lihat rincian transaksi"
+              >
+                <Eye className="w-3 h-3" />
+                <span>Lihat Detail</span>
+              </Button>
+            </div>
+          );
+        },
+      },
     ];
 
     return (
-      <div className="space-y-6">
-        {renderSubTabHeader("Profit terpending", "Transaksi yang margin keuntungannya belum dapat dicairkan")}
-        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs">
+      <div className="flex-1 flex flex-col min-h-0 space-y-4">
+        {renderSubTabHeader("Profit Terpending", "Transaksi lunas yang proses pengerjaannya sedang berjalan")}
+
+        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
           <EnhancedTableWithDialogs
             columns={profitPendingColumns}
-            data={profitPendingData}
+            data={filteredProfitPendingData}
             subTabTitle="Profit Terpending"
             onView={(item) => setViewingItem({ item, subTabTitle: "Profit terpending", columns: profitPendingColumns })}
-            onEdit={(item, updated) => updateInvoice(item.id, updated)}
-            onDelete={(item) => deleteInvoice(item.id)}
-            searchPlaceholder="Cari nama customer, nomor polisi, alasan..."
+            searchPlaceholder="Cari nama customer, nomor polisi, invoice, alasan..."
             hideAddButton={true}
+            hideEditButton={true}
+            hideDeleteButton={true}
           />
         </Card>
+
+        {/* Ringkasan Finansial Profit Terpending */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 shrink-0">
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <p className="text-xs font-medium text-muted-foreground">Total Uang Masuk Terverifikasi</p>
+            <h3 className="text-lg font-bold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
+              {formatRupiah(totalMasukPending)}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{filteredProfitPendingData.length} order lunas berjalan</p>
+          </Card>
+
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <p className="text-xs font-medium text-muted-foreground">Dana Titipan Samsat (Pass-Through)</p>
+            <h3 className="text-lg font-bold text-rose-500 mt-1 tabular-nums">
+              {formatRupiah(totalDanaTitipan)}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Kewajiban pajak ke kas negara</p>
+          </Card>
+
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <p className="text-xs font-medium text-muted-foreground">Selisih Kas Sementara</p>
+            <h3 className="text-lg font-bold text-foreground mt-1 tabular-nums">
+              {formatRupiah(totalSelisihKas)}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Uang masuk - beban aktual</p>
+          </Card>
+
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <p className="text-xs font-medium text-muted-foreground">Total Estimasi Profit</p>
+            <h3 className="text-lg font-bold text-amber-600 dark:text-amber-400 mt-1 tabular-nums">
+              {formatRupiah(totalEstimasiProfit)}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Menunggu pengerjaan tuntas</p>
+          </Card>
+        </div>
       </div>
     );
   }
 
-  if (tab === "cashback-pending") {
-    const cashbackPendingColumns = [
-      { key: "tanggal", label: "Tanggal", filterable: true, filterType: "text" as const },
-      { key: "nopol", label: "Nomor Polisi", filterable: true, filterType: "text" as const },
-      { key: "customer", label: "Nama Customer", filterable: true, filterType: "text" as const },
-      { key: "namaBerkas", label: "Nama berkas" },
+    if (tab === "cashback-pending") {
+    const displayCashbackData = cashbackPendingData.filter(
+      (item: any) => !dismissedCashbackIds.has(item.id) && (!item.orderNo || !dismissedCashbackIds.has(item.orderNo))
+    );
+
+    const totalKelebihan = displayCashbackData.reduce((acc: number, item: any) => acc + (item.nominalKelebihan || item.jumlahCashback || 0), 0);
+    const totalPendingCount = displayCashbackData.filter((item: any) => item.status !== "Dibayar" && !paidCashbackIds.has(item.id) && (!item.orderNo || !paidCashbackIds.has(item.orderNo))).length;
+    const totalSudahDibayarCount = displayCashbackData.length - totalPendingCount;
+
+    const cashbackPendingColumns: Column[] = [
+      { 
+        key: "tanggalMasukBerkas", 
+        label: "Tanggal Masuk Berkas", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (val: string, item: any) => (
+          <span className="text-xs font-medium text-foreground">
+            {val || item.tanggal || "-"}
+          </span>
+        ),
+      },
+      { 
+        key: "orderNo", 
+        label: "Nomor Order", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (_val: any, item: any) => (
+          <span className="font-mono text-xs font-semibold text-primary">
+            {item.orderNo || item.invoice || "-"}
+          </span>
+        ),
+      },
+      { 
+        key: "nopol", 
+        label: "Nomor Polisi", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (value: string) => <PlateNumberBadge plate={value || "-"} />
+      },
+      { 
+        key: "customer", 
+        label: "Nama Customer", 
+        filterable: true, 
+        filterType: "text" as const,
+        render: (value: string) => <span className="font-medium text-foreground">{formatCustomerName(value)}</span>
+      },
+      {
+        key: "phone",
+        label: "Nomor Telepon/WhatsApp",
+        render: (_val: any, item: any) => {
+          const phone = item.phone || item.nomorHp || item.noHp || "";
+          const hasPhone = phone && phone.replace(/[^0-9]/g, "").length >= 8;
+          if (!hasPhone) {
+            return <span className="text-muted-foreground text-xs italic">-</span>;
+          }
+          const cleanPhone = phone.replace(/[^0-9]/g, "");
+          const waPhone = cleanPhone.startsWith("0") ? `62${cleanPhone.slice(1)}` : cleanPhone;
+          const sisaKelebihan = formatRupiah(item.nominalKelebihan || item.jumlahCashback || 0);
+          const textMsg = encodeURIComponent(
+            `Halo ${item.customer}, kami dari Biro Jasa SUN89 menginformasikan ada pengembalian dana / kelebihan bayar pengurusan ${item.pengurusan || item.jenisLayanan} (No. Polisi: ${item.nopol || "-"}, Order: ${item.orderNo || item.invoice || "-"}) sebesar ${sisaKelebihan}. Mohon konfirmasi rekening tujuan pengembalian. Terima kasih.`
+          );
+          return (
+            <div className="flex items-center gap-1.5 py-0.5">
+              <span className="text-xs font-mono text-muted-foreground">{phone}</span>
+              <a
+                href={`https://wa.me/${waPhone}?text=${textMsg}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center p-1 rounded text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+                title={`Hubungi WA (${phone})`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+              </a>
+            </div>
+          );
+        },
+      },
       { key: "pengurusan", label: "Jenis Pengurusan" },
-      { key: "uangMasuk", label: "Uang masuk" },
-      { key: "profit", label: "Profit" },
-      { key: "jumlahCashback", label: "Jumlah cashback" },
-      { key: "cashbackPersen", label: "%" },
-      { key: "status", label: "Status" },
-      { key: "invoice", label: "Invoice" },
+      { 
+        key: "uangMasuk", 
+        label: "Uang Masuk dari Konsumen",
+        align: "right" as const,
+        render: (val: number, item: any) => (
+          <span className="font-mono tabular-nums text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            {formatRupiah(val ?? item.terbayar ?? item.dibayar ?? 0)}
+          </span>
+        )
+      },
+      { 
+        key: "totalTagihan", 
+        label: "Total Tagihan",
+        align: "right" as const,
+        render: (val: number) => (
+          <span className="font-mono tabular-nums text-xs font-medium text-foreground">
+            {formatRupiah(val || 0)}
+          </span>
+        )
+      },
+      { 
+        key: "nominalKelebihan", 
+        label: "Kelebihan Bayar",
+        align: "right" as const,
+        render: (val: number, item: any) => {
+          const amount = Number(val ?? item.jumlahCashback ?? 0);
+          return (
+            <span className="font-mono tabular-nums text-xs font-bold text-blue-600 dark:text-blue-400">
+              {amount > 0 ? formatRupiah(amount) : "-"}
+            </span>
+          );
+        }
+      },
+      { 
+        key: "status", 
+        label: "Status",
+        filterable: true,
+        filterType: "select" as const,
+        filterOptions: ["Pending", "Dibayar"],
+        render: (val: string, item: any) => {
+          const isPaid = paidCashbackIds.has(item.id) || (item.orderNo && paidCashbackIds.has(item.orderNo)) || val === "Dibayar";
+          return (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+              isPaid
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            }`}>
+              {isPaid ? "Dibayar" : "Pending"}
+            </span>
+          );
+        }
+      },
+      {
+        key: "aksi",
+        label: "Aksi",
+        render: (_val: any, item: any) => {
+          const isPaid = paidCashbackIds.has(item.id) || (item.orderNo && paidCashbackIds.has(item.orderNo)) || item.status === "Dibayar";
+          return (
+            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+              {isPaid ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2.5 text-[11px] gap-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-emerald-500/40 font-semibold whitespace-nowrap"
+                  onClick={() => setSelesaiInfoItem(item)}
+                  title="Selesaikan transaksi cashback yang sudah dicairkan"
+                >
+                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                  <span>Selesai</span>
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2.5 text-[11px] gap-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 border-blue-500/40 font-semibold whitespace-nowrap"
+                  onClick={() => handleOpenCashbackConfirm(item)}
+                  title="Cairkan pengembalian kelebihan bayar"
+                >
+                  <CheckCircle className="w-3 h-3 text-blue-600" />
+                  <span>Cairkan</span>
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground border-border hover:bg-muted font-medium"
+                onClick={() => handleOpenEditCashback(item)}
+                title="Edit data transaksi cashback"
+              >
+                <Pencil className="w-3 h-3" />
+                <span>Edit</span>
+              </Button>
+            </div>
+          );
+        }
+      }
     ];
 
     return (
-      <div className="space-y-6">
-        {renderSubTabHeader("Cashback terpending", "Alokasi insentif dan komisi cashback rekanan yang pending")}
-        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs">
+      <div className="flex-1 flex flex-col min-h-0 space-y-4">
+        {renderSubTabHeader("Cashback Terpending", "Kewajiban pengembalian kelebihan bayar kepada customer")}
+        <Card className="p-4 sm:p-5 border border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
           <EnhancedTableWithDialogs
             columns={cashbackPendingColumns}
-            data={cashbackPendingData}
+            data={displayCashbackData}
             subTabTitle="Cashback Terpending"
             onView={(item) => setViewingItem({ item, subTabTitle: "Cashback terpending", columns: cashbackPendingColumns })}
-            onEdit={(item, updated) => updateInvoice(item.id, updated)}
-            onDelete={(item) => deleteInvoice(item.id)}
-            searchPlaceholder="Cari nama customer, nomor polisi..."
+            hideDeleteButton={true}
+            searchPlaceholder="Cari nama customer, nomor polisi, order..."
             hideAddButton={true}
+            hideEditButton={true}
           />
         </Card>
+
+        {/* Ringkasan Finansial Cashback & Refund */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <p className="text-xs font-medium text-muted-foreground">Kelebihan Pembayaran Pelanggan</p>
+            <h3 className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1 tabular-nums">
+              {formatRupiah(totalKelebihan)}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {displayCashbackData.length} total transaksi pengembalian dana
+            </p>
+          </Card>
+
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <p className="text-xs font-medium text-muted-foreground">Status Menunggu Pencairan</p>
+            <h3 className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1 tabular-nums">
+              {totalPendingCount} transaksi
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Siap diproses pengembalian kas
+            </p>
+          </Card>
+
+          <Card className="p-4 border border-border bg-card shadow-2xs">
+            <p className="text-xs font-medium text-muted-foreground">Sudah Selesai Dicairkan</p>
+            <h3 className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
+              {totalSudahDibayarCount} transaksi
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Tekan tombol Selesai untuk membersihkan antrean
+            </p>
+          </Card>
+        </div>
+
+        {/* Modal Konfirmasi Pencairan Cashback / Refund (Dua Kolom Desktop, Field Rapih) */}
+        <AlertDialog open={!!cashbackTargetItem} onOpenChange={(open) => { if (!open && !isSubmittingCashback) { setCashbackTargetItem(null); setCashbackProof(null); } }}>
+          <AlertDialogContent className="border-border sm:max-w-2xl lg:max-w-3xl bg-card max-h-[92vh] overflow-y-auto">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                <CheckCircle className="w-4 h-4 text-blue-600" />
+                Konfirmasi Pencairan Cashback / Refund
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground pt-1">
+                Catat pengeluaran kas kantor untuk pengembalian kelebihan bayar customer.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            {cashbackTargetItem && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
+                {/* Kolom 1: Ringkasan Order & Kelebihan Bayar */}
+                <div className="rounded-lg border border-border/80 bg-muted/30 p-3.5 space-y-2.5 text-xs flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="font-semibold text-foreground text-xs border-b border-border/50 pb-1.5 flex items-center justify-between">
+                      <span>Rincian Order</span>
+                      <span className="font-mono text-primary font-bold text-[11px]">{cashbackTargetItem.orderNo || cashbackTargetItem.invoice}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">Nomor Polisi:</span>
+                      <span className="font-semibold text-foreground">{cashbackTargetItem.nopol || "-"}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">Nama Customer:</span>
+                      <span className="font-medium text-foreground">{formatCustomerName(cashbackTargetItem.customer || "-")}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">No. Telepon / WA:</span>
+                      <span className="font-mono text-muted-foreground text-[11px]">{cashbackTargetItem.phone || cashbackTargetItem.nomorHp || "-"}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">Tanggal Berkas:</span>
+                      <span className="text-foreground">{cashbackTargetItem.tanggalMasukBerkas || cashbackTargetItem.tanggal || "-"}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-0.5 border-t border-border/40 pt-1.5">
+                      <span className="text-muted-foreground">Total Uang Masuk:</span>
+                      <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                        {formatRupiah(cashbackTargetItem.uangMasuk ?? cashbackTargetItem.terbayar ?? 0)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-muted-foreground">Total Tagihan:</span>
+                      <span className="font-mono font-medium text-foreground">
+                        {formatRupiah(cashbackTargetItem.totalTagihan || 0)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-0.5 border-t border-border/40 pt-1.5">
+                      <span className="text-muted-foreground font-medium">Kelebihan Bayar:</span>
+                      <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-sm">
+                        {formatRupiah(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-center">
+                    <p className="text-[10px] text-muted-foreground">Nominal yang Akan Dicairkan:</p>
+                    <p className="text-base font-bold text-blue-600 dark:text-blue-400 font-mono mt-0.5">
+                      {formatRupiah(cashbackAmount || cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Kolom 2: Form Input Pencairan Kas */}
+                <div className="space-y-3 text-xs">
+                  {/* Nominal yang Dicairkan */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-foreground block">
+                        Nominal yang Dicairkan <span className="text-destructive">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setCashbackAmount(Number(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0))}
+                        className="text-[10px] text-primary hover:underline font-semibold"
+                      >
+                        Maksimal ({formatRupiah(Number(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0))})
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
+                        Rp
+                      </span>
+                      <input
+                        type="number"
+                        min="1"
+                        max={Number(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0)}
+                        value={cashbackAmount || ""}
+                        onChange={(e) => setCashbackAmount(Number(e.target.value))}
+                        className="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono font-semibold"
+                      />
+                    </div>
+                    {cashbackAmount <= 0 && (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                        Nominal pencairan harus lebih dari Rp 0.
+                      </p>
+                    )}
+                    {Number(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0) > 0 &&
+                      cashbackAmount > Number(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0) && (
+                        <p className="text-[10px] text-destructive mt-0.5">
+                          Nominal melebihi batas saldo ({formatRupiah(Number(cashbackTargetItem.nominalKelebihan || cashbackTargetItem.jumlahCashback || 0))}).
+                        </p>
+                    )}
+                  </div>
+
+                  {/* Tanggal Pengeluaran Kas + Checkbox Hari Ini */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-foreground block">
+                        Tanggal Pengeluaran Kas <span className="text-destructive">*</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isCashbackToday}
+                          onChange={(e) => {
+                            setIsCashbackToday(e.target.checked);
+                            if (e.target.checked) {
+                              setCashbackDate(new Date().toISOString().split("T")[0]);
+                            }
+                          }}
+                          className="rounded border-border text-primary focus:ring-primary w-3.5 h-3.5"
+                        />
+                        <span>Hari Ini</span>
+                      </label>
+                    </div>
+                    <input
+                      type="date"
+                      value={cashbackDate}
+                      onChange={(e) => {
+                        setCashbackDate(e.target.value);
+                        setIsCashbackToday(e.target.value === new Date().toISOString().split("T")[0]);
+                      }}
+                      className="w-full h-9 px-3 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-normal"
+                    />
+                  </div>
+
+                  {/* Metode Pembayaran Keluar */}
+                  {(() => {
+                    const currentSelectedMethod = activeMethods.find((m) => m.nama_metode === cashbackMethod);
+                    const isCash =
+                      currentSelectedMethod?.bank === "Tunai" ||
+                      cashbackMethod.toLowerCase().includes("cash") ||
+                      cashbackMethod.toLowerCase().includes("tunai") ||
+                      cashbackBank === "Tunai";
+
+                    return (
+                      <>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-foreground block">
+                            Metode Pembayaran Keluar <span className="text-destructive">*</span>
+                          </label>
+                          <select
+                            value={cashbackMethod}
+                            onChange={(e) => {
+                              const selectedName = e.target.value;
+                              setCashbackMethod(selectedName);
+                              const foundM = activeMethods.find((m) => m.nama_metode === selectedName);
+                              const nextIsCash =
+                                foundM?.bank === "Tunai" ||
+                                selectedName.toLowerCase().includes("cash") ||
+                                selectedName.toLowerCase().includes("tunai");
+                              if (nextIsCash) {
+                                setCashbackBank("Tunai");
+                                setCashbackNoRekening("");
+                              } else {
+                                if (cashbackBank === "Tunai") {
+                                  setCashbackBank(foundM?.bank || "BCA");
+                                }
+                              }
+                            }}
+                            className="w-full h-9 px-3 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-normal"
+                          >
+                            {activeMethods.length > 0 ? (
+                              activeMethods.map((m) => (
+                                <option key={m.id} value={m.nama_metode}>
+                                  {m.nama_metode} ({m.bank}{m.nomor_rekening ? ` - ${m.nomor_rekening}` : ""})
+                                </option>
+                              ))
+                            ) : (
+                              <>
+                                <option value="Transfer BCA">Transfer BCA (BCA)</option>
+                                <option value="Transfer Mandiri">Transfer Mandiri (Mandiri)</option>
+                                <option value="Transfer BRI">Transfer BRI (BRI)</option>
+                                <option value="Cash">Cash (Tunai)</option>
+                              </>
+                            )}
+                          </select>
+                        </div>
+
+                        {/* Detail Rekening: Hanya jika non-tunai */}
+                        {isCash ? (
+                          <div className="p-2.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-xs space-y-1">
+                            <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                              ✓ Metode Tunai (Cash Kantor)
+                            </p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">
+                              Pengeluaran tunai langsung dari kas kantor. Tidak memerlukan bank tujuan dan nomor rekening.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-2.5 rounded-md border border-border/70 bg-muted/20">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-medium text-muted-foreground block">
+                                Bank Tujuan <span className="text-destructive">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={cashbackBank === "Tunai" ? "" : cashbackBank}
+                                onChange={(e) => setCashbackBank(e.target.value)}
+                                placeholder="Contoh: BCA, Mandiri, BRI"
+                                className="w-full h-8 px-2.5 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-normal"
+                              />
+                              {!cashbackBank.trim() && (
+                                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                                  Bank tujuan wajib diisi untuk transfer.
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-medium text-muted-foreground block">
+                                No. Rekening Tujuan <span className="text-destructive">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={cashbackNoRekening}
+                                onChange={(e) => setCashbackNoRekening(e.target.value)}
+                                placeholder="Nomor rekening"
+                                className="w-full h-8 px-2.5 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                              />
+                              {!cashbackNoRekening.trim() && (
+                                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                                  Nomor rekening tujuan wajib diisi untuk transfer.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  {/* Upload Bukti Transfer (Opsional) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5 text-blue-600" />
+                        Bukti Transfer / Kas Keluar <span className="text-muted-foreground font-normal">(Opsional)</span>
+                      </label>
+                      <span className={cashbackProof ? "text-emerald-600 font-medium text-[10px]" : "text-muted-foreground font-normal text-[10px]"}>
+                        {cashbackProof ? "✓ Terlampir" : "Opsional"}
+                      </span>
+                    </div>
+
+                    {cashbackProof ? (
+                      <div className="p-2 rounded border border-blue-500/30 bg-blue-500/10 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {cashbackProof.fileType === "pdf" ? <FileIcon className="w-4 h-4 text-blue-600 shrink-0" /> : <ImageIcon className="w-4 h-4 text-blue-600 shrink-0" />}
+                          <span className="font-mono text-[11px] truncate text-foreground">{cashbackProof.fileName}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase">({cashbackProof.fileType})</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCashbackProof(null)}
+                          className="text-destructive hover:text-destructive/80 p-1 text-xs"
+                          title="Hapus berkas"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-border rounded-lg bg-background hover:bg-muted/30 cursor-pointer transition-colors">
+                        <Upload className="w-4 h-4 text-muted-foreground mb-1" />
+                        <span className="text-[11px] font-medium text-foreground">
+                          {isUploadingCashbackProof ? "Mengunggah..." : "Pilih berkas bukti transfer / struk (Opsional)"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">JPG, PNG, PDF (Maks. 5 MB)</span>
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.heic,.HEIC"
+                          className="hidden"
+                          disabled={isUploadingCashbackProof}
+                          onChange={handleUploadCashbackProof}
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <AlertDialogFooter className="mt-3 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSubmittingCashback}
+                onClick={() => setCashbackTargetItem(null)}
+                className="h-9 text-xs px-4 font-medium"
+              >
+                Batal
+              </Button>
+              {(() => {
+                const maxAvailable = Number(cashbackTargetItem?.nominalKelebihan || cashbackTargetItem?.jumlahCashback || 0);
+                const isCashSubmit =
+                  cashbackMethod.toLowerCase().includes("cash") ||
+                  cashbackMethod.toLowerCase().includes("tunai") ||
+                  cashbackBank === "Tunai";
+                const isFormInvalid =
+                  cashbackAmount <= 0 ||
+                  (maxAvailable > 0 && cashbackAmount > maxAvailable) ||
+                  (!isCashSubmit && (!cashbackBank.trim() || !cashbackNoRekening.trim()));
+
+                return (
+                  <Button
+                    type="button"
+                    disabled={isSubmittingCashback || isUploadingCashbackProof || isFormInvalid}
+                    onClick={handleConfirmCashbackPayment}
+                    className="h-9 text-xs px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSubmittingCashback ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Memproses...
+                      </>
+                    ) : (
+                      "Ya, Cairkan Dana"
+                    )}
+                  </Button>
+                );
+              })()}
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Modal Selesai (Informasi Cashback Telah Dicairkan & Dismiss dari Antrean) */}
+        <AlertDialog open={!!selesaiInfoItem} onOpenChange={(open) => { if (!open) setSelesaiInfoItem(null); }}>
+          <AlertDialogContent className="border-border sm:max-w-md bg-card">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                <CheckCircle className="w-4 h-4 text-emerald-600" />
+                Cashback Berhasil Dicairkan
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground pt-1 space-y-2">
+                <p className="leading-relaxed">
+                  Cashback terpending ini sudah berhasil dicairkan. Transaksi akan diselesaikan dan dikeluarkan dari antrean Cashback Terpending.
+                </p>
+                {selesaiInfoItem && (
+                  <div className="p-3 rounded-md border border-border/80 bg-muted/30 space-y-1 font-mono text-xs text-foreground">
+                    <div>Order: <span className="font-semibold text-primary">{selesaiInfoItem.orderNo || selesaiInfoItem.invoice}</span></div>
+                    <div>Customer: <span className="font-semibold">{selesaiInfoItem.customer}</span></div>
+                    <div>Nominal: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatRupiah(selesaiInfoItem.nominalKelebihan || selesaiInfoItem.jumlahCashback || 0)}</span></div>
+                  </div>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogAction
+                onClick={() => {
+                  if (!selesaiInfoItem) return;
+                  dismissCashback(selesaiInfoItem.id);
+                  if (selesaiInfoItem.orderNo) {
+                    dismissCashback(selesaiInfoItem.orderNo);
+                  }
+                  setDismissedCashbackIds((prev) => {
+                    const next = new Set(prev);
+                    next.add(selesaiInfoItem.id);
+                    if (selesaiInfoItem.orderNo) next.add(selesaiInfoItem.orderNo);
+                    return next;
+                  });
+                  toast.success(`Transaksi ${selesaiInfoItem.orderNo || selesaiInfoItem.invoice} diselesaikan dari antrean pending.`);
+                  setSelesaiInfoItem(null);
+                }}
+                className="h-8 text-xs px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+              >
+                OK
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Modal Edit Transaksi In-Place */}
+        <Dialog open={!!editingCashbackItem} onOpenChange={(open) => { if (!open) setEditingCashbackItem(null); }}>
+          <DialogContent className="border-border sm:max-w-lg bg-card max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                <Pencil className="w-4 h-4 text-primary" />
+                Edit Transaksi Cashback / Refund
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground pt-0.5">
+                Perbarui data transaksi. Perubahan disimpan langsung ke data kanonis tanpa membuat baris baru.
+              </DialogDescription>
+            </DialogHeader>
+
+            {editingCashbackItem && (() => {
+              const isPaid = editingCashbackItem.status === "Dibayar" || paidCashbackIds.has(editingCashbackItem.id);
+              return (
+                <div className="space-y-3 py-2 text-xs">
+                  {isPaid && (
+                    <div className="p-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                      ⚠️ Transaksi ini berstatus <strong>Dibayar</strong>. Nilai finansial (Total Tagihan, Uang Masuk, Kelebihan Bayar) dan Status dikunci demi menjaga integritas pembukuan kas.
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-foreground">Nomor Order</Label>
+                      <Input
+                        value={editingCashbackForm.orderNo || ""}
+                        disabled
+                        className="h-8 text-xs font-mono bg-muted/50"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-foreground">Tanggal Masuk Berkas</Label>
+                      <Input
+                        value={editingCashbackForm.tanggalMasukBerkas || ""}
+                        onChange={(e) => setEditingCashbackForm({ ...editingCashbackForm, tanggalMasukBerkas: e.target.value })}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-foreground">Nomor Polisi</Label>
+                      <Input
+                        value={editingCashbackForm.nopol || ""}
+                        onChange={(e) => setEditingCashbackForm({ ...editingCashbackForm, nopol: e.target.value })}
+                        className="h-8 text-xs font-mono uppercase"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-foreground">No. Telepon / WhatsApp</Label>
+                      <Input
+                        value={editingCashbackForm.phone || ""}
+                        onChange={(e) => setEditingCashbackForm({ ...editingCashbackForm, phone: e.target.value })}
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-foreground">Nama Customer</Label>
+                    <Input
+                      value={editingCashbackForm.customer || ""}
+                      onChange={(e) => setEditingCashbackForm({ ...editingCashbackForm, customer: e.target.value })}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-semibold text-foreground">Total Tagihan</Label>
+                      <Input
+                        type="number"
+                        disabled={isPaid}
+                        value={editingCashbackForm.totalTagihan ?? 0}
+                        onChange={(e) => {
+                          const tagihan = Number(e.target.value) || 0;
+                          const masuk = Number(editingCashbackForm.uangMasuk) || 0;
+                          setEditingCashbackForm({
+                            ...editingCashbackForm,
+                            totalTagihan: tagihan,
+                            nominalKelebihan: Math.max(0, masuk - tagihan),
+                          });
+                        }}
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-semibold text-foreground">Uang Masuk</Label>
+                      <Input
+                        type="number"
+                        disabled={isPaid}
+                        value={editingCashbackForm.uangMasuk ?? 0}
+                        onChange={(e) => {
+                          const masuk = Number(e.target.value) || 0;
+                          const tagihan = Number(editingCashbackForm.totalTagihan) || 0;
+                          setEditingCashbackForm({
+                            ...editingCashbackForm,
+                            uangMasuk: masuk,
+                            nominalKelebihan: Math.max(0, masuk - tagihan),
+                          });
+                        }}
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] font-semibold text-foreground">Kelebihan Bayar</Label>
+                      <Input
+                        type="number"
+                        disabled={isPaid}
+                        value={editingCashbackForm.nominalKelebihan ?? 0}
+                        onChange={(e) => setEditingCashbackForm({ ...editingCashbackForm, nominalKelebihan: Number(e.target.value) || 0 })}
+                        className="h-8 text-xs font-mono font-bold text-blue-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-foreground">Status</Label>
+                    <select
+                      disabled={isPaid}
+                      value={editingCashbackForm.status || "Pending"}
+                      onChange={(e) => setEditingCashbackForm({ ...editingCashbackForm, status: e.target.value })}
+                      className="w-full h-8 px-2.5 rounded-md border border-border bg-input-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                    >
+                      <option value="Pending">Pending</option>
+                      <option value="Dibayar">Dibayar</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold text-foreground">Alasan / Catatan</Label>
+                    <Textarea
+                      rows={2}
+                      value={editingCashbackForm.alasanPending || ""}
+                      onChange={(e) => setEditingCashbackForm({ ...editingCashbackForm, alasanPending: e.target.value })}
+                      placeholder="Catatan alasan kelebihan bayar atau pengembalian..."
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
+            <DialogFooter className="mt-3 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setEditingCashbackItem(null)}
+              >
+                Batal
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 text-xs bg-primary text-primary-foreground font-semibold"
+                onClick={handleSaveEditCashback}
+              >
+                Simpan Perubahan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }

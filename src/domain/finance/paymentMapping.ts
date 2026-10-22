@@ -3,12 +3,12 @@
  * Admin SUN89 — Biro Jasa Management System
  * 
  * Provides unified mapping across Order, Finance, and Backend statuses:
- * - Order Domain: "Belum Lunas" | "Kurang" | "Lunas"
- * - Finance Domain: "Belum Bayar" | "Kurang Bayar" | "Lunas"
- * - Backend / SQLite: "UNPAID" | "PARTIAL" | "PAID"
+ * - Order Domain: "Belum Lunas" | "Kurang" | "Lunas" | "Kelebihan Bayar"
+ * - Finance Domain: "Belum Bayar" | "Kurang Bayar" | "Lunas" | "Kelebihan Bayar"
+ * - Backend / SQLite: "UNPAID" | "PARTIAL" | "PAID" | "OVERPAID"
  */
 
-export type CanonicalPaymentStatus = "UNPAID" | "PARTIAL" | "PAID";
+export type CanonicalPaymentStatus = "UNPAID" | "PARTIAL" | "PAID" | "OVERPAID";
 
 export function toCanonicalPaymentStatus(
   status?: string | null,
@@ -16,19 +16,23 @@ export function toCanonicalPaymentStatus(
   dibayar?: number
 ): CanonicalPaymentStatus {
   if (totalBiaya !== undefined && dibayar !== undefined && totalBiaya > 0) {
-    if (dibayar >= totalBiaya) return "PAID";
+    if (dibayar > totalBiaya) return "OVERPAID";
+    if (dibayar === totalBiaya) return "PAID";
     if (dibayar > 0) return "PARTIAL";
     return "UNPAID";
   }
 
   const s = String(status || "").trim().toUpperCase();
+  if (s === "OVERPAID" || s === "KELEBIHAN BAYAR" || s === "LEBIH BAYAR") return "OVERPAID";
   if (s === "PAID" || s === "LUNAS") return "PAID";
   if (s === "PARTIAL" || s === "KURANG" || s === "KURANG BAYAR") return "PARTIAL";
   return "UNPAID";
 }
 
-export function toOrderPaymentStatus(canonical: CanonicalPaymentStatus): "Belum Lunas" | "Kurang" | "Lunas" {
+export function toOrderPaymentStatus(canonical: CanonicalPaymentStatus): "Belum Lunas" | "Kurang" | "Lunas" | "Kelebihan Bayar" {
   switch (canonical) {
+    case "OVERPAID":
+      return "Kelebihan Bayar";
     case "PAID":
       return "Lunas";
     case "PARTIAL":
@@ -39,8 +43,10 @@ export function toOrderPaymentStatus(canonical: CanonicalPaymentStatus): "Belum 
   }
 }
 
-export function toFinancePaymentStatus(canonical: CanonicalPaymentStatus): "Belum Bayar" | "Kurang Bayar" | "Lunas" {
+export function toFinancePaymentStatus(canonical: CanonicalPaymentStatus): "Belum Bayar" | "Kurang Bayar" | "Lunas" | "Kelebihan Bayar" {
   switch (canonical) {
+    case "OVERPAID":
+      return "Kelebihan Bayar";
     case "PAID":
       return "Lunas";
     case "PARTIAL":
@@ -52,5 +58,6 @@ export function toFinancePaymentStatus(canonical: CanonicalPaymentStatus): "Belu
 }
 
 export function isFullyPaid(status?: string | null): boolean {
-  return toCanonicalPaymentStatus(status) === "PAID";
+  const canonical = toCanonicalPaymentStatus(status);
+  return canonical === "PAID" || canonical === "OVERPAID";
 }

@@ -9,6 +9,7 @@ import { documentService } from "../services/documentService";
 import { documentTicketService } from "../services/documentTicketService";
 import { verifyToken, TokenPayload } from "../utils/crypto";
 import { ApiError } from "../middleware/errorHandler";
+import { normalizeDocumentUploadPayload } from "../utils/aliasNormalizer";
 
 async function resolveDocumentUser(
   req: AuthenticatedRequest,
@@ -96,6 +97,8 @@ export async function uploadDocument(
       throw new ApiError(401, "UNAUTHENTICATED", "Autentikasi diperlukan untuk mengunggah dokumen.");
     }
 
+    normalizeDocumentUploadPayload(req.body);
+
     const doc = await documentService.uploadDocument({
       buffer: req.file.buffer,
       originalName: req.file.originalname,
@@ -150,9 +153,22 @@ export async function previewDocument(
     const resolvedUser = await resolveDocumentUser(req, id, "preview");
     const { doc, stream } = await documentService.getDocumentStream(id, resolvedUser);
 
+    // Allow embedding in app iframes with tailored CSP per mimeType
+    res.removeHeader("X-Frame-Options");
+    const allowedAncestors = "frame-ancestors 'self' http://localhost:3000 http://127.0.0.1:3000 http://localhost:3001 http://127.0.0.1:3001 http://localhost:5173 http://127.0.0.1:5173";
+    if (doc.mimeType === "application/pdf") {
+      res.setHeader("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; object-src 'self'; ${allowedAncestors}`);
+    } else {
+      res.setHeader("Content-Security-Policy", `default-src 'none'; img-src 'self' data: blob:; ${allowedAncestors}`);
+    }
+
     res.setHeader("Content-Type", doc.mimeType);
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(doc.originalName)}"`);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${encodeURIComponent(doc.originalName)}"; filename*=UTF-8''${encodeURIComponent(doc.originalName)}`
+    );
     res.setHeader("Content-Length", doc.sizeBytes);
+    res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
 
@@ -173,9 +189,14 @@ export async function downloadDocument(
     const { doc, stream } = await documentService.getDocumentStream(id, resolvedUser);
 
     res.setHeader("Content-Type", doc.mimeType);
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(doc.originalName)}"`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodeURIComponent(doc.originalName)}"; filename*=UTF-8''${encodeURIComponent(doc.originalName)}`
+    );
     res.setHeader("Content-Length", doc.sizeBytes);
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox;");
 
     stream.pipe(res);
   } catch (err) {
@@ -241,6 +262,32 @@ export async function deleteDocument(
     res.json({
       success: true,
       message: "Dokumen berhasil dihapus.",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function linkDocumentToOrder(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new ApiError(401, "UNAUTHENTICATED", "Autentikasi diperlukan.");
+    }
+    const { id } = req.params;
+    normalizeDocumentUploadPayload(req.body);
+    const { orderNo } = req.body;
+    if (!orderNo) {
+      throw new ApiError(400, "VALIDATION_ERROR", "Field 'orderNo' (atau alias 'order_no') wajib disertakan.");
+    }
+    const success = documentService.linkOrder(id, orderNo, req.user);
+    res.json({
+      success,
+      message: success ? "Dokumen berhasil dihubungkan ke order." : "Gagal menghubungkan dokumen.",
       timestamp: new Date().toISOString(),
     });
   } catch (err) {

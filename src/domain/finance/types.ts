@@ -5,7 +5,7 @@
 
 import { SettlementCondition, RefundStatus } from "../order/types";
 
-export type PaymentStatus = "Belum Bayar" | "Kurang Bayar" | "Lunas";
+export type PaymentStatus = "Belum Bayar" | "Kurang Bayar" | "Lunas" | "Kelebihan Bayar";
 export type RealizationStatus = "PENDING" | "REALIZED";
 export type BillingLifecycleStatus = "ACTIVE" | "COMPLETED";
 
@@ -14,7 +14,7 @@ export type CollectionState = "BELUM_JATUH_TEMPO" | "JATUH_TEMPO" | "LUNAS";
 
 export interface PaymentSyncPayload {
   orderNo: string;
-  statusPembayaran: "Lunas" | "Belum Bayar" | "Kurang Bayar" | "Belum Lunas" | "Kurang";
+  statusPembayaran: "Lunas" | "Belum Bayar" | "Kurang Bayar" | "Kelebihan Bayar" | "Belum Lunas" | "Kurang";
   dibayar: number;
   kurang: number;
   totalBiaya: number;
@@ -110,6 +110,18 @@ export interface ProfitItem {
   jemputDokumen?: string;
   prosesSamsat?: string;
   pengantaranKembali?: string;
+  metodePembayaran?: string;
+  // 4 Structured disbursement fields (Decision 4)
+  metodePencairan?: "Cash" | "Transfer Bank" | string;
+  namaBank?: string;
+  nomorRekening?: string;
+  namaPemilikRekening?: string;
+  bank?: string;
+  namaRekening?: string;
+  noRekening?: string;
+  tanggalBayar?: string;
+  tanggalUangMasuk?: string;
+  status?: string;
 }
 
 export interface KasMessengerItem {
@@ -121,6 +133,11 @@ export interface KasMessengerItem {
   in: number;
   out: number;
   total: number;
+  penanggungJawab?: string;
+  orderNo?: string;
+  reimbursementId?: string;
+  receiptUrl?: string;
+  kategori?: string;
 }
 
 export interface KasKantorItem {
@@ -162,5 +179,6 @@ export interface BelumKurangBayarItem {
 export function derivePaymentStatus(totalTagihan: number, terbayar: number): PaymentStatus {
   if (terbayar <= 0) return "Belum Bayar";
   if (terbayar < totalTagihan) return "Kurang Bayar";
+  if (terbayar > totalTagihan) return "Kelebihan Bayar";
   return "Lunas";
 }

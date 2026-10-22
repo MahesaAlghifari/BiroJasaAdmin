@@ -11,9 +11,11 @@ export class ApiError extends Error {
   public statusCode: number;
   public code: string;
   public details?: any;
+  public readonly isApiError = true;
 
   constructor(statusCode: number, code: string, message: string, details?: any) {
     super(message);
+    this.name = "ApiError";
     this.statusCode = statusCode;
     this.code = code;
     this.details = details;
@@ -27,7 +29,7 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ): void {
-  const isApiError = err instanceof ApiError;
+  const isApiError = err instanceof ApiError || err?.isApiError === true || (err && typeof err.statusCode === "number" && typeof err.code === "string");
   const statusCode = isApiError ? err.statusCode : (err.statusCode || (err.status ? Number(err.status) : 500));
   
   // Always log server-side for troubleshooting (with sanitized URL)
@@ -38,11 +40,12 @@ export function errorHandler(
 
   const isProduction = CONFIG.NODE_ENV === "production";
   
-  // In production, sanitize 500 and non-ApiErrors to prevent leaking SQL/filesystem details
-  let code = isApiError ? err.code : "INTERNAL_SERVER_ERROR";
-  let message = isApiError ? err.message : "Terjadi kesalahan internal pada server.";
+  // For 4xx errors, preserve the user-facing message and code
+  let code = isApiError ? err.code : (err.code || "VALIDATION_ERROR");
+  let message = err.message || "Permintaan tidak dapat diproses.";
 
-  if (isProduction && (!isApiError || statusCode >= 500)) {
+  // In production, sanitize 500+ errors to prevent leaking stack traces / internals
+  if (statusCode >= 500 && isProduction) {
     code = "INTERNAL_SERVER_ERROR";
     message = "Terjadi kesalahan internal pada server.";
   }

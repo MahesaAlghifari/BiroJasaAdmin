@@ -21,14 +21,37 @@ export interface IOrderDataProvider {
   advanceOrder(orderNo: string, targetStage: StageName, updates: Partial<OperationalOrder>): boolean;
   rollbackOrder(orderNo: string, targetStage: StageName, updates: Partial<OperationalOrder>): boolean;
   archiveOrder(orderNo: string): boolean;
-  verifyPayment?(orderNo: string, verifierName?: string): boolean;
+  deleteArchivedOrder?(orderNo: string): boolean;
+  clearArchivedOrders?(): boolean;
+  cancelOrder?(orderNo: string, reason?: string): boolean | Promise<boolean>;
+  verifyPayment?(orderNo: string, verifierName?: string, confirmedAmount?: number, notes?: string): boolean;
   subscribe(listener: () => void): () => void;
+  getIsLoading?(): boolean;
+  getError?(): string | null;
+  getIsInitialized?(): boolean;
+  refresh?(): Promise<void>;
 }
 
 export class MockOrderProvider implements IOrderDataProvider {
   private activeOrders: Record<StageName, OperationalOrder[]> = createInitialOrders();
   private archivedOrders: OperationalOrder[] = [];
   private listeners: Set<() => void> = new Set();
+
+  public getIsLoading(): boolean {
+    return false;
+  }
+
+  public getError(): string | null {
+    return null;
+  }
+
+  public getIsInitialized(): boolean {
+    return true;
+  }
+
+  public async refresh(): Promise<void> {
+    this.notify();
+  }
 
   public subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -177,20 +200,96 @@ export class MockOrderProvider implements IOrderDataProvider {
     return true;
   }
 
-  public verifyPayment(orderNo: string, verifierName: string = "Admin"): boolean {
+  public deleteArchivedOrder(orderNo: string): boolean {
+    const idx = this.archivedOrders.findIndex((o) => o.orderNo === orderNo);
+    if (idx !== -1) {
+      this.archivedOrders.splice(idx, 1);
+      this.notify();
+      return true;
+    }
+    return false;
+  }
+
+  public clearArchivedOrders(): boolean {
+    this.archivedOrders = [];
+    this.notify();
+    return true;
+  }
+
+  public cancelOrder(orderNo: string, reason?: string): boolean {
+    for (const stage of STAGES) {
+      const idx = this.activeOrders[stage]?.findIndex((o) => o.orderNo === orderNo) ?? -1;
+      if (idx !== -1) {
+        const orderToCancel = this.activeOrders[stage][idx];
+        this.activeOrders[stage][idx] = {
+          ...orderToCancel,
+          currentStageName: "Dibatalkan" as any,
+          stageBeforeCancel: (orderToCancel as any).stageBeforeCancel || stage,
+          catatanOrder: `${orderToCancel.catatanOrder ? orderToCancel.catatanOrder + " | " : ""}Dibatalkan: ${reason || "-"}`,
+        };
+        (this.activeOrders[stage][idx] as any).isCancelled = true;
+        (this.activeOrders[stage][idx] as any).status = "Dibatalkan";
+        (this.activeOrders[stage][idx] as any).cancellationReason = reason;
+        this.notify();
+        return true;
+      }
+    }
+    const archIdx = this.archivedOrders.findIndex((o) => o.orderNo === orderNo);
+    if (archIdx !== -1) {
+      const orderToCancel = this.archivedOrders[archIdx];
+      this.archivedOrders[archIdx] = {
+        ...orderToCancel,
+        currentStageName: "Dibatalkan" as any,
+        catatanOrder: `${orderToCancel.catatanOrder ? orderToCancel.catatanOrder + " | " : ""}Dibatalkan: ${reason || "-"}`,
+      };
+      (this.archivedOrders[archIdx] as any).isCancelled = true;
+      (this.archivedOrders[archIdx] as any).status = "Dibatalkan";
+      (this.archivedOrders[archIdx] as any).cancellationReason = reason;
+      this.notify();
+      return true;
+    }
+    return false;
+  }
+
+  public verifyPayment(orderNo: string, verifierName: string = "Admin", confirmedAmount?: number, notes?: string): boolean {
     const targetOrder = this.getOrderByNo(orderNo);
     if (!targetOrder) return false;
     const nowStr = new Date().toISOString();
+    const totalBiaya = targetOrder.payment?.totalBiaya || targetOrder.totalEstimasi || 0;
+    const paid = confirmedAmount !== undefined
+      ? Math.max(0, confirmedAmount)
+      : (targetOrder.payment?.nominalDibayarAwal !== undefined
+          ? targetOrder.payment.nominalDibayarAwal
+          : (targetOrder.payment?.dibayar && targetOrder.payment.dibayar > 0 ? targetOrder.payment.dibayar : totalBiaya));
+    const sisa = Math.max(0, totalBiaya - paid);
+    const overpayment = Math.max(0, paid - totalBiaya);
+    const statusPembayaran = paid >= totalBiaya ? "Lunas" : paid > 0 ? "Kurang Bayar" : "Belum Bayar";
+
+    const prev = targetOrder.payment?.nominalPembayaranAwalTerkonfirmasi ?? targetOrder.payment?.nominalDibayarAwal ?? targetOrder.payment?.dibayar ?? 0;
+    const riwayat = [...(targetOrder.payment?.riwayatKoreksiPembayaran || [])];
+    if (prev !== paid || notes) {
+      riwayat.push({
+        nominalLama: prev,
+        nominalBaru: paid,
+        tanggal: nowStr,
+        admin: verifierName,
+        catatan: notes,
+      });
+    }
+
     return this.updateOrder(orderNo, {
       payment: {
         ...targetOrder.payment,
         isPaymentVerified: true,
         paymentVerifiedAt: nowStr,
         paymentVerifiedBy: verifierName,
-        statusPembayaran: "Lunas",
-        dibayar: targetOrder.payment.totalBiaya,
-        kurang: 0,
+        nominalPembayaranAwalTerkonfirmasi: paid,
+        statusPembayaran,
+        dibayar: paid,
+        kurang: sisa,
+        overpayment,
         tanggalBayar: nowStr.split("T")[0],
+        riwayatKoreksiPembayaran: riwayat,
       },
     });
   }

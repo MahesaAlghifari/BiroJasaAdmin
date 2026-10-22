@@ -22,6 +22,7 @@ export interface IDocumentRepository {
   createAccessTicket(id: string, operation?: "preview" | "download"): Promise<string>;
   getAuthenticatedPreviewUrl(id: string): Promise<string>;
   getAuthenticatedDownloadUrl(id: string): Promise<string>;
+  linkOrder?(id: string, orderNo: string): Promise<boolean>;
   setProvider(provider: IDocumentProvider): void;
   getProvider(): IDocumentProvider;
 }
@@ -95,6 +96,13 @@ export class DocumentRepository implements IDocumentRepository {
       return this.provider.getAuthenticatedDownloadUrl(id);
     }
     return Promise.resolve(this.getDownloadUrl(id));
+  }
+
+  public linkOrder(id: string, orderNo: string): Promise<boolean> {
+    if (typeof (this.provider as any).linkOrder === "function") {
+      return (this.provider as any).linkOrder(id, orderNo);
+    }
+    return Promise.resolve(true);
   }
 }
 

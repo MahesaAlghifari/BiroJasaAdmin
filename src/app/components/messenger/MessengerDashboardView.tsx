@@ -44,15 +44,15 @@ export function MessengerDashboardView({
   const [selectedTaskForDetail, setSelectedTaskForDetail] = useState<MessengerTaskItem | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
-  // Strict per-employee isolation
+  // Authoritative per-employee isolation and available tasks
   const myTasks = useMemo(() => {
-    return getMessengerTasksForEmployee(activeOrders, currentUser.employeeId || "");
-  }, [activeOrders, currentUser.employeeId]);
+    return getMessengerTasksForEmployee(activeOrders, currentUser);
+  }, [activeOrders, currentUser]);
 
   // Operational KPIs strictly for current messenger
   const stats = useMemo(() => {
-    return getMessengerStatsForEmployee(activeOrders, currentUser.employeeId || "");
-  }, [activeOrders, currentUser.employeeId]);
+    return getMessengerStatsForEmployee(activeOrders, currentUser);
+  }, [activeOrders, currentUser]);
 
   // Attention items: Approaching deadline (< 6h), overdue, or urgent
   const attentionTasks = useMemo(() => {

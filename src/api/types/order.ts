@@ -15,7 +15,7 @@ export interface CreateOrderRequest {
   tahunKendaraan: number | string;
   wilayahSamsatAsal: string;
   wilayahSamsatTujuan?: string;
-  tipePembayaran: "Bayar di Awal" | "Bayar di Akhir";
+  tipePembayaran: "Bayar di Awal" | "Bayar di Akhir" | "Tempo";
   metodePembayaran: string;
   catatanOrder?: string;
   biayaJasa?: number;
@@ -39,7 +39,7 @@ export interface AdvanceOrderRequest {
 
 export interface OrderListQuery extends PaginationQuery {
   stage?: StageName;
-  paymentStatus?: "Lunas" | "Belum Lunas" | "Kurang";
+  paymentStatus?: "Lunas" | "Belum Bayar" | "Kurang Bayar" | "Kelebihan Bayar" | "Belum Lunas" | "Kurang";
   search?: string;
 }
 

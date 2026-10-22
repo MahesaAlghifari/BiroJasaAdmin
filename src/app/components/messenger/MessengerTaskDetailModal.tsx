@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -43,12 +43,16 @@ import {
   updateMessengerComponent,
   uploadMessengerEvidence,
   completeMessengerDelivery,
+  completeMessengerPickup,
   calculateEstimatedCompletion,
   UserContext,
 } from "../../data/messengerTaskAdapter";
+import { orderStore } from "../../data/orderStore";
 import { MessengerWaitingReasonDialog } from "./MessengerWaitingReasonDialog";
 import { toast } from "sonner";
 import { cn } from "../ui/utils";
+import { processDocumentUpload, formatFileSize } from "../../utils/fileCompressor";
+import { documentRepository } from "../../../data/repositories/documentRepository";
 
 interface MessengerTaskDetailModalProps {
   task: MessengerTaskItem | null;
@@ -84,10 +88,102 @@ export function MessengerTaskDetailModal({
   const [waitingTargetComponentId, setWaitingTargetComponentId] = useState<string | null>(null);
 
   // Local state for Delivery Handover Form (Stage 7 -> 8)
+  const deliveryFileInputRef = useRef<HTMLInputElement>(null);
+  const evidenceFileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedCompForEvidence, setSelectedCompForEvidence] = useState<{ id: string; name: string } | null>(null);
+  const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const [recipientName, setRecipientName] = useState(task.rawOrder.deliveryHandover?.recipientName || task.customer || "");
   const [relationship, setRelationship] = useState(task.rawOrder.deliveryHandover?.relationship || "Pemilik Langsung");
   const [deliveryNotes, setDeliveryNotes] = useState(task.rawOrder.deliveryHandover?.notes || "");
-  const [photoProofName, setPhotoProofName] = useState<string | null>(task.rawOrder.deliveryHandover?.photoProofUrl ? "Foto_Serah_Terima.jpg" : null);
+  const [deliveryFileUrl, setDeliveryFileUrl] = useState<string>(task.rawOrder.deliveryHandover?.photoProofUrl || "");
+  const [deliveryFileName, setDeliveryFileName] = useState<string>(task.rawOrder.deliveryHandover?.fileName || (task.rawOrder.deliveryHandover?.photoProofUrl ? "Foto_Serah_Terima.jpg" : ""));
+  const [deliveryFileType, setDeliveryFileType] = useState<"image" | "pdf">(task.rawOrder.deliveryHandover?.fileType || "image");
+  const [deliveryFileSize, setDeliveryFileSize] = useState<number>(task.rawOrder.deliveryHandover?.fileSize || 0);
+  const [isCompressingDeliveryFile, setIsCompressingDeliveryFile] = useState(false);
+
+  // Section 2.B Checklist Dokumen Wajib
+  const requiredDocs = useMemo(() => {
+    const clientDocs = task.rawOrder.clientDocuments;
+    if (clientDocs && Object.keys(clientDocs).length > 0) {
+      return Object.entries(clientDocs).map(([key, doc]) => ({
+        key,
+        name: doc.name || (key.toUpperCase() === "STNK" ? "STNK Asli" : key.toUpperCase() === "BPKB" ? "BPKB Asli" : key.toUpperCase() === "KTP" ? "KTP Pemilik Asli" : key.toUpperCase() === "SKKP" ? "SKKP (Surat Ketetapan Pajak)" : key),
+        isMandatory: doc.isOptional !== true,
+      }));
+    }
+    return [
+      { key: "stnk", name: "STNK Asli", isMandatory: true },
+      { key: "bpkb", name: "BPKB Asli", isMandatory: true },
+      { key: "ktp", name: "KTP Pemilik Asli", isMandatory: true },
+      { key: "skkp", name: "SKKP (Surat Ketetapan Pajak)", isMandatory: false },
+      { key: "lainnya", name: "Dokumen Tambahan / Surat Kuasa", isMandatory: false },
+    ];
+  }, [task.rawOrder.clientDocuments]);
+
+  const [checkedDocs, setCheckedDocs] = useState<Record<string, boolean>>(() => {
+    return task.rawOrder.pickupChecklist || {};
+  });
+
+  const handleToggleDoc = (key: string, checked: boolean) => {
+    const updated = { ...checkedDocs, [key]: checked };
+    setCheckedDocs(updated);
+    orderStore.updateOrder(task.orderNo, {
+      pickupChecklist: updated,
+    });
+  };
+
+  // Section 2.C Catatan Kendala tanpa dropdown
+  const [catatanKendala, setCatatanKendala] = useState(
+    task.rawOrder.catatanKendala || task.pickupProof?.catatanKendala || ""
+  );
+  const [isSavingKendala, setIsSavingKendala] = useState(false);
+
+  const handleSaveCatatanKendala = () => {
+    setIsSavingKendala(true);
+    const success = orderStore.updateOrder(task.orderNo, {
+      catatanKendala: catatanKendala.trim(),
+      messengerTaskNotes: catatanKendala.trim() || undefined,
+    });
+    setIsSavingKendala(false);
+    if (success) {
+      toast.success("Catatan kendala berhasil disimpan!");
+      onTaskUpdated();
+    } else {
+      toast.error("Gagal menyimpan catatan kendala");
+    }
+  };
+
+  const [isSubmittingPickup, setIsSubmittingPickup] = useState(false);
+
+  const handleCompletePickup = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const missingMandatory = requiredDocs.filter((d) => d.isMandatory && !checkedDocs[d.key]);
+    if (missingMandatory.length > 0) {
+      toast.error(
+        `Penyelesaian diblokir! Dokumen wajib berikut belum dicentang: ${missingMandatory.map((d) => d.name).join(", ")}`
+      );
+      return;
+    }
+
+    setIsSubmittingPickup(true);
+    const res = completeMessengerPickup(
+      task.orderNo,
+      {
+        catatanKendala: catatanKendala.trim() || undefined,
+        pickupChecklist: checkedDocs,
+      },
+      currentUser
+    );
+    setIsSubmittingPickup(false);
+
+    if (res.success) {
+      toast.success(`Penjemputan dokumen untuk order ${task.orderNo} selesai!`);
+      onTaskUpdated();
+      onOpenChange(false);
+    } else {
+      toast.error(res.error || "Gagal menyelesaikan penjemputan");
+    }
+  };
 
   // Handler: Start task
   const handleStartTask = () => {
@@ -180,24 +276,101 @@ export function MessengerTaskDetailModal({
     }
   };
 
-  // Handler: Mock evidence upload for component
-  const handleSimulateEvidenceUpload = (componentId: string, compName: string) => {
-    const evidence: ComponentEvidence = {
-      id: `ev-${Date.now()}`,
-      fileUrl: `https://mock.storage/evidence_${componentId}_${Date.now()}.jpg`,
-      fileType: "IMAGE",
-      fileName: `Bukti_${compName.replace(/\s+/g, "_")}.jpg`,
-      fileSize: "1.4 MB",
-      uploadedAt: new Date().toISOString(),
-      uploadedBy: currentUser.userName,
-    };
+  // Handler: Real evidence upload for component
+  const handleEvidenceFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedCompForEvidence) return;
 
-    const res = uploadMessengerEvidence(task.orderNo, componentId, evidence, currentUser);
-    if (res.success) {
-      toast.success(`Bukti untuk ${compName} berhasil diunggah!`);
-      onTaskUpdated();
-    } else {
-      toast.error(res.error || "Gagal mengunggah bukti");
+    try {
+      setIsUploadingEvidence(true);
+      const processed = await processDocumentUpload(file);
+      let fileUrl = processed.fileUrl;
+
+      try {
+        const uploaded = await documentRepository.uploadDocument(processed.file, {
+          orderNo: task.orderNo,
+          documentType: selectedCompForEvidence.name,
+          metadata: {
+            phase: "AFTER",
+            componentId: selectedCompForEvidence.id,
+          },
+        });
+        if (uploaded?.id) {
+          fileUrl = uploaded.fileUrl;
+        }
+      } catch (err) {
+        console.warn("Evidence server upload failed, using processed fileUrl:", err);
+      }
+
+      const evidence: ComponentEvidence = {
+        id: `ev-${Date.now()}`,
+        fileUrl,
+        fileType: processed.fileType === "pdf" ? "PDF" : "IMAGE",
+        fileName: processed.fileName,
+        fileSize: formatFileSize(processed.fileSize),
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: currentUser.userName,
+      };
+
+      const res = uploadMessengerEvidence(task.orderNo, selectedCompForEvidence.id, evidence, currentUser);
+      if (res.success) {
+        toast.success(`Bukti untuk ${selectedCompForEvidence.name} (${processed.fileName}) berhasil diunggah!`);
+        onTaskUpdated();
+      } else {
+        toast.error(res.error || "Gagal mengunggah bukti");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Gagal memproses berkas bukti");
+    } finally {
+      setIsUploadingEvidence(false);
+      e.target.value = "";
+      setSelectedCompForEvidence(null);
+    }
+  };
+
+  // Handler: Real file change for delivery handover (PDF, JPG, JPEG, PNG, HEIC up to 5MB with compression)
+  const handleDeliveryFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsCompressingDeliveryFile(true);
+      const processed = await processDocumentUpload(file);
+      let finalFileUrl = processed.fileUrl;
+
+      try {
+        const uploaded = await documentRepository.uploadDocument(processed.file, {
+          orderNo: task.orderNo,
+          documentType: "Bukti Serah Terima",
+          metadata: {
+            phase: "AFTER",
+            category: "Bukti Serah Terima",
+          },
+        });
+        if (uploaded?.id) {
+          finalFileUrl = uploaded.fileUrl;
+        }
+      } catch (uploadErr) {
+        console.warn("Delivery proof server upload failed, using processed fileUrl:", uploadErr);
+      }
+
+      setDeliveryFileUrl(finalFileUrl);
+      setDeliveryFileName(processed.fileName);
+      setDeliveryFileType(processed.fileType);
+      setDeliveryFileSize(processed.fileSize);
+
+      if (processed.compressed && processed.compressionRatio) {
+        toast.success(
+          `Berkas ${file.name} berhasil diproses & dikompres (${formatFileSize(file.size)} ➔ ${formatFileSize(processed.fileSize)}, hemat ${processed.compressionRatio})!`
+        );
+      } else {
+        toast.success(`Berkas ${file.name} (${formatFileSize(processed.fileSize)}) berhasil dilampirkan!`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Gagal memproses berkas serah terima");
+    } finally {
+      setIsCompressingDeliveryFile(false);
+      e.target.value = "";
     }
   };
 
@@ -212,8 +385,11 @@ export function MessengerTaskDetailModal({
     const handoverProof: DeliveryHandoverProof = {
       recipientName: recipientName.trim(),
       relationship,
-      photoProofUrl: photoProofName ? `https://mock.storage/${photoProofName}` : "https://mock.storage/foto_serah_terima_default.jpg",
-      notes: deliveryNotes.trim(),
+      photoProofUrl: deliveryFileUrl || undefined,
+      fileName: deliveryFileName || undefined,
+      fileType: deliveryFileType,
+      fileSize: deliveryFileSize || undefined,
+      notes: undefined,
       completedAt: new Date().toISOString(),
     };
 
@@ -300,15 +476,6 @@ export function MessengerTaskDetailModal({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenWaitingDialog()}
-                        className="text-xs text-amber-600 border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950"
-                      >
-                        <Clock className="w-3.5 h-3.5 mr-1" /> Kendala / Menunggu
-                      </Button>
-
                       {task.status === "Belum Diambil" && (
                         <Button
                           size="sm"
@@ -321,30 +488,142 @@ export function MessengerTaskDetailModal({
                     </div>
                   </div>
 
-                  {/* Dokumen yang Diambil */}
-                  <div className="p-4 rounded-xl border border-border bg-card space-y-2">
-                    <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">
-                      Dokumen Fisik yang Diambil
-                    </h4>
-                    <div className="space-y-1.5 pt-1">
-                      {Object.entries(task.rawOrder.clientDocuments || {}).map(([key, doc]) => (
-                        <div
-                          key={key}
-                          className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-xs"
-                        >
-                          <div className="flex items-center gap-2">
-                            <FileText className="w-4 h-4 text-primary shrink-0" />
-                            <span className="font-medium text-foreground uppercase">
-                              {key}: {doc.name || "Berkas Fisik"}
-                            </span>
-                          </div>
-                          <Badge variant="outline" className="text-[10px]">
-                            {doc.status}
-                          </Badge>
-                        </div>
-                      ))}
+                  {/* Section 2.B: Dokumen Fisik yang Perlu Diambil (Checklist Wajib) */}
+                  <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">
+                          Dokumen Fisik yang Perlu Diambil
+                        </h4>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Centang seluruh dokumen fisik wajib yang diterima dari klien sebelum menyelesaikan tugas.
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-xs font-semibold px-2 py-0.5">
+                        {requiredDocs.filter((d) => checkedDocs[d.key]).length} / {requiredDocs.filter((d) => d.isMandatory).length} Wajib
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-2 pt-1">
+                      {requiredDocs.map((doc) => {
+                        const isChecked = Boolean(checkedDocs[doc.key]);
+                        return (
+                          <label
+                            key={doc.key}
+                            className={cn(
+                              "flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all",
+                              isChecked
+                                ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-950 dark:text-emerald-200"
+                                : "bg-muted/40 border-border/80 hover:bg-muted text-foreground"
+                            )}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => handleToggleDoc(doc.key, e.target.checked)}
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                              />
+                              <div>
+                                <span className="font-semibold text-xs block">
+                                  {doc.name}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {doc.isMandatory ? "Wajib Dicentang" : "Opsional (Bila Ada)"}
+                                </span>
+                              </div>
+                            </div>
+                            {isChecked ? (
+                              <Badge className="bg-emerald-600 text-white text-[10px] px-2 py-0.5">
+                                ✓ Diterima
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                {doc.isMandatory ? "Belum Diambil" : "Opsional"}
+                              </Badge>
+                            )}
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
+
+                  {/* Section 2.C: Catatan Kendala tanpa dropdown */}
+                  <div className="p-4 rounded-xl border border-border bg-card space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="modal-catatan-kendala" className="text-xs font-bold text-foreground uppercase tracking-wider block">
+                        Catatan Kendala
+                      </Label>
+                      <span className="text-[10px] text-muted-foreground">Opsional jika tidak ada kendala</span>
+                    </div>
+
+                    <Textarea
+                      id="modal-catatan-kendala"
+                      placeholder="Tulis kendala operasional (contoh: alamat salah, tidak ditemukan, klien tidak dapat dihubungi, dokumen belum siap)..."
+                      value={catatanKendala}
+                      onChange={(e) => setCatatanKendala(e.target.value)}
+                      rows={2}
+                      className="text-xs resize-none"
+                    />
+
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isSavingKendala}
+                        onClick={handleSaveCatatanKendala}
+                        className="text-xs h-7 px-3 border-border font-medium"
+                      >
+                        {isSavingKendala ? "Menyimpan..." : "Simpan Catatan Kendala"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Selesaikan Penjemputan Action (When in progress) */}
+                  {(task.status === "Dalam Proses" || task.statusCode === "IN_PROGRESS") && (
+                    <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-50/10 flex items-center justify-between gap-3">
+                      <div>
+                        <span className="text-xs font-semibold text-foreground block">
+                          Selesaikan Penjemputan Dokumen
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Pastikan seluruh dokumen wajib telah dicentang sebelum menyelesaikan tugas.
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        disabled={isSubmittingPickup}
+                        onClick={() => handleCompletePickup()}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs h-8 px-4 shadow-xs shrink-0"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                        {isSubmittingPickup ? "Menyimpan..." : "Selesaikan Penjemputan"}
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Bukti Penjemputan Tersimpan (When completed or proof exists) */}
+                  {task.rawOrder.pickupProof && (
+                    <div className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/20 dark:bg-emerald-950/20 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Bukti Penjemputan Terverifikasi
+                        </span>
+                        {task.rawOrder.pickupProof.completedAt && (
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {new Date(task.rawOrder.pickupProof.completedAt).toLocaleString("id-ID")}
+                          </span>
+                        )}
+                      </div>
+                      {task.rawOrder.pickupProof.catatanKendala && (
+                        <p className="text-xs text-foreground/80 italic bg-card p-2 rounded border border-border/60">
+                          Kendala: "{task.rawOrder.pickupProof.catatanKendala}"
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -512,7 +791,11 @@ export function MessengerTaskDetailModal({
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleSimulateEvidenceUpload(comp.componentId, comp.name)}
+                              disabled={isUploadingEvidence}
+                              onClick={() => {
+                                setSelectedCompForEvidence({ id: comp.componentId, name: comp.name });
+                                evidenceFileInputRef.current?.click();
+                              }}
                               className="h-7 text-xs"
                             >
                               <Upload className="w-3 h-3 mr-1" /> Unggah Bukti
@@ -522,35 +805,70 @@ export function MessengerTaskDetailModal({
                       );
                     })}
                   </div>
+                  <input
+                    ref={evidenceFileInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.heic,.HEIC"
+                    className="hidden"
+                    onChange={handleEvidenceFileChange}
+                  />
                 </div>
               )}
 
               {/* === CASE 3: PENGANTARAN DOKUMEN === */}
               {task.keteranganTugas === "Pengantaran Dokumen" && (
                 <div className="space-y-4">
-                  {/* Delivery Location & Recipient Info */}
-                  <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/30 dark:bg-emerald-950/20 space-y-2">
-                    <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-300 uppercase tracking-wider">
-                      Alamat Tujuan Pengantaran
+                  {/* Section 4: Alamat Pengantaran Dokumen (Authoritative from Admin) */}
+                  <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-50/10 dark:bg-emerald-950/10 space-y-2">
+                    <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-emerald-600" /> Alamat Pengantaran Dokumen
                     </h4>
-                    <p className="text-xs text-foreground font-medium">
-                      {task.rawOrder.alamatPengantaran?.detail || task.lokasi}
-                    </p>
+                    {task.rawOrder.alamatPengantaran && (task.rawOrder.alamatPengantaran.detail || task.rawOrder.alamatPengantaran.kota || task.rawOrder.alamatPengantaran.kecamatan) ? (
+                      <div className="space-y-1 text-xs">
+                        <p className="font-semibold text-foreground">{task.rawOrder.alamatPengantaran.detail}</p>
+                        {(task.rawOrder.alamatPengantaran.rtRw || task.rawOrder.alamatPengantaran.nomor) && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {task.rawOrder.alamatPengantaran.rtRw ? `RT/RW: ${task.rawOrder.alamatPengantaran.rtRw}` : ""}{task.rawOrder.alamatPengantaran.rtRw && task.rawOrder.alamatPengantaran.nomor ? " • " : ""}{task.rawOrder.alamatPengantaran.nomor ? `No. ${task.rawOrder.alamatPengantaran.nomor}` : ""}
+                          </p>
+                        )}
+                        <p className="text-[11px] text-muted-foreground">
+                          {[task.rawOrder.alamatPengantaran.kelurahan, task.rawOrder.alamatPengantaran.kecamatan, task.rawOrder.alamatPengantaran.kota].filter(Boolean).join(", ")}
+                        </p>
+                        {task.rawOrder.alamatPengantaran.landmark && (
+                          <p className="text-[11px] text-primary/90 font-medium">Patokan: {task.rawOrder.alamatPengantaran.landmark}</p>
+                        )}
+                      </div>
+                    ) : task.rawOrder.detailAlamatPengembalian ? (
+                      <p className="text-xs text-foreground font-medium">{task.rawOrder.detailAlamatPengembalian}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">Alamat pengantaran belum diisi di sistem Admin.</p>
+                    )}
                     <div className="flex flex-wrap items-center gap-2 pt-2">
                       <a
                         href={`tel:${task.phone}`}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
                       >
-                        <Phone className="w-3 h-3" /> Hubungi Customer ({task.phone})
+                        <Phone className="w-3 h-3" /> Hubungi Customer
                       </a>
-                      <a
-                        href={mapsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        <ExternalLink className="w-3 h-3" /> Buka Google Maps
-                      </a>
+                      {task.rawOrder.alamatPengantaran?.mapsUrl ? (
+                        <a
+                          href={task.rawOrder.alamatPengantaran.mapsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Buka Google Maps
+                        </a>
+                      ) : (
+                        <a
+                          href={mapsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Buka Google Maps
+                        </a>
+                      )}
                     </div>
                   </div>
 
@@ -561,7 +879,7 @@ export function MessengerTaskDetailModal({
                         Form Bukti Serah Terima Dokumen (Penyelesaian Tugas)
                       </h4>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Lengkapi form serah terima untuk menyelesaikan pengantaran ke customer (Stage 7 → Stage 8).
+                        Lengkapi nama penerima dan bukti untuk menyelesaikan pengantaran ke customer (Stage 7 → Stage 8).
                       </p>
                     </div>
 
@@ -599,44 +917,70 @@ export function MessengerTaskDetailModal({
                       </div>
                     </div>
 
-                    {/* Foto Serah Terima Upload Simulation */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-foreground">
-                        Foto Bukti Serah Terima <span className="text-destructive">*</span>
-                      </Label>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setPhotoProofName(`Foto_Serah_Terima_${task.orderNo}.jpg`);
-                            toast.success("Foto serah terima berhasil ditangkap/diunggah!");
-                          }}
-                          className="h-8 text-xs font-medium"
-                        >
-                          <Camera className="w-3.5 h-3.5 mr-1" />
-                          {photoProofName ? "Ganti Foto Bukti" : "Ambil / Unggah Foto Bukti"}
-                        </Button>
-                        {photoProofName && (
-                          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" /> {photoProofName}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    {/* Real File Input for Delivery Handover (PDF, JPEG, JPG, PNG, HEIC up to 5MB with compression) */}
+                    <input
+                      ref={deliveryFileInputRef}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.heic,.HEIC"
+                      className="hidden"
+                      onChange={handleDeliveryFileChange}
+                    />
 
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-foreground">
-                        Catatan Pengantaran (Opsional)
-                      </Label>
-                      <Textarea
-                        placeholder="Contoh: Dokumen diserahkan di pos sekuriti lantai 1 gedung..."
-                        value={deliveryNotes}
-                        onChange={(e) => setDeliveryNotes(e.target.value)}
-                        rows={2}
-                        className="text-xs resize-none"
-                      />
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold text-foreground">
+                          Bukti Serah Terima (PDF / Foto) <span className="text-destructive">*</span>
+                        </Label>
+                        <span className="text-[10px] text-muted-foreground">PDF / JPG / PNG (Maks 5MB)</span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={isCompressingDeliveryFile}
+                            onClick={() => deliveryFileInputRef.current?.click()}
+                            className="h-8 text-xs font-medium"
+                          >
+                            <Upload className="w-3.5 h-3.5 mr-1 text-primary" />
+                            {isCompressingDeliveryFile
+                              ? "Memproses..."
+                              : deliveryFileUrl
+                              ? "Ganti Berkas / Foto"
+                              : "Unggah Berkas / Foto"}
+                          </Button>
+                        </div>
+
+                        {deliveryFileUrl && (
+                          <div className="flex items-center gap-2.5 p-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+                            {deliveryFileType === "pdf" ? (
+                              <div className="w-8 h-8 rounded bg-rose-500/10 border border-rose-200 flex items-center justify-center shrink-0">
+                                <FileText className="w-4 h-4 text-rose-600" />
+                              </div>
+                            ) : (
+                              <img
+                                src={deliveryFileUrl}
+                                alt="Bukti serah terima"
+                                className="w-8 h-8 object-cover rounded border border-border shrink-0"
+                              />
+                            )}
+                            <div className="min-w-0 flex-1 text-left">
+                              <p className="text-[11px] font-semibold text-foreground truncate">
+                                {deliveryFileName || "Bukti_Serah_Terima"}
+                              </p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[10px] text-emerald-600 font-medium">✓ Siap Dilampirkan</span>
+                                {deliveryFileSize > 0 && (
+                                  <span className="text-[10px] text-muted-foreground font-mono">
+                                    ({formatFileSize(deliveryFileSize)})
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="pt-2 border-t border-border flex justify-end">
@@ -659,10 +1003,6 @@ export function MessengerTaskDetailModal({
                   <div>
                     <span className="text-muted-foreground">Nama Customer:</span>
                     <p className="font-semibold text-foreground mt-0.5">{task.customer}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Nomor Telepon:</span>
-                    <p className="font-semibold text-foreground mt-0.5">{task.phone}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Nomor Polisi:</span>
@@ -694,7 +1034,7 @@ export function MessengerTaskDetailModal({
                 <div className="pt-2 border-t border-border/60">
                   <span className="text-xs text-muted-foreground">Alamat Pengantaran:</span>
                   <p className="text-xs font-medium text-foreground mt-0.5">
-                    {task.rawOrder.alamatPengantaran?.detail || "-"}
+                    {task.rawOrder.alamatPengantaran?.detail || task.rawOrder.detailAlamatPengembalian || "Alamat pengantaran belum diisi di sistem Admin."}
                   </p>
                 </div>
               </div>

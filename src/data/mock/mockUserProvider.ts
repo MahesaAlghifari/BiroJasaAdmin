@@ -45,6 +45,7 @@ export interface IUserDataProvider {
   subscribe(listener: () => void): () => void;
   authenticate(email: string, password: string): Promise<AuthUserSession | null>;
   getDemoCredentials(): typeof DEMO_CREDENTIALS;
+  resetPassword?(id: number | string): Promise<{ success: boolean; message?: string }>;
   isLoading?(): boolean;
   getError?(): string | null;
 }
@@ -110,11 +111,24 @@ export class MockUserProvider implements IUserDataProvider {
     return DEMO_CREDENTIALS;
   }
 
+  public async resetPassword(id: number | string): Promise<{ success: boolean; message?: string }> {
+    return { success: true, message: "Kata sandi berhasil direset." };
+  }
+
   public async authenticate(email: string, password: string): Promise<AuthUserSession | null> {
     const creds = Object.values(DEMO_CREDENTIALS).find(
       (c) => c.email.toLowerCase() === email.toLowerCase() && c.password === password
     );
     if (!creds) return null;
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem("auth_user", JSON.stringify({
+        role: creds.role,
+        nama: creds.name,
+        userId: creds.userId,
+        employeeId: creds.employeeId,
+      }));
+      window.localStorage.setItem("auth_token", `mock-token-${creds.role}-${Date.now()}`);
+    }
     return {
       role: creds.role,
       name: creds.name,

@@ -5,6 +5,7 @@
 
 import { Request, Response, NextFunction } from "express";
 import { verifyToken, TokenPayload } from "../utils/crypto";
+import { dbOrderRepository } from "../repositories/dbOrderRepository";
 
 export interface AuthenticatedRequest extends Request {
   user?: TokenPayload | null;
@@ -146,14 +147,24 @@ export function requireStageAuthority(req: AuthenticatedRequest, res: Response, 
     return;
   }
 
-  // Admin cannot supervise Stage 6
-  if (userRole === "admin" && (targetStage === "Supervisi" || req.params?.stage === "Supervisi")) {
-    res.status(403).json({
-      success: false,
-      error: { code: "FORBIDDEN", message: "Hanya Supervisor / SVP yang berwenang melakukan supervisi Stage 6." },
-      timestamp: new Date().toISOString(),
-    });
-    return;
+  // Admin cannot supervise Stage 6 (advancing FROM Stage 6 to Stage 7)
+  const orderNo = req.params?.orderNo;
+  let currentStageName = "";
+  if (orderNo) {
+    const existingOrder = dbOrderRepository.getByOrderNo(orderNo);
+    currentStageName = existingOrder?.currentStageName || "";
+  }
+
+  if (userRole === "admin") {
+    // Admin is view-only in Stage 6 and cannot approve/advance from Stage 6
+    if (currentStageName === "Supervisi" || req.params?.stage === "Supervisi") {
+      res.status(403).json({
+        success: false,
+        error: { code: "FORBIDDEN", message: "Hanya Supervisor / SVP yang berwenang melakukan supervisi Stage 6." },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
   }
 
   next();

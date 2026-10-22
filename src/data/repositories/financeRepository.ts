@@ -27,16 +27,22 @@ export interface IFinanceRepository {
   getKasMessengerList(): KasMessengerItem[];
   getPengeluaranList(): PengeluaranItem[];
   subscribe(listener: () => void): () => void;
-  recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): boolean;
+  recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): boolean | Promise<boolean>;
   resolveInvoice(id: number, details?: any): boolean;
   completeInvoice(id: number, completedBy?: string): boolean;
+  payoutCashback?(id: number, payoutData: any): Promise<boolean> | boolean;
   addKasKantor?(item: Omit<KasKantorItem, "id">): KasKantorItem | null;
+  deleteKasKantor?(id: number): Promise<boolean> | boolean;
+  addKasMessenger?(item: Omit<KasMessengerItem, "id" | "total"> & { total?: number }): KasMessengerItem | null;
+  deleteKasMessenger?(id: number): Promise<boolean> | boolean;
   addPengeluaran?(item: Omit<PengeluaranItem, "id">): PengeluaranItem | null;
+  deletePengeluaran?(id: number): Promise<boolean> | boolean;
   saveInvoice?(invoice: InvoiceBillingRecord): void;
   setProvider?(provider: IFinanceDataProvider): void;
   getProvider?(): IFinanceDataProvider;
   isLoading?(): boolean;
   getError?(): Error | null;
+  initFromApi?(): Promise<void>;
 }
 
 export class FinanceRepository implements IFinanceRepository {
@@ -100,7 +106,7 @@ export class FinanceRepository implements IFinanceRepository {
     return this.provider.subscribe(listener);
   }
 
-  public recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): boolean {
+  public recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): boolean | Promise<boolean> {
     return this.provider.recordPayment(idOrInvoice, paymentAmount, details);
   }
 
@@ -112,12 +118,44 @@ export class FinanceRepository implements IFinanceRepository {
     return this.provider.completeInvoice(id, completedBy);
   }
 
+  public async payoutCashback(id: number, payoutData: any): Promise<boolean> {
+    if (this.provider.payoutCashback) {
+      return await this.provider.payoutCashback(id, payoutData);
+    }
+    return false;
+  }
+
   public addKasKantor(item: Omit<KasKantorItem, "id">): KasKantorItem | null {
     return this.provider.addKasKantor ? this.provider.addKasKantor(item) : null;
   }
 
+  public async deleteKasKantor(id: number): Promise<boolean> {
+    if (this.provider.deleteKasKantor) {
+      return await this.provider.deleteKasKantor(id);
+    }
+    return false;
+  }
+
+  public addKasMessenger(item: Omit<KasMessengerItem, "id" | "total"> & { total?: number }): KasMessengerItem | null {
+    return this.provider.addKasMessenger ? this.provider.addKasMessenger(item) : null;
+  }
+
+  public async deleteKasMessenger(id: number): Promise<boolean> {
+    if (this.provider.deleteKasMessenger) {
+      return await this.provider.deleteKasMessenger(id);
+    }
+    return false;
+  }
+
   public addPengeluaran(item: Omit<PengeluaranItem, "id">): PengeluaranItem | null {
     return this.provider.addPengeluaran ? this.provider.addPengeluaran(item) : null;
+  }
+
+  public async deletePengeluaran(id: number): Promise<boolean> {
+    if (this.provider.deletePengeluaran) {
+      return await this.provider.deletePengeluaran(id);
+    }
+    return false;
   }
 
   public saveInvoice(invoice: InvoiceBillingRecord): void {
@@ -132,6 +170,12 @@ export class FinanceRepository implements IFinanceRepository {
 
   public getError(): Error | null {
     return this.provider.getError ? this.provider.getError() : null;
+  }
+
+  public async initFromApi(): Promise<void> {
+    if (this.provider && typeof (this.provider as any).initFromApi === "function") {
+      await (this.provider as any).initFromApi();
+    }
   }
 }
 

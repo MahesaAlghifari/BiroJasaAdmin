@@ -23,9 +23,16 @@ export interface IOrderRepository {
   advanceOrder(orderNo: string, targetStage: StageName, updates?: Partial<OperationalOrder>): boolean;
   rollbackOrder(orderNo: string, targetStage: StageName, updates?: Partial<OperationalOrder>): boolean;
   archiveOrder(orderNo: string): boolean;
-  verifyPayment(orderNo: string, verifierName?: string): boolean;
+  deleteArchivedOrder(orderNo: string): boolean;
+  clearArchivedOrders(): boolean;
+  cancelOrder?(orderNo: string, reason?: string): boolean | Promise<boolean>;
+  verifyPayment(orderNo: string, verifierName?: string, confirmedAmount?: number, notes?: string, proofPayload?: any): boolean;
   setProvider?(provider: IOrderDataProvider): void;
   getProvider?(): IOrderDataProvider;
+  getIsLoading?(): boolean;
+  getError?(): string | null;
+  getIsInitialized?(): boolean;
+  refresh?(silent?: boolean): Promise<void>;
 }
 
 export class OrderRepository implements IOrderRepository {
@@ -135,29 +142,101 @@ export class OrderRepository implements IOrderRepository {
     return this.provider.archiveOrder(orderNo);
   }
 
-  public verifyPayment(orderNo: string, verifierName: string = "Admin"): boolean {
+  public deleteArchivedOrder(orderNo: string): boolean {
+    if (typeof (this.provider as any).deleteArchivedOrder === "function") {
+      return (this.provider as any).deleteArchivedOrder(orderNo);
+    }
+    return false;
+  }
+
+  public clearArchivedOrders(): boolean {
+    if (typeof (this.provider as any).clearArchivedOrders === "function") {
+      return (this.provider as any).clearArchivedOrders();
+    }
+    return false;
+  }
+
+  public cancelOrder(orderNo: string, reason?: string): boolean | Promise<boolean> {
+    if (typeof (this.provider as any).cancelOrder === "function") {
+      return (this.provider as any).cancelOrder(orderNo, reason);
+    }
+    return false;
+  }
+
+  public verifyPayment(orderNo: string, verifierName: string = "Admin", confirmedAmount?: number, notes?: string, proofPayload?: any): boolean {
     if (typeof this.provider.verifyPayment === "function") {
-      return this.provider.verifyPayment(orderNo, verifierName);
+      return (this.provider as any).verifyPayment(orderNo, verifierName, confirmedAmount, notes, proofPayload);
     }
     const target = this.getByOrderNo(orderNo);
     if (!target) return false;
     const nowStr = new Date().toISOString();
+    const totalBiaya = target.payment?.totalBiaya || target.totalEstimasi || 0;
+    const paid = confirmedAmount !== undefined
+      ? Math.max(0, confirmedAmount)
+      : (target.payment?.nominalDibayarAwal !== undefined
+          ? target.payment.nominalDibayarAwal
+          : (target.payment?.dibayar && target.payment.dibayar > 0 ? target.payment.dibayar : totalBiaya));
+    const sisa = Math.max(0, totalBiaya - paid);
+    const overpayment = Math.max(0, paid - totalBiaya);
+    const statusPembayaran = paid >= totalBiaya ? "Lunas" : paid > 0 ? "Kurang Bayar" : "Belum Bayar";
+
+    const prev = target.payment?.nominalPembayaranAwalTerkonfirmasi ?? target.payment?.nominalDibayarAwal ?? target.payment?.dibayar ?? 0;
+    const riwayat = [...(target.payment?.riwayatKoreksiPembayaran || [])];
+    if (prev !== paid || notes) {
+      riwayat.push({
+        nominalLama: prev,
+        nominalBaru: paid,
+        tanggal: nowStr,
+        admin: verifierName,
+        catatan: notes,
+      });
+    }
+
     return this.updateOrder(orderNo, {
       payment: {
         ...target.payment,
         isPaymentVerified: true,
         paymentVerifiedAt: nowStr,
         paymentVerifiedBy: verifierName,
-        statusPembayaran: "Lunas",
-        dibayar: target.payment.totalBiaya,
-        kurang: 0,
-        tanggalBayar: nowStr.split("T")[0],
+        nominalPembayaranAwalTerkonfirmasi: paid,
+        statusPembayaran,
+        dibayar: paid,
+        kurang: sisa,
+        overpayment,
+        tanggalBayar: target.payment?.tanggalBayar || nowStr.split("T")[0],
+        riwayatKoreksiPembayaran: riwayat,
       },
     });
   }
 
   public async initFromApi(): Promise<void> {
     if (typeof (this.provider as any).initFromApi === "function") {
+      await (this.provider as any).initFromApi();
+    }
+  }
+
+  public getIsLoading(): boolean {
+    return typeof (this.provider as any).getIsLoading === "function"
+      ? (this.provider as any).getIsLoading()
+      : false;
+  }
+
+  public getError(): string | null {
+    return typeof (this.provider as any).getError === "function"
+      ? (this.provider as any).getError()
+      : null;
+  }
+
+  public getIsInitialized(): boolean {
+    return typeof (this.provider as any).getIsInitialized === "function"
+      ? (this.provider as any).getIsInitialized()
+      : true;
+  }
+
+  public async refresh(silent = false): Promise<void> {
+    if (typeof (this.provider as any).refresh === "function") {
+      await (this.provider as any).refresh(silent);
+    } else if (typeof (this.provider as any).initFromApi === "function") {
       await (this.provider as any).initFromApi();
     }
   }

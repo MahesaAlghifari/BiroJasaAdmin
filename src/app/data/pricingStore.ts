@@ -25,32 +25,86 @@ import {
   ServicePackageConfig,
   OrderCostBreakdownItem,
   OrderCostSnapshot,
+  ApplyAllScope,
+  WilayahAdministratif,
 } from "../../domain/pricing/types";
+import {
+  WILAYAH_REFERENSI,
+  PROVINSI_LIST,
+  WILAYAH_ADMINISTRATIF_LIST,
+  WilayahAdministratifItem,
+  ProvinsiItem,
+  findWilayahByKode,
+  findWilayahByName,
+  getWilayahByProvinsi,
+} from "../../domain/pricing/wilayahIndonesiaData";
 import { auditLog } from "../utils/auditLog";
 import { pricingRepository } from "../../data/repositories/pricingRepository";
 import { APP_CONFIG } from "../config/appConfig";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Authoritative Samsat Master List
+// 1. Authoritative Samsat Master List (10 Verified Operational Samsat)
 // ─────────────────────────────────────────────────────────────────────────────
-export const SAMSAT_LIST: SamsatMasterItem[] = [
-  { id: "samsat-jakarta-timur", name: "Samsat Jakarta Timur", wilayah: "Jakarta Timur", alamat: "Jl. Raya Pondok Gede" },
-  { id: "samsat-jakarta-barat", name: "Samsat Jakarta Barat", wilayah: "Jakarta Barat", alamat: "Jl. Daan Mogot" },
-  { id: "samsat-jakarta-selatan", name: "Samsat Jakarta Selatan", wilayah: "Jakarta Selatan", alamat: "Jl. TB Simatupang" },
-  { id: "samsat-jakarta-utara", name: "Samsat Jakarta Utara", wilayah: "Jakarta Utara", alamat: "Jl. Yos Sudarso" },
-  { id: "samsat-jakarta-pusat", name: "Samsat Jakarta Pusat", wilayah: "Jakarta Pusat", alamat: "Jl. Gn. Sahari" },
-  { id: "samsat-depok", name: "Samsat Depok", wilayah: "Depok", alamat: "Jl. Margonda Raya" },
-  { id: "samsat-bekasi", name: "Samsat Bekasi", wilayah: "Bekasi", alamat: "Jl. Ahmad Yani" },
-  { id: "samsat-tangerang", name: "Samsat Tangerang", wilayah: "Tangerang", alamat: "Jl. Gatot Subroto" },
-  { id: "samsat-bogor", name: "Samsat Bogor", wilayah: "Bogor", alamat: "Jl. Pajajaran" },
-  { id: "samsat-tangerang-selatan", name: "Samsat Tangerang Selatan", wilayah: "Tangerang Selatan", alamat: "Jl. Pahlawan Seribu" },
+export const INITIAL_10_SAMSAT: SamsatMasterItem[] = [
+  { id: "samsat-jakarta-timur", name: "Samsat Jakarta Timur", wilayah: "Jakarta Timur", alamat: "Jl. Raya Pondok Gede", kode_kabupaten_kota: "31.75", nama_provinsi: "Daerah Khusus Ibukota Jakarta", is_verified: true, status_aktif: true },
+  { id: "samsat-jakarta-barat", name: "Samsat Jakarta Barat", wilayah: "Jakarta Barat", alamat: "Jl. Daan Mogot", kode_kabupaten_kota: "31.73", nama_provinsi: "Daerah Khusus Ibukota Jakarta", is_verified: true, status_aktif: true },
+  { id: "samsat-jakarta-selatan", name: "Samsat Jakarta Selatan", wilayah: "Jakarta Selatan", alamat: "Jl. TB Simatupang", kode_kabupaten_kota: "31.74", nama_provinsi: "Daerah Khusus Ibukota Jakarta", is_verified: true, status_aktif: true },
+  { id: "samsat-jakarta-utara", name: "Samsat Jakarta Utara", wilayah: "Jakarta Utara", alamat: "Jl. Yos Sudarso", kode_kabupaten_kota: "31.72", nama_provinsi: "Daerah Khusus Ibukota Jakarta", is_verified: true, status_aktif: true },
+  { id: "samsat-jakarta-pusat", name: "Samsat Jakarta Pusat", wilayah: "Jakarta Pusat", alamat: "Jl. Gn. Sahari", kode_kabupaten_kota: "31.71", nama_provinsi: "Daerah Khusus Ibukota Jakarta", is_verified: true, status_aktif: true },
+  { id: "samsat-depok", name: "Samsat Depok", wilayah: "Depok", alamat: "Jl. Margonda Raya", kode_kabupaten_kota: "32.76", nama_provinsi: "Jawa Barat", is_verified: true, status_aktif: true },
+  { id: "samsat-bekasi", name: "Samsat Bekasi", wilayah: "Bekasi", alamat: "Jl. Ahmad Yani", kode_kabupaten_kota: "32.75", nama_provinsi: "Jawa Barat", is_verified: true, status_aktif: true },
+  { id: "samsat-tangerang", name: "Samsat Tangerang", wilayah: "Tangerang", alamat: "Jl. Gatot Subroto", kode_kabupaten_kota: "36.71", nama_provinsi: "Banten", is_verified: true, status_aktif: true },
+  { id: "samsat-bogor", name: "Samsat Bogor", wilayah: "Bogor", alamat: "Jl. Pajajaran", kode_kabupaten_kota: "32.71", nama_provinsi: "Jawa Barat", is_verified: true, status_aktif: true },
+  { id: "samsat-tangerang-selatan", name: "Samsat Tangerang Selatan", wilayah: "Tangerang Selatan", alamat: "Jl. Pahlawan Seribu", kode_kabupaten_kota: "36.74", nama_provinsi: "Banten", is_verified: true, status_aktif: true },
 ];
+
+export function buildSamsatMasterList(): SamsatMasterItem[] {
+  const result: SamsatMasterItem[] = [...INITIAL_10_SAMSAT];
+  const coveredCodes = new Set(INITIAL_10_SAMSAT.map((s) => s.kode_kabupaten_kota));
+
+  WILAYAH_ADMINISTRATIF_LIST.forEach((w) => {
+    if (!coveredCodes.has(w.kode_kabupaten_kota)) {
+      const cleanName = w.nama_kabupaten_kota.replace(/^(kabupaten|kota)\s+/i, "").trim();
+      const slug = `samsat-${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      const uniqueId = result.some((s) => s.id === slug) ? `${slug}-${w.kode_kabupaten_kota.replace(".", "")}` : slug;
+      result.push({
+        id: uniqueId,
+        name: `Samsat ${cleanName}`,
+        wilayah: cleanName,
+        alamat: `Kantor Samsat ${cleanName}, ${w.nama_provinsi}`,
+        kode_kabupaten_kota: w.kode_kabupaten_kota,
+        nama_provinsi: w.nama_provinsi,
+        is_verified: true,
+        status_aktif: true,
+      });
+      coveredCodes.add(w.kode_kabupaten_kota);
+    }
+  });
+
+  return result;
+}
+
+export const SAMSAT_LIST: SamsatMasterItem[] = buildSamsatMasterList();
 
 export function resolveSamsatId(input?: string): string {
   if (!input) return "samsat-jakarta-timur";
   const normalized = input.toLowerCase().trim();
+
+  // 1. Direct ID match
+  const byId = SAMSAT_LIST.find((s) => s.id === normalized);
+  if (byId) return byId.id;
+
+  // 2. Direct Wilayah match
+  const byWilayah = SAMSAT_LIST.find((s) => s.wilayah.toLowerCase() === normalized);
+  if (byWilayah) return byWilayah.id;
+
+  // 3. Direct Name match
+  const byName = SAMSAT_LIST.find((s) => s.name.toLowerCase() === normalized);
+  if (byName) return byName.id;
+
+  // 4. Classic 10 shortcuts for Jabodetabek
   if (normalized.includes("timur")) return "samsat-jakarta-timur";
-  if (normalized.includes("barat")) return "samsat-jakarta-barat";
+  if (normalized.includes("barat") && !normalized.includes("bandung")) return "samsat-jakarta-barat";
   if (normalized.includes("selatan") && !normalized.includes("tangerang")) return "samsat-jakarta-selatan";
   if (normalized.includes("utara")) return "samsat-jakarta-utara";
   if (normalized.includes("pusat")) return "samsat-jakarta-pusat";
@@ -59,6 +113,13 @@ export function resolveSamsatId(input?: string): string {
   if (normalized.includes("tangerang selatan") || normalized.includes("tangsel")) return "samsat-tangerang-selatan";
   if (normalized.includes("tangerang")) return "samsat-tangerang";
   if (normalized.includes("bogor")) return "samsat-bogor";
+
+  // 5. Partial contains match
+  const partial = SAMSAT_LIST.find(
+    (s) => s.wilayah.toLowerCase().includes(normalized) || s.name.toLowerCase().includes(normalized)
+  );
+  if (partial) return partial.id;
+
   return "samsat-jakarta-timur";
 }
 
@@ -67,12 +128,20 @@ export function resolveServiceId(input?: string): string {
   const normalized = input.toLowerCase().trim();
   if (normalized.includes("antar")) return "mutasi-antar-samsat";
   if (normalized.includes("luar")) return "mutasi-luar-daerah";
-  if (normalized.includes("1 tahun") || normalized.includes("1-tahun")) return "perpanjangan-1-tahun";
-  if (normalized.includes("5 tahun") || normalized.includes("5-tahun")) return "perpanjangan-5-tahun";
+  if (
+    normalized.includes("1 tahun") ||
+    normalized.includes("1-tahun") ||
+    normalized.includes("perpanjangan-stnk") ||
+    normalized.includes("tahunan") ||
+    normalized === "perpanjangan-1"
+  ) {
+    return "perpanjangan-1-tahun";
+  }
+  if (normalized.includes("5 tahun") || normalized.includes("5-tahun") || normalized === "perpanjangan-5") return "perpanjangan-5-tahun";
   if (normalized.includes("balik nama") || normalized.includes("balik-nama")) return "balik-nama";
   if (normalized.includes("tarik berkas") || normalized.includes("tarik-berkas")) return "tarik-berkas";
   if (normalized.includes("duplikat")) return "duplikat-stnk";
-  return "mutasi-antar-samsat";
+  return normalized.replace(/\s+/g, "-");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,16 +276,99 @@ class PricingStore {
 
   public syncFromRepository(): void {
     const items = pricingRepository.getSamsatItems();
-    if (!Array.isArray(items) || items.length === 0) return;
-
-    items.forEach((item) => {
-      const price = item.basePrice || 0;
-      this.samsatPricing.forEach((map) => {
-        map.set(item.id, price);
+    if (Array.isArray(items) && items.length > 0) {
+      items.forEach((item) => {
+        const price = item.basePrice || 0;
+        this.samsatPricing.forEach((map) => {
+          map.set(item.id, price);
+        });
       });
-    });
+
+      // Synchronize canonical Layanan Standar items from samsat_pricing into hargaDasarRows
+      const standardItems = items.filter((item) => item.category === "Layanan Standar");
+      if (standardItems.length > 0) {
+        this.hargaDasarRows = standardItems.map((item) => ({
+          id: item.id, // Canonical database ID (e.g. "std-cek-fisik")
+          namaSamsat: item.name,
+          hargaDasar: item.basePrice || 0,
+          adminSamsat: 0,
+          jasa: 0,
+          totalEstimasi: item.basePrice || 0,
+          code: item.code,
+          category: item.category,
+        }));
+      }
+    }
+
+    // Authoritative Samsat list from backend database
+    if (pricingRepository.getSamsatOffices) {
+      const offices = pricingRepository.getSamsatOffices();
+      if (Array.isArray(offices) && offices.length > 0) {
+        this.samsats = offices.map((o) => ({
+          id: o.id,
+          name: o.name,
+          wilayah: o.wilayah,
+          alamat: o.alamat || `Kantor Samsat ${o.wilayah}`,
+          kode_kabupaten_kota: o.kode_kabupaten_kota,
+          nama_provinsi: o.nama_provinsi,
+          is_verified: true,
+          status_aktif: true,
+        }));
+      }
+    }
+
+    // Authoritative Biaya Layanan configs from backend database
+    if (pricingRepository.getServiceConfigs) {
+      const dbConfigs = pricingRepository.getServiceConfigs();
+      if (Array.isArray(dbConfigs) && dbConfigs.length > 0) {
+        dbConfigs.forEach((cfg) => {
+          const key = cfg.id || `${cfg.serviceId}:${cfg.samsatId}`;
+          this.serviceConfigs.set(key, cfg);
+
+          // Update corresponding row in biayaLayananRows if matching
+          const cfgSvcId = resolveServiceId(cfg.serviceId || cfg.serviceName);
+          const cfgSamsatId = resolveSamsatId(cfg.samsatId || cfg.wilayah);
+
+          const rowIdx = this.biayaLayananRows.findIndex(
+            (r) => resolveServiceId(r.layanan) === cfgSvcId && resolveSamsatId(r.wilayah) === cfgSamsatId
+          );
+          if (rowIdx !== -1) {
+            this.biayaLayananRows[rowIdx] = {
+              ...this.biayaLayananRows[rowIdx],
+              id: cfg.id || this.biayaLayananRows[rowIdx].id,
+              dbId: cfg.id,
+              biayaJasa: cfg.biayaJasa,
+              biayaJasaLengkap: cfg.biayaJasa,
+              biayaAntarJemput: cfg.biayaAntarJemput,
+            };
+          } else {
+            this.biayaLayananRows.push({
+              id: cfg.id || `bl-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              dbId: cfg.id,
+              layanan: cfg.serviceName || cfg.serviceId,
+              wilayah: cfg.wilayah || cfg.samsatId,
+              biayaJasa: cfg.biayaJasa || 0,
+              biayaJasaLengkap: cfg.biayaJasa || 0,
+              biayaJasaNembak: cfg.jasaNembak?.nominal || 0,
+              biayaAntarJemput: cfg.biayaAntarJemput || 50000,
+              antarJemputEnabled: cfg.antarJemputEnabled ?? true,
+              swdkllj: cfg.swdkllj ? { ...cfg.swdkllj } : { nominal: 143000, enabled: true },
+              opsenPkb: cfg.opsenPkb ? { ...cfg.opsenPkb } : { nominal: 143000, enabled: true },
+              biayaLainnya: Array.isArray(cfg.biayaLainnya) ? cfg.biayaLainnya : [],
+            });
+          }
+        });
+      }
+    }
 
     this.notify();
+  }
+
+  public async initFromApi(): Promise<void> {
+    if (pricingRepository.initFromApi) {
+      await pricingRepository.initFromApi();
+    }
+    this.syncFromRepository();
   }
 
   private seed() {
@@ -345,13 +497,16 @@ class PricingStore {
       totalEstimasi: s.id === "samsat-depok" ? 261000 : 275000,
     }));
 
-    this.hargaDasarRows = SAMSAT_LIST.map((s, idx) => ({
-      id: idx + 1,
-      namaSamsat: s.name,
-      hargaDasar: 150000,
-      adminSamsat: 50000,
-      jasa: 75000,
-      totalEstimasi: 275000,
+    const stdItems = MASTER_PRICING_ITEMS.filter((item) => item.category === "Layanan Standar");
+    this.hargaDasarRows = stdItems.map((item) => ({
+      id: item.id, // Canonical database ID (e.g. "std-cek-fisik")
+      namaSamsat: item.name,
+      hargaDasar: this.getSamsatPrice("samsat-jakarta-timur", item.id) || 30000,
+      adminSamsat: 0,
+      jasa: 0,
+      totalEstimasi: this.getSamsatPrice("samsat-jakarta-timur", item.id) || 30000,
+      code: item.code,
+      category: item.category,
     }));
 
     // 2. Seed Biaya Layanan table rows (from BiayaLayanan.tsx baseline)
@@ -440,6 +595,44 @@ class PricingStore {
       { id: 69, layanan: "Duplikat STNK", wilayah: "Bogor", biayaJasa: 320000, biayaAntarJemput: 65000 },
       { id: 70, layanan: "Duplikat STNK", wilayah: "Tangerang Selatan", biayaJasa: 345000, biayaAntarJemput: 52000 },
     ];
+
+    // Seed remaining Samsats across Indonesia in Biaya Layanan rows
+    const coveredSamsats = new Set(this.biayaLayananRows.map((r) => r.wilayah));
+    const standardServices = [
+      { name: "Perpanjangan 1 Tahun", jasa: 250000, antarJemput: 50000 },
+      { name: "Perpanjangan 5 Tahun", jasa: 500000, antarJemput: 50000 },
+      { name: "Mutasi Antar Samsat", jasa: 800000, antarJemput: 50000 },
+      { name: "Mutasi Luar Daerah", jasa: 1500000, antarJemput: 50000 },
+      { name: "Balik Nama", jasa: 1200000, antarJemput: 50000 },
+      { name: "Tarik Berkas", jasa: 600000, antarJemput: 50000 },
+      { name: "Duplikat STNK", jasa: 350000, antarJemput: 50000 },
+    ];
+
+    let nextRowId = this.biayaLayananRows.length + 1;
+    SAMSAT_LIST.forEach((samsat) => {
+      if (!coveredSamsats.has(samsat.wilayah)) {
+        standardServices.forEach((svc) => {
+          this.biayaLayananRows.push({
+            id: nextRowId++,
+            layanan: svc.name,
+            wilayah: samsat.wilayah,
+            biayaJasaLengkap: svc.jasa,
+            biayaJasaNembak: Math.round(svc.jasa * 0.6),
+            biayaAntarJemput: svc.antarJemput,
+            biayaJasa: svc.jasa,
+            biayaPengurusanKhusus: Math.round(svc.jasa * 0.6),
+            jasaLengkapEnabled: true,
+            jasaNembakEnabled: false,
+            pengurusanKhususEnabled: false,
+            antarJemputEnabled: true,
+            swdkllj: { nominal: 143000, enabled: true },
+            opsenPkb: { nominal: 143000, enabled: true },
+            biayaLainnya: [],
+          });
+        });
+        coveredSamsats.add(samsat.wilayah);
+      }
+    });
 
     // Seed Service configs per (serviceId, samsatId)
     this.biayaLayananRows.forEach((row) => {
@@ -566,17 +759,65 @@ class PricingStore {
     return this.samsats.find((s) => s.id === resolved) || this.samsats[0] || SAMSAT_LIST[0];
   }
 
-  public addSamsat(data: { name: string; wilayah: string; alamat: string }): SamsatMasterItem {
+  public async addSamsat(data: {
+    name: string;
+    wilayah: string;
+    alamat: string;
+    kode_kabupaten_kota?: string;
+    nama_provinsi?: string;
+    is_verified?: boolean;
+    status_aktif?: boolean;
+  }): Promise<SamsatMasterItem> {
     const slug = `samsat-${data.wilayah.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
     const id = this.samsats.some((s) => s.id === slug)
       ? `${slug}-${Date.now().toString().slice(-4)}`
       : slug;
-    const newSamsat: SamsatMasterItem = {
+
+    // Lookup official wilayah if code provided
+    let officialProvinsi = data.nama_provinsi;
+    if (data.kode_kabupaten_kota && !officialProvinsi) {
+      const w = findWilayahByKode(data.kode_kabupaten_kota);
+      if (w) officialProvinsi = (w as any).provinsi || (w as any).namaProvinsi;
+    }
+
+    const payload: SamsatMasterItem = {
       id,
       name: data.name,
       wilayah: data.wilayah,
       alamat: data.alamat,
+      kode_kabupaten_kota: data.kode_kabupaten_kota,
+      nama_provinsi: officialProvinsi,
+      is_verified: data.is_verified ?? true,
+      status_aktif: data.status_aktif ?? true,
     };
+
+    // Sync to backend API if available and await confirmation
+    if (typeof fetch !== "undefined") {
+      const token = typeof window !== "undefined" ? window.localStorage?.getItem("auth_token") : undefined;
+      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/samsat/offices`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Gagal menyimpan data Samsat ke server (HTTP ${res.status})`);
+      }
+
+      const resData = await res.json().catch(() => ({}));
+      if (resData?.data) {
+        payload.id = resData.data.id || payload.id;
+        payload.name = resData.data.name || payload.name;
+        payload.wilayah = resData.data.wilayah || payload.wilayah;
+        if (resData.data.alamat !== undefined) payload.alamat = resData.data.alamat;
+      }
+    }
+
+    const newSamsat = payload;
     this.samsats.push(newSamsat);
 
     // Initialize pricing map
@@ -585,7 +826,7 @@ class PricingStore {
     for (const [key, pricingItemId] of Object.entries(MUTASI_AS_ROW_KEY_MAP)) {
       defaultMap.set(pricingItemId, baseRow[key] || 50000);
     }
-    this.samsatPricing.set(id, defaultMap);
+    this.samsatPricing.set(newSamsat.id, defaultMap);
 
     // Add row to mutasiASRows
     this.mutasiASRows.push({
@@ -617,10 +858,10 @@ class PricingStore {
         biayaAntarJemput: svc.antarJemput,
       };
       this.biayaLayananRows.push(newRow);
-      this.serviceConfigs.set(`${serviceId}:${id}`, {
+      this.serviceConfigs.set(`${serviceId}:${newSamsat.id}`, {
         serviceId,
         serviceName: svc.name,
-        samsatId: id,
+        samsatId: newSamsat.id,
         wilayah: newSamsat.wilayah,
         biayaJasa: svc.jasa,
         biayaAntarJemput: svc.antarJemput,
@@ -637,7 +878,7 @@ class PricingStore {
         action: "CREATE",
         module: "Master Data",
         details: `Samsat baru "${newSamsat.name}" (${newSamsat.wilayah}) berhasil ditambahkan ke Master Data.`,
-        metadata: { id, name: newSamsat.name, wilayah: newSamsat.wilayah },
+        metadata: { id: newSamsat.id, name: newSamsat.name, wilayah: newSamsat.wilayah },
       });
     } catch {
       // safe fallback
@@ -647,17 +888,48 @@ class PricingStore {
     return newSamsat;
   }
 
-  public updateSamsat(
+  public async updateSamsat(
     id: string,
-    updates: Partial<{ name: string; wilayah: string; alamat: string }>
-  ): boolean {
+    updates: Partial<{
+      name: string;
+      wilayah: string;
+      alamat: string;
+      kode_kabupaten_kota?: string;
+      nama_provinsi?: string;
+      is_verified?: boolean;
+      status_aktif?: boolean;
+    }>
+  ): Promise<boolean> {
     const samsat = this.samsats.find((s) => s.id === id);
-    if (!samsat) return false;
+    if (!samsat) throw new Error(`Kantor Samsat dengan ID '${id}' tidak ditemukan`);
+
+    // Sync to backend API if available and await confirmation
+    if (typeof fetch !== "undefined") {
+      const token = typeof window !== "undefined" ? window.localStorage?.getItem("auth_token") : undefined;
+      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/samsat/offices/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(updates),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Gagal memperbarui Samsat di server (HTTP ${res.status})`);
+      }
+    }
+
     const oldName = samsat.name;
     const oldWilayah = samsat.wilayah;
     if (updates.name) samsat.name = updates.name;
     if (updates.wilayah) samsat.wilayah = updates.wilayah;
     if (updates.alamat) samsat.alamat = updates.alamat;
+    if (updates.kode_kabupaten_kota !== undefined) samsat.kode_kabupaten_kota = updates.kode_kabupaten_kota;
+    if (updates.nama_provinsi !== undefined) samsat.nama_provinsi = updates.nama_provinsi;
+    if (updates.is_verified !== undefined) samsat.is_verified = updates.is_verified;
+    if (updates.status_aktif !== undefined) samsat.status_aktif = updates.status_aktif;
 
     // Update in mutasiASRows
     this.mutasiASRows.forEach((r) => {
@@ -686,9 +958,26 @@ class PricingStore {
     return true;
   }
 
-  public deleteSamsat(id: string): boolean {
+  public async deleteSamsat(id: string): Promise<boolean> {
     const idx = this.samsats.findIndex((s) => s.id === id);
-    if (idx === -1) return false;
+    if (idx === -1) throw new Error(`Kantor Samsat dengan ID '${id}' tidak ditemukan`);
+
+    // Sync to backend API if available and await confirmation
+    if (typeof fetch !== "undefined") {
+      const token = typeof window !== "undefined" ? window.localStorage?.getItem("auth_token") : undefined;
+      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/samsat/offices/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Gagal menghapus Samsat di server (HTTP ${res.status})`);
+      }
+    }
+
     const samsat = this.samsats[idx];
     this.samsats.splice(idx, 1);
     this.samsatPricing.delete(id);
@@ -708,6 +997,124 @@ class PricingStore {
     } catch {
       // safe fallback
     }
+
+    this.notify();
+    return true;
+  }
+
+  // ─── Wilayah Administratif Methods ──────────────────────────────────────────
+  public getWilayahMetadata() {
+    return { ...WILAYAH_REFERENSI };
+  }
+
+  public getProvinces(): ProvinsiItem[] {
+    return PROVINSI_LIST;
+  }
+
+  public getWilayahAdministratifList(): WilayahAdministratifItem[] {
+    return WILAYAH_ADMINISTRATIF_LIST;
+  }
+
+  public getWilayahByKode(kode: string): WilayahAdministratifItem | undefined {
+    return findWilayahByKode(kode);
+  }
+
+  public getWilayahOverview(filters?: {
+    provinsi?: string;
+    jenis?: "Kabupaten" | "Kota" | "all";
+    search?: string;
+    status?: "configured" | "unconfigured" | "all";
+  }) {
+    let list = WILAYAH_ADMINISTRATIF_LIST;
+
+    if (filters?.provinsi && filters.provinsi !== "all") {
+      const pNorm = filters.provinsi.toLowerCase().trim();
+      list = list.filter(
+        (w) =>
+          w.nama_provinsi.toLowerCase() === pNorm ||
+          w.kode_provinsi === filters.provinsi
+      );
+    }
+
+    if (filters?.jenis && filters.jenis !== "all") {
+      list = list.filter((w) => w.jenis_wilayah === filters.jenis);
+    }
+
+    if (filters?.search && filters.search.trim()) {
+      const q = filters.search.toLowerCase().trim();
+      list = list.filter(
+        (w) =>
+          w.kode_kabupaten_kota.toLowerCase().includes(q) ||
+          w.nama_kabupaten_kota.toLowerCase().includes(q) ||
+          w.nama_provinsi.toLowerCase().includes(q)
+      );
+    }
+
+    const samsats = this.samsats;
+
+    const mapped = list.map((w) => {
+      // Match linked Samsat by official Kemendagri code or fallback by name
+      const linkedSamsats = samsats.filter(
+        (s) =>
+          s.kode_kabupaten_kota === w.kode_kabupaten_kota ||
+          (s.wilayah &&
+            s.wilayah.toLowerCase().trim() ===
+              w.nama_kabupaten_kota.toLowerCase().replace(/^(kabupaten|kota)\s+/i, "").trim())
+      );
+      const hasConfiguredSamsat = linkedSamsats.length > 0;
+      return {
+        ...w,
+        kode: w.kode_kabupaten_kota,
+        nama: w.nama_kabupaten_kota,
+        jenis: w.jenis_wilayah,
+        provinsi: w.nama_provinsi,
+        samsatOffices: linkedSamsats,
+        hasConfiguredSamsat,
+        biayaStatus: hasConfiguredSamsat ? ("Terkonfigurasi" as const) : ("Belum Dikonfigurasi" as const),
+      };
+    });
+
+    if (filters?.status && filters.status !== "all") {
+      if (filters.status === "configured") {
+        return mapped.filter((item) => item.hasConfiguredSamsat);
+      } else if (filters.status === "unconfigured") {
+        return mapped.filter((item) => !item.hasConfiguredSamsat);
+      }
+    }
+
+    return mapped;
+  }
+
+  public async linkSamsatToWilayah(samsatId: string, kodeKabupatenKota: string): Promise<boolean> {
+    const samsat = this.samsats.find((s) => s.id === samsatId);
+    if (!samsat) throw new Error(`Kantor Samsat dengan ID '${samsatId}' tidak ditemukan`);
+    const wilayah = findWilayahByKode(kodeKabupatenKota);
+    if (!wilayah) throw new Error(`Kode wilayah '${kodeKabupatenKota}' tidak valid`);
+
+    if (typeof fetch !== "undefined") {
+      const token = typeof window !== "undefined" ? window.localStorage?.getItem("auth_token") : undefined;
+      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/samsat/offices/${encodeURIComponent(samsatId)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          kode_kabupaten_kota: wilayah.kode_kabupaten_kota,
+          nama_provinsi: wilayah.nama_provinsi,
+          is_verified: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Gagal menghubungkan Samsat ke wilayah di server (HTTP ${res.status})`);
+      }
+    }
+
+    samsat.kode_kabupaten_kota = wilayah.kode_kabupaten_kota;
+    samsat.nama_provinsi = wilayah.nama_provinsi;
+    samsat.is_verified = true;
 
     this.notify();
     return true;
@@ -774,6 +1181,64 @@ class PricingStore {
 
     this.notify();
     return true;
+  }
+
+  /**
+   * Returns list of all available official services registered in the system.
+   * Derived dynamically from authoritative Biaya Layanan master configuration,
+   * preserving canonical business ordering and including any runtime/API additions.
+   */
+  public getAvailableServices(): string[] {
+    const canonicalOrder = [
+      "Perpanjangan 1 Tahun",
+      "Perpanjangan 5 Tahun",
+      "Mutasi Antar Samsat",
+      "Mutasi Luar Daerah",
+      "Balik Nama",
+      "Tarik Berkas",
+      "Duplikat STNK",
+    ];
+
+    const serviceSet = new Set<string>();
+
+    // 1. Gather services from active Biaya Layanan rows
+    if (Array.isArray(this.biayaLayananRows)) {
+      for (const row of this.biayaLayananRows) {
+        if (row && typeof row.layanan === "string" && row.layanan.trim()) {
+          serviceSet.add(row.layanan.trim());
+        }
+      }
+    }
+
+    // 2. Gather services from registered service configs
+    if (this.serviceConfigs && this.serviceConfigs.size > 0) {
+      for (const cfg of this.serviceConfigs.values()) {
+        if (cfg && typeof cfg.serviceName === "string" && cfg.serviceName.trim()) {
+          serviceSet.add(cfg.serviceName.trim());
+        }
+      }
+    }
+
+    // 3. Fallback to canonical order if empty
+    if (serviceSet.size === 0) {
+      return [...canonicalOrder];
+    }
+
+    // Preserve canonical order first
+    const ordered: string[] = [];
+    for (const service of canonicalOrder) {
+      if (serviceSet.has(service)) {
+        ordered.push(service);
+        serviceSet.delete(service);
+      }
+    }
+
+    // Append any newly added/custom services
+    for (const customService of serviceSet) {
+      ordered.push(customService);
+    }
+
+    return ordered;
   }
 
   // ─── Biaya Layanan Methods (Service Fee Config per Service + Samsat) ────────
@@ -1014,7 +1479,7 @@ class PricingStore {
     return this.mutasiASRows.map((r) => ({ ...r }));
   }
 
-  public updateMutasiASRow(id: number, updatedRow: any): void {
+  public async updateMutasiASRow(id: number, updatedRow: any): Promise<void> {
     const idx = this.mutasiASRows.findIndex((r) => r.id === id);
     if (idx !== -1) {
       this.mutasiASRows[idx] = { ...updatedRow };
@@ -1028,7 +1493,7 @@ class PricingStore {
         if (updatedRow[key] !== undefined && typeof updatedRow[key] === "number") {
           priceMap.set(pricingItemId, updatedRow[key]);
           if (this.isApiMode) {
-            pricingRepository.updateSamsatItem(pricingItemId, { basePrice: updatedRow[key] });
+            await pricingRepository.updateSamsatItem(pricingItemId, { basePrice: updatedRow[key] });
           }
         }
       }
@@ -1064,96 +1529,107 @@ class PricingStore {
     return this.biayaLayananRows.map((r) => ({ ...r }));
   }
 
-  public updateBiayaLayananRow(id: number, updatedRow: any): void {
-    const idx = this.biayaLayananRows.findIndex((r) => r.id === id);
-    if (idx !== -1) {
-      this.biayaLayananRows[idx] = { ...updatedRow };
-      const serviceId = resolveServiceId(updatedRow.layanan);
-      const samsatId = resolveSamsatId(updatedRow.wilayah);
-      const key = `${serviceId}:${samsatId}`;
-      const existing = this.serviceConfigs.get(key);
-      const newBiayaJasa = updatedRow.biayaJasa || updatedRow.biayaJasaLengkap || 0;
-      const newAntarJemput = updatedRow.biayaAntarJemput || 50000;
-
-      if (existing) {
-        existing.biayaJasa = newBiayaJasa;
-        existing.biayaAntarJemput = newAntarJemput;
-        if (updatedRow.biayaJasaLengkap !== undefined || updatedRow.jasaLengkapEnabled !== undefined) {
-          existing.jasaLengkap = {
-            nominal: updatedRow.biayaJasaLengkap ?? existing.jasaLengkap?.nominal ?? newBiayaJasa,
-            enabled: updatedRow.jasaLengkapEnabled ?? existing.jasaLengkap?.enabled ?? true,
-          };
-        }
-        if (
-          updatedRow.biayaJasaNembak !== undefined ||
-          updatedRow.jasaNembakEnabled !== undefined ||
-          updatedRow.biayaPengurusanKhusus !== undefined ||
-          updatedRow.pengurusanKhususEnabled !== undefined
-        ) {
-          const nom =
-            updatedRow.biayaPengurusanKhusus ??
-            updatedRow.biayaJasaNembak ??
-            existing.biayaPengurusanKhusus?.nominal ??
-            existing.jasaNembak?.nominal ??
-            Math.round(newBiayaJasa * 0.6);
-          const en =
-            updatedRow.pengurusanKhususEnabled ??
-            updatedRow.jasaNembakEnabled ??
-            existing.biayaPengurusanKhusus?.enabled ??
-            existing.jasaNembak?.enabled ??
-            false;
-          existing.jasaNembak = { nominal: nom, enabled: en };
-          existing.biayaPengurusanKhusus = { nominal: nom, enabled: en };
-        }
-        if (updatedRow.antarJemputEnabled !== undefined) {
-          existing.antarJemputEnabled = updatedRow.antarJemputEnabled;
-        }
-        if (updatedRow.opsenPkb || updatedRow.swdkllj) {
-          const ops = updatedRow.opsenPkb || updatedRow.swdkllj;
-          existing.swdkllj = { ...ops };
-          existing.opsenPkb = { ...ops };
-        }
-        if (updatedRow.biayaLainnya) {
-          existing.biayaLainnya = updatedRow.biayaLainnya.map((b: any) => ({ ...b }));
-        }
-      } else {
-        const khususNom = updatedRow.biayaPengurusanKhusus ?? updatedRow.biayaJasaNembak ?? Math.round(newBiayaJasa * 0.6);
-        const khususEn = updatedRow.pengurusanKhususEnabled ?? updatedRow.jasaNembakEnabled ?? false;
-        const opsenObj = updatedRow.opsenPkb ? { ...updatedRow.opsenPkb } : (updatedRow.swdkllj ? { ...updatedRow.swdkllj } : { nominal: 143000, enabled: true });
-
-        this.serviceConfigs.set(key, {
-          serviceId,
-          serviceName: updatedRow.layanan,
-          samsatId,
-          wilayah: updatedRow.wilayah,
-          biayaJasa: newBiayaJasa,
-          jasaLengkap: {
-            nominal: updatedRow.biayaJasaLengkap ?? newBiayaJasa,
-            enabled: updatedRow.jasaLengkapEnabled ?? true,
-          },
-          jasaNembak: {
-            nominal: khususNom,
-            enabled: khususEn,
-          },
-          biayaPengurusanKhusus: {
-            nominal: khususNom,
-            enabled: khususEn,
-          },
-          biayaAntarJemput: newAntarJemput,
-          antarJemputEnabled: updatedRow.antarJemputEnabled ?? true,
-          components: this.getDefaultComponentsForService(serviceId),
-          swdkllj: opsenObj,
-          opsenPkb: opsenObj,
-          biayaLainnya: updatedRow.biayaLainnya ? updatedRow.biayaLainnya.map((b: any) => ({ ...b })) : [],
-          active: true,
-        });
-      }
-      this.notify();
+  public async updateBiayaLayananRow(id: any, updatedRow: any): Promise<void> {
+    const idx = this.biayaLayananRows.findIndex((r) => String(r.id) === String(id) || String(r.dbId) === String(id));
+    if (idx === -1) {
+      throw new Error(`Baris biaya layanan '${id}' tidak ditemukan.`);
     }
+
+    const serviceId = resolveServiceId(updatedRow.layanan);
+    const samsatId = resolveSamsatId(updatedRow.wilayah);
+    const key = updatedRow.dbId || `${serviceId}:${samsatId}`;
+    const newBiayaJasa = updatedRow.biayaJasa || updatedRow.biayaJasaLengkap || 0;
+    const newAntarJemput = updatedRow.biayaAntarJemput || 50000;
+
+    const existing = this.serviceConfigs.get(key) || this.serviceConfigs.get(`${serviceId}:${samsatId}`);
+    let updatedConfig: any;
+
+    if (existing) {
+      existing.biayaJasa = newBiayaJasa;
+      existing.biayaAntarJemput = newAntarJemput;
+      if (updatedRow.biayaJasaLengkap !== undefined || updatedRow.jasaLengkapEnabled !== undefined) {
+        existing.jasaLengkap = {
+          nominal: updatedRow.biayaJasaLengkap ?? existing.jasaLengkap?.nominal ?? newBiayaJasa,
+          enabled: updatedRow.jasaLengkapEnabled ?? existing.jasaLengkap?.enabled ?? true,
+        };
+      }
+      if (
+        updatedRow.biayaJasaNembak !== undefined ||
+        updatedRow.jasaNembakEnabled !== undefined ||
+        updatedRow.biayaPengurusanKhusus !== undefined ||
+        updatedRow.pengurusanKhususEnabled !== undefined
+      ) {
+        const nom =
+          updatedRow.biayaPengurusanKhusus ??
+          updatedRow.biayaJasaNembak ??
+          existing.biayaPengurusanKhusus?.nominal ??
+          existing.jasaNembak?.nominal ??
+          Math.round(newBiayaJasa * 0.6);
+        const en =
+          updatedRow.pengurusanKhususEnabled ??
+          updatedRow.jasaNembakEnabled ??
+          existing.biayaPengurusanKhusus?.enabled ??
+          existing.jasaNembak?.enabled ??
+          false;
+        existing.jasaNembak = { nominal: nom, enabled: en };
+        existing.biayaPengurusanKhusus = { nominal: nom, enabled: en };
+      }
+      if (updatedRow.antarJemputEnabled !== undefined) {
+        existing.antarJemputEnabled = updatedRow.antarJemputEnabled;
+      }
+      if (updatedRow.opsenPkb || updatedRow.swdkllj) {
+        const ops = updatedRow.opsenPkb || updatedRow.swdkllj;
+        existing.swdkllj = { ...ops };
+        existing.opsenPkb = { ...ops };
+      }
+      if (updatedRow.biayaLainnya) {
+        existing.biayaLainnya = updatedRow.biayaLainnya.map((b: any) => ({ ...b }));
+      }
+      updatedConfig = existing;
+    } else {
+      const khususNom = updatedRow.biayaPengurusanKhusus ?? updatedRow.biayaJasaNembak ?? Math.round(newBiayaJasa * 0.6);
+      const khususEn = updatedRow.pengurusanKhususEnabled ?? updatedRow.jasaNembakEnabled ?? false;
+      const opsenObj = updatedRow.opsenPkb ? { ...updatedRow.opsenPkb } : (updatedRow.swdkllj ? { ...updatedRow.swdkllj } : { nominal: 143000, enabled: true });
+
+      updatedConfig = {
+        id: key,
+        serviceId,
+        serviceName: updatedRow.layanan,
+        samsatId,
+        wilayah: updatedRow.wilayah,
+        biayaJasa: newBiayaJasa,
+        jasaLengkap: {
+          nominal: updatedRow.biayaJasaLengkap ?? newBiayaJasa,
+          enabled: updatedRow.jasaLengkapEnabled ?? true,
+        },
+        jasaNembak: {
+          nominal: khususNom,
+          enabled: khususEn,
+        },
+        biayaPengurusanKhusus: {
+          nominal: khususNom,
+          enabled: khususEn,
+        },
+        biayaAntarJemput: newAntarJemput,
+        antarJemputEnabled: updatedRow.antarJemputEnabled ?? true,
+        components: this.getDefaultComponentsForService(serviceId),
+        swdkllj: opsenObj,
+        opsenPkb: opsenObj,
+        biayaLainnya: updatedRow.biayaLainnya ? updatedRow.biayaLainnya.map((b: any) => ({ ...b })) : [],
+        active: true,
+      };
+      this.serviceConfigs.set(key, updatedConfig);
+    }
+
+    if (this.isApiMode && pricingRepository.updateServicePricing) {
+      await pricingRepository.updateServicePricing(key, updatedConfig);
+    }
+
+    this.biayaLayananRows[idx] = { ...updatedRow, id: key, dbId: key };
+    this.notify();
   }
 
-  public addBiayaLayananRow(row: any): void {
-    this.biayaLayananRows.push(row);
+  public async addBiayaLayananRow(row: any): Promise<any> {
     const serviceId = resolveServiceId(row.layanan);
     const samsatId = resolveSamsatId(row.wilayah);
     const key = `${serviceId}:${samsatId}`;
@@ -1161,28 +1637,223 @@ class PricingStore {
     const khususEn = row.pengurusanKhususEnabled ?? row.jasaNembakEnabled ?? false;
     const opsenObj = row.opsenPkb ? { ...row.opsenPkb } : (row.swdkllj ? { ...row.swdkllj } : { nominal: 143000, enabled: true });
 
-    this.serviceConfigs.set(key, {
+    const newConfig: any = {
+      id: key,
       serviceId,
       serviceName: row.layanan,
       samsatId,
       wilayah: row.wilayah,
       biayaJasa: row.biayaJasa || row.biayaJasaLengkap || 0,
       biayaAntarJemput: row.biayaAntarJemput || 50000,
+      antarJemputEnabled: row.antarJemputEnabled ?? true,
+      jasaLengkap: {
+        nominal: row.biayaJasaLengkap || row.biayaJasa || 0,
+        enabled: row.jasaLengkapEnabled ?? true,
+      },
+      jasaNembak: {
+        nominal: khususNom,
+        enabled: khususEn,
+      },
+      biayaPengurusanKhusus: {
+        nominal: khususNom,
+        enabled: khususEn,
+      },
       components: this.getDefaultComponentsForService(serviceId),
+      swdkllj: opsenObj,
+      opsenPkb: opsenObj,
+      biayaLainnya: Array.isArray(row.biayaLainnya) ? row.biayaLainnya.map((b: any) => ({ ...b })) : [],
       active: true,
-    });
+    };
+
+    if (this.isApiMode && pricingRepository.createServicePricing) {
+      const serverRes = await pricingRepository.createServicePricing(newConfig);
+      if (serverRes?.id) {
+        newConfig.id = serverRes.id;
+      }
+    }
+
+    row.id = newConfig.id;
+    row.dbId = newConfig.id;
+    this.biayaLayananRows.push(row);
+    this.serviceConfigs.set(key, newConfig);
+    this.notify();
+    return newConfig;
+  }
+
+  public async deleteBiayaLayananRow(id: any): Promise<void> {
+    const idx = this.biayaLayananRows.findIndex((r) => String(r.id) === String(id) || String(r.dbId) === String(id));
+    if (idx === -1) {
+      throw new Error(`Baris biaya layanan '${id}' tidak ditemukan.`);
+    }
+
+    const targetRow = this.biayaLayananRows[idx];
+    const serviceId = resolveServiceId(targetRow.layanan);
+    const samsatId = resolveSamsatId(targetRow.wilayah);
+    const canonicalKey = targetRow.dbId || `${serviceId}:${samsatId}`;
+
+    if (this.isApiMode && pricingRepository.deleteServicePricing) {
+      await pricingRepository.deleteServicePricing(canonicalKey);
+    }
+
+    this.biayaLayananRows.splice(idx, 1);
+    this.serviceConfigs.delete(canonicalKey);
+    this.serviceConfigs.delete(`${serviceId}:${samsatId}`);
     this.notify();
   }
 
-  public deleteBiayaLayananRow(id: number): void {
-    const idx = this.biayaLayananRows.findIndex((r) => r.id === id);
-    if (idx !== -1) {
-      const removed = this.biayaLayananRows.splice(idx, 1)[0];
-      const serviceId = resolveServiceId(removed.layanan);
-      const samsatId = resolveSamsatId(removed.wilayah);
-      this.serviceConfigs.delete(`${serviceId}:${samsatId}`);
-      this.notify();
+  public applyConfigToAllSamsats(
+    serviceIdOrName: string,
+    sourceConfig: {
+      biayaJasaLengkap: number;
+      jasaLengkapEnabled: boolean;
+      biayaJasaNembak: number;
+      jasaNembakEnabled: boolean;
+      biayaAntarJemput: number;
+      antarJemputEnabled: boolean;
+      antarJemputMode?: "Antar & Jemput" | "Antar Saja" | "Jemput Saja";
+      nominalSwdkllj: number;
+      swdklljEnabled: boolean;
+      biayaLainnya?: Array<{ id: string; label: string; nominal: number; enabled: boolean; includesInTotal?: boolean }>;
+      components?: Record<string, boolean>;
+    },
+    scope: ApplyAllScope = {
+      applyBiayaLayanan: true,
+      applyBiayaTambahan: true,
+      applyKomponenSamsat: true,
+      applyBiayaLainnya: false,
     }
+  ): void {
+    const serviceId = resolveServiceId(serviceIdOrName);
+    const serviceName = this.biayaLayananRows.find((r) => resolveServiceId(r.layanan) === serviceId)?.layanan || serviceIdOrName;
+
+    // Helper for safe non-destructive merge of biayaLainnya
+    const safeMergeBiayaLainnya = (targetItems: any[] = [], sourceItems: any[] = []): any[] => {
+      const merged = (targetItems || []).map((item) => ({ ...item }));
+      (sourceItems || []).forEach((sourceItem) => {
+        const existingIdx = merged.findIndex(
+          (t) =>
+            (t.id && sourceItem.id && t.id === sourceItem.id) ||
+            (t.label && sourceItem.label && t.label.trim().toLowerCase() === sourceItem.label.trim().toLowerCase())
+        );
+        if (existingIdx !== -1) {
+          merged[existingIdx] = {
+            ...merged[existingIdx],
+            label: sourceItem.label || merged[existingIdx].label,
+            nominal: sourceItem.nominal !== undefined ? sourceItem.nominal : merged[existingIdx].nominal,
+            enabled: sourceItem.enabled !== undefined ? sourceItem.enabled : merged[existingIdx].enabled,
+            includesInTotal: sourceItem.includesInTotal !== undefined ? sourceItem.includesInTotal : merged[existingIdx].includesInTotal,
+          };
+        } else {
+          merged.push({
+            ...sourceItem,
+            id: sourceItem.id || `bl-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          });
+        }
+      });
+      return merged;
+    };
+
+    // Update all matching rows in biayaLayananRows
+    this.biayaLayananRows.forEach((row) => {
+      if (resolveServiceId(row.layanan) === serviceId) {
+        if (scope.applyBiayaLayanan !== false) {
+          row.biayaJasa = sourceConfig.biayaJasaLengkap;
+          row.biayaJasaLengkap = sourceConfig.biayaJasaLengkap;
+          row.jasaLengkapEnabled = sourceConfig.jasaLengkapEnabled;
+          row.biayaPengurusanKhusus = sourceConfig.biayaJasaNembak;
+          row.biayaJasaNembak = sourceConfig.biayaJasaNembak;
+          row.pengurusanKhususEnabled = sourceConfig.jasaNembakEnabled;
+          row.jasaNembakEnabled = sourceConfig.jasaNembakEnabled;
+        }
+
+        if (scope.applyBiayaTambahan !== false) {
+          row.biayaAntarJemput = sourceConfig.biayaAntarJemput;
+          row.antarJemputEnabled = sourceConfig.antarJemputEnabled;
+          if (sourceConfig.antarJemputMode) {
+            row.antarJemputMode = sourceConfig.antarJemputMode;
+          }
+          row.opsenPkb = {
+            nominal: sourceConfig.nominalSwdkllj,
+            enabled: sourceConfig.swdklljEnabled,
+          };
+          row.swdkllj = {
+            nominal: sourceConfig.nominalSwdkllj,
+            enabled: sourceConfig.swdklljEnabled,
+          };
+        }
+
+        // Only merge Biaya Lainnya if explicitly selected in scope
+        if (scope.applyBiayaLainnya === true && sourceConfig.biayaLainnya) {
+          row.biayaLainnya = safeMergeBiayaLainnya(row.biayaLainnya, sourceConfig.biayaLainnya);
+        }
+
+        // Update serviceConfigs
+        const samsatId = resolveSamsatId(row.wilayah);
+        const key = `${serviceId}:${samsatId}`;
+        const existing = this.serviceConfigs.get(key);
+        if (existing) {
+          if (scope.applyBiayaLayanan !== false) {
+            existing.biayaJasa = sourceConfig.biayaJasaLengkap;
+            existing.jasaLengkap = {
+              nominal: sourceConfig.biayaJasaLengkap,
+              enabled: sourceConfig.jasaLengkapEnabled,
+            };
+            existing.jasaNembak = {
+              nominal: sourceConfig.biayaJasaNembak,
+              enabled: sourceConfig.jasaNembakEnabled,
+            };
+            existing.biayaPengurusanKhusus = {
+              nominal: sourceConfig.biayaJasaNembak,
+              enabled: sourceConfig.jasaNembakEnabled,
+            };
+          }
+
+          if (scope.applyBiayaTambahan !== false) {
+            existing.biayaAntarJemput = sourceConfig.biayaAntarJemput;
+            existing.antarJemputEnabled = sourceConfig.antarJemputEnabled;
+            if (sourceConfig.antarJemputMode) {
+              existing.antarJemputMode = sourceConfig.antarJemputMode;
+            }
+            existing.swdkllj = {
+              nominal: sourceConfig.nominalSwdkllj,
+              enabled: sourceConfig.swdklljEnabled,
+            };
+            existing.opsenPkb = { ...existing.swdkllj };
+          }
+
+          if (scope.applyBiayaLainnya === true && sourceConfig.biayaLainnya) {
+            existing.biayaLainnya = safeMergeBiayaLainnya(existing.biayaLainnya, sourceConfig.biayaLainnya);
+          }
+
+          if (scope.applyKomponenSamsat !== false && sourceConfig.components) {
+            Object.entries(sourceConfig.components).forEach(([pricingItemId, enabled]) => {
+              const comp = existing.components.find((c) => c.pricingItemId === pricingItemId);
+              if (comp) {
+                comp.enabled = enabled;
+              } else {
+                existing.components.push({ pricingItemId, enabled, required: false });
+              }
+            });
+          }
+        }
+      }
+    });
+
+    try {
+      auditLog.log({
+        userId: "usr-admin",
+        userName: "Admin Master",
+        userRole: "admin",
+        action: "UPDATE",
+        module: "Master Data",
+        details: `Konfigurasi biaya layanan ${serviceName} berhasil diterapkan ke seluruh Samsat.`,
+        metadata: { serviceId, sourceConfig },
+      });
+    } catch {
+      // safe fallback
+    }
+
+    this.notify();
   }
 
   // ─── Mutasi LD Rows ─────────────────────────────────────────────────────────
@@ -1298,15 +1969,24 @@ class PricingStore {
     return this.hargaDasarRows.map((r) => ({ ...r }));
   }
 
-  public updateHargaDasarRow(id: number, updatedRow: any): void {
-    const idx = this.hargaDasarRows.findIndex((r) => r.id === id);
-    if (idx !== -1) {
-      this.hargaDasarRows[idx] = { ...updatedRow };
-      if (this.isApiMode && updatedRow.hargaDasar !== undefined) {
-        pricingRepository.updateSamsatItem(String(id), { basePrice: Number(updatedRow.hargaDasar) });
-      }
-      this.notify();
+  public async updateHargaDasarRow(id: string | number, updatedRow: any): Promise<void> {
+    const idx = this.hargaDasarRows.findIndex((r) => String(r.id) === String(id));
+    if (idx === -1) {
+      throw new Error(`Baris harga dasar '${id}' tidak ditemukan.`);
     }
+
+    const canonicalId = String(id);
+    const existingDbItem = this.getPricingItemById(canonicalId);
+    if (!existingDbItem && this.isApiMode) {
+      throw new Error(`Baris '${updatedRow.namaSamsat || id}' tidak memiliki pasangan record di database.`);
+    }
+
+    if (this.isApiMode && updatedRow.hargaDasar !== undefined) {
+      await pricingRepository.updateSamsatItem(canonicalId, { basePrice: Number(updatedRow.hargaDasar) });
+    }
+
+    this.hargaDasarRows[idx] = { ...updatedRow, id: canonicalId };
+    this.notify();
   }
 
   public addHargaDasarRow(row: any): void {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
@@ -38,27 +39,34 @@ import {
   Image as ImageIcon,
   Building,
   FileUp,
+  Banknote,
   ArrowRight,
   ArrowLeft,
   ChevronRight,
   ShieldCheck,
   Clock,
+  Plus,
   Info,
   ChevronDown,
   ChevronUp,
   Calendar,
   FileCheck,
   HelpCircle,
+  Truck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { usePaymentMethods } from "../data/paymentMethodStore";
 import { orderStore, OperationalOrder, StructuredAddress, OrderDocument, PaymentProof } from "../data/orderStore";
 import { pricingStore, usePricingStore, resolveServiceId, resolveSamsatId } from "../data/pricingStore";
 import { documentRepository } from "../../data/repositories/documentRepository";
+import { processDocumentUpload, formatFileSize } from "../utils/fileCompressor";
 import { cn } from "./ui/utils";
 import { calculateEstimation } from "../../domain/estimation/estimationEngine";
 import { DEFAULT_R4_ANNUAL_TEMPLATE, DEFAULT_R2_ANNUAL_TEMPLATE } from "../../domain/estimation/defaultTemplates";
-import { estimationStore } from "../data/estimationStore";
+import { estimationStore, useEstimationStore } from "../data/estimationStore";
 import { CalculationExplanationModal } from "./estimation/CalculationExplanationModal";
+import { SearchableSamsatSelect } from "./SearchableSamsatSelect";
+import { PlateNumberInput } from "./PlateNumberInput";
 import {
   ProgramSamsat,
   KondisiBerkas,
@@ -66,6 +74,7 @@ import {
   EstimationInput,
   EstimationResult,
 } from "../../domain/estimation/types";
+import { parseDateParts } from "../../domain/estimation/excelDateUtils";
 
 const layananOptions = [
   "Perpanjangan 1 Tahun",
@@ -79,6 +88,37 @@ const bulanOptions = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
+
+export const getMonthNameFromDate = (dateStr: string): string => {
+  if (!dateStr) return "";
+  const parts = parseDateParts(dateStr);
+  if (!parts || !parts.m || parts.m < 1 || parts.m > 12) return "";
+  return bulanOptions[parts.m - 1];
+};
+
+export function resolveEstimationTemplateId(serviceName: string, vehicleType: string): string | null {
+  const isMobil = vehicleType === "Mobil" || (vehicleType as string) === "R4";
+  const isMotor = vehicleType === "Motor" || (vehicleType as string) === "R2";
+  if (!isMobil && !isMotor) return null;
+
+  const sId = resolveServiceId(serviceName);
+  if (serviceName === "Perpanjangan 1 Tahun" || sId === "perpanjangan-1-tahun") {
+    return isMobil ? "template-pajak-tahunan-r4" : "template-pajak-tahunan-r2";
+  }
+  if (serviceName === "Perpanjangan 5 Tahun" || sId === "perpanjangan-5-tahun") {
+    return isMobil ? "template-pajak-5-tahun-r4" : "template-pajak-5-tahun-r2";
+  }
+  if (serviceName === "Balik Nama" || sId === "balik-nama") {
+    return isMobil ? "template-bbn-r4" : "template-bbn-r2";
+  }
+  if (serviceName === "Mutasi Antar Samsat" || sId === "mutasi-antar-samsat") {
+    return isMobil ? "template-mutasi-as-r4" : "template-mutasi-as-r2";
+  }
+  if (serviceName === "Mutasi Luar Daerah" || sId === "mutasi-luar-daerah") {
+    return isMobil ? "template-mutasi-ld-r4" : "template-mutasi-ld-r2";
+  }
+  return null;
+}
 
 interface BuatOrderProps {
   onOrderCreated?: (order: OperationalOrder) => void;
@@ -102,10 +142,14 @@ export function BuatOrder({
   currentUserRole = "admin",
   currentUserId,
 }: BuatOrderProps) {
+  const navigate = useNavigate();
   usePricingStore(); // Reactive subscription to pricingStore configuration
+  useEstimationStore(); // Reactive subscription to estimationStore template parameters & components
+  const { activeMethods } = usePaymentMethods();
 
-  // Stepper State: 1 = Data Klien, 2 = Dokumen Kendaraan, 3 = Pembayaran & Ringkasan
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+  // Stepper State: 1 = Data Klien & Kendaraan, 2 = Dokumen, Pembayaran & Ringkasan
+  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
+  const [isSameAsCustomer, setIsSameAsCustomer] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSameAddress, setIsSameAddress] = useState(true);
@@ -137,7 +181,6 @@ export function BuatOrder({
   const [r4ProgramSamsat, setR4ProgramSamsat] = useState<ProgramSamsat>("NORMAL");
   const [r4KondisiBerkas, setR4KondisiBerkas] = useState<KondisiBerkas>("LENGKAP");
   const [r4WilayahAccId, setR4WilayahAccId] = useState<WilayahAccId>("DKI Jakarta");
-  const [r4TanggalEstimasi, setR4TanggalEstimasi] = useState<string>("");
   const [r4ShowIncidentals, setR4ShowIncidentals] = useState<boolean>(false);
   const [r4ManualValues, setR4ManualValues] = useState<Record<string, number>>({
     jr: 0,
@@ -151,7 +194,6 @@ export function BuatOrder({
   const [r2ProgramSamsat, setR2ProgramSamsat] = useState<ProgramSamsat>("NORMAL");
   const [r2KondisiBerkas, setR2KondisiBerkas] = useState<KondisiBerkas>("TIDAK ADA KTP");
   const [r2WilayahAccId, setR2WilayahAccId] = useState<WilayahAccId>("NON ACC ID");
-  const [r2TanggalEstimasi, setR2TanggalEstimasi] = useState<string>("");
   const [r2ShowIncidentals, setR2ShowIncidentals] = useState<boolean>(false);
   const [r2ManualValues, setR2ManualValues] = useState<Record<string, number>>({
     "stnk-hilang": 0,
@@ -160,6 +202,14 @@ export function BuatOrder({
     "req-nopol-ganjil-acak": 0,
     "pemekaran-wilayah": 0,
   });
+
+  // Extended Estimation States (5 Tahunan, BBN, Mutasi AS, Mutasi LD)
+  const [extProgramSamsat, setExtProgramSamsat] = useState<ProgramSamsat>("NORMAL");
+  const [extKondisiBerkas, setExtKondisiBerkas] = useState<KondisiBerkas>("LENGKAP");
+  const [extWilayahAccId, setExtWilayahAccId] = useState<WilayahAccId>("DKI Jakarta");
+  const [extFreeBbn, setExtFreeBbn] = useState<boolean>(true);
+  const [extShowIncidentals, setExtShowIncidentals] = useState<boolean>(false);
+  const [extManualValues, setExtManualValues] = useState<Record<string, number>>({});
 
   // Calculation Explanation Popup Modal States
   const [explanationModalOpen, setExplanationModalOpen] = useState(false);
@@ -198,14 +248,15 @@ export function BuatOrder({
 
     // 3. Informasi Pajak Kendaraan
     pkbBerlakuSd: "",
-    tahunPajak: new Date().getFullYear().toString(),
-    bulanPajak: "Januari",
+    tahunPajak: "",
+    bulanPajak: "",
     nominalPkbTerakhir: "",
     nominalSwdkllj: "143000",
 
     // 4. Pembayaran
-    tipePembayaran: "Bayar di Akhir" as "Bayar di Awal" | "Bayar di Akhir",
-    metodePembayaran: "Transfer Bank BCA",
+    tipePembayaran: "Bayar di Akhir" as "Bayar di Awal" | "Bayar di Akhir" | "Tempo",
+    metodePembayaran: "Transfer BCA",
+    nominalDibayarAwal: "",
 
     // 5. Alamat Penjemputan
     jemputKota: "Jakarta Timur",
@@ -263,11 +314,39 @@ export function BuatOrder({
     (formData.layanan === "Perpanjangan 1 Tahun" || resolveServiceId(formData.layanan) === "perpanjangan-1-tahun") &&
     (formData.jenisKendaraan === "Motor" || (formData.jenisKendaraan as string) === "R2");
 
-  // Cost calculation via pricingStore SSoT or estimationEngine (for R4 and R2 Annual)
+  const extendedTemplateId = resolveEstimationTemplateId(formData.layanan, formData.jenisKendaraan);
+  const isExtendedEstimation = !isR4Annual && !isR2Annual && !!extendedTemplateId;
+
+  // Cost calculation via pricingStore SSoT or estimationEngine (for R4, R2, and Extended)
   const calculateCost = () => {
     const pkb = parseFloat(formData.nominalPkbTerakhir) || 0;
     const swdkllj = isOpsenEnabled ? (parseFloat(formData.nominalSwdkllj) || 0) : 0;
     const dendaSwdkllj = 0;
+
+    const cfg = currentConfig || (formData.layanan ? pricingStore.getServiceFeeConfig(formData.layanan, formData.wilayahSamsatAsal) : undefined);
+    const isAntarJemput = formData.metodeLayanan === "Antar Jemput";
+    const isCourierEnabled = cfg ? cfg.antarJemputEnabled !== false : true;
+    const courierFee = isAntarJemput && isCourierEnabled ? (cfg?.biayaAntarJemput ?? 50000) : 0;
+
+    const kustomItems: any[] = [];
+    let totalKustomFees = 0;
+    if (cfg?.biayaLainnya && Array.isArray(cfg.biayaLainnya)) {
+      cfg.biayaLainnya.forEach((bl) => {
+        const nom = Number(bl.nominal) || 0;
+        if (bl.enabled !== false && nom > 0) {
+          kustomItems.push({
+            itemId: bl.id,
+            code: "BIAYA-LAIN",
+            name: bl.label || "Biaya Tambahan Wilayah",
+            amount: nom,
+            category: "Operasional" as const,
+            source: "BiayaLayanan" as const,
+            isRequired: false,
+          });
+          totalKustomFees += nom;
+        }
+      });
+    }
 
     if (!formData.layanan) {
       return {
@@ -285,15 +364,34 @@ export function BuatOrder({
         r4Result: undefined as EstimationResult | undefined,
         isR2Annual: false,
         r2Result: undefined as EstimationResult | undefined,
+        isExtendedEstimation: false,
+        extResult: undefined as EstimationResult | undefined,
+        extTemplate: undefined,
+        courierFee: 0,
+        kustomItems: [],
+        totalKustomFees: 0,
       };
     }
 
     if (isR4Annual) {
-      const template = estimationStore.getTemplate("template-pajak-tahunan-r4") || DEFAULT_R4_ANNUAL_TEMPLATE;
+      const baseTemplate = estimationStore.getTemplate("template-pajak-tahunan-r4") || DEFAULT_R4_ANNUAL_TEMPLATE;
+      const isKhusus = r4KondisiBerkas === "TIDAK ADA KTP" && Boolean(cfg?.biayaPengurusanKhusus?.enabled && (cfg.biayaPengurusanKhusus.nominal || 0) > 0);
+      const effectiveJasa = isKhusus
+        ? (cfg?.biayaPengurusanKhusus?.nominal || 0)
+        : (cfg?.jasaLengkap?.enabled !== false ? (cfg?.jasaLengkap?.nominal ?? cfg?.biayaJasa ?? baseTemplate.biayaJasa) : 0);
+
+      const template = {
+        ...baseTemplate,
+        biayaJasa: effectiveJasa,
+        components: baseTemplate.components.map((c) =>
+          c.ruleId === "JASA" ? { ...c, defaultValue: effectiveJasa } : c
+        ),
+      };
+
       const estimationInput: EstimationInput = {
         pkbDasar: pkb,
         tanggalJatuhTempo: formData.pkbBerlakuSd || "",
-        tanggalEstimasi: r4TanggalEstimasi || new Date().toISOString().split("T")[0],
+        tanggalEstimasi: new Date().toISOString().split("T")[0],
         programSamsat: r4ProgramSamsat,
         kondisiBerkas: r4KondisiBerkas,
         wilayahAccId: r4WilayahAccId,
@@ -326,8 +424,23 @@ export function BuatOrder({
           };
         });
 
+      if (isAntarJemput && courierFee > 0) {
+        breakdown.push({
+          itemId: "fee-antar-jemput",
+          code: "OPS-ANTARJEMPUT",
+          name: `Layanan Kurir Antar-Jemput (${cfg?.antarJemputMode || "Antar & Jemput"})`,
+          amount: courierFee,
+          category: "Operasional",
+          source: "Operasional",
+          isRequired: false,
+        });
+      }
+
+      kustomItems.forEach((ki) => breakdown.push(ki));
+
       const cetakSkpAmount = r4Result.items.find((i) => i.id === "cetak-skp")?.amount || 0;
-      const jasaAmount = r4Result.items.find((i) => i.id === "jasa")?.amount || 250000;
+      const jasaAmount = r4Result.items.find((i) => i.id === "jasa")?.amount ?? effectiveJasa;
+      const grandTotal = r4Result.totalEstimasi + courierFee + totalKustomFees;
 
       const snapshot: any = {
         serviceId: "perpanjangan-1-tahun",
@@ -336,12 +449,13 @@ export function BuatOrder({
         samsatName: formData.wilayahSamsatAsal,
         metodeLayanan: formData.metodeLayanan,
         biayaJasa: jasaAmount,
+        biayaPengurusanKhusus: isKhusus ? effectiveJasa : undefined,
         biayaSamsat: cetakSkpAmount,
-        biayaAntarJemput: 0,
+        biayaAntarJemput: courierFee,
         pkb: r4Result.totalPkb + r4Result.totalDendaPkb,
         swdkllj: r4Result.totalSwdkllj,
         dendaSwdkllj: r4Result.totalDendaSwdkllj + cetakSkpAmount + r4Result.totalInsidental,
-        totalEstimasi: r4Result.totalEstimasi,
+        totalEstimasi: grandTotal,
         breakdown,
         createdAt: new Date().toISOString(),
       };
@@ -349,27 +463,46 @@ export function BuatOrder({
       return {
         biayaJasa: jasaAmount,
         biayaSamsat: cetakSkpAmount,
-        biayaAntarJemput: 0,
-        subtotalLayanan: r4Result.totalAdminDanJasa + r4Result.totalInsidental,
+        biayaAntarJemput: courierFee,
+        subtotalLayanan: r4Result.totalAdminDanJasa + r4Result.totalInsidental + courierFee + totalKustomFees,
         pkb: r4Result.totalPkb + r4Result.totalDendaPkb,
         swdkllj: r4Result.totalSwdkllj,
         dendaSwdkllj: r4Result.totalDendaSwdkllj + cetakSkpAmount + r4Result.totalInsidental,
-        total: r4Result.totalEstimasi,
+        total: grandTotal,
         breakdown,
         snapshot,
         isR4Annual: true,
         r4Result,
         isR2Annual: false,
         r2Result: undefined as EstimationResult | undefined,
+        isExtendedEstimation: false,
+        extResult: undefined as EstimationResult | undefined,
+        extTemplate: undefined,
+        courierFee,
+        kustomItems,
+        totalKustomFees,
       };
     }
 
     if (isR2Annual) {
-      const template = estimationStore.getTemplate("template-pajak-tahunan-r2") || DEFAULT_R2_ANNUAL_TEMPLATE;
+      const baseTemplate = estimationStore.getTemplate("template-pajak-tahunan-r2") || DEFAULT_R2_ANNUAL_TEMPLATE;
+      const isKhusus = r2KondisiBerkas === "TIDAK ADA KTP" && Boolean(cfg?.biayaPengurusanKhusus?.enabled && (cfg.biayaPengurusanKhusus.nominal || 0) > 0);
+      const effectiveJasa = isKhusus
+        ? (cfg?.biayaPengurusanKhusus?.nominal || 0)
+        : (cfg?.jasaLengkap?.enabled !== false ? (cfg?.jasaLengkap?.nominal ?? cfg?.biayaJasa ?? baseTemplate.biayaJasa) : 0);
+
+      const template = {
+        ...baseTemplate,
+        biayaJasa: effectiveJasa,
+        components: baseTemplate.components.map((c) =>
+          c.ruleId === "JASA" ? { ...c, defaultValue: effectiveJasa } : c
+        ),
+      };
+
       const estimationInput: EstimationInput = {
         pkbDasar: pkb,
         tanggalJatuhTempo: formData.pkbBerlakuSd || "",
-        tanggalEstimasi: r2TanggalEstimasi || new Date().toISOString().split("T")[0],
+        tanggalEstimasi: new Date().toISOString().split("T")[0],
         programSamsat: r2ProgramSamsat,
         kondisiBerkas: r2KondisiBerkas,
         wilayahAccId: r2WilayahAccId,
@@ -402,9 +535,24 @@ export function BuatOrder({
           };
         });
 
+      if (isAntarJemput && courierFee > 0) {
+        breakdown.push({
+          itemId: "fee-antar-jemput",
+          code: "OPS-ANTARJEMPUT",
+          name: `Layanan Kurir Antar-Jemput (${cfg?.antarJemputMode || "Antar & Jemput"})`,
+          amount: courierFee,
+          category: "Operasional",
+          source: "Operasional",
+          isRequired: false,
+        });
+      }
+
+      kustomItems.forEach((ki) => breakdown.push(ki));
+
       const cetakSkpAmount = r2Result.items.find((i) => i.id === "cetak-skp")?.amount || 0;
       const prosesAccAmount = r2Result.items.find((i) => i.id === "proses-dan-acc-id")?.amount || 0;
-      const jasaAmount = r2Result.items.find((i) => i.id === "jasa")?.amount || 200000;
+      const jasaAmount = r2Result.items.find((i) => i.id === "jasa")?.amount ?? effectiveJasa;
+      const grandTotal = r2Result.totalEstimasi + courierFee + totalKustomFees;
 
       const snapshot: any = {
         serviceId: "perpanjangan-1-tahun",
@@ -413,12 +561,13 @@ export function BuatOrder({
         samsatName: formData.wilayahSamsatAsal,
         metodeLayanan: formData.metodeLayanan,
         biayaJasa: jasaAmount,
+        biayaPengurusanKhusus: isKhusus ? effectiveJasa : undefined,
         biayaSamsat: cetakSkpAmount + prosesAccAmount,
-        biayaAntarJemput: 0,
+        biayaAntarJemput: courierFee,
         pkb: r2Result.totalPkb + r2Result.totalDendaPkb,
         swdkllj: r2Result.totalSwdkllj,
         dendaSwdkllj: r2Result.totalDendaSwdkllj + cetakSkpAmount + prosesAccAmount + r2Result.totalInsidental,
-        totalEstimasi: r2Result.totalEstimasi,
+        totalEstimasi: grandTotal,
         breakdown,
         createdAt: new Date().toISOString(),
       };
@@ -426,18 +575,147 @@ export function BuatOrder({
       return {
         biayaJasa: jasaAmount,
         biayaSamsat: cetakSkpAmount + prosesAccAmount,
-        biayaAntarJemput: 0,
-        subtotalLayanan: r2Result.totalAdminDanJasa + r2Result.totalInsidental,
+        biayaAntarJemput: courierFee,
+        subtotalLayanan: r2Result.totalAdminDanJasa + r2Result.totalInsidental + courierFee + totalKustomFees,
         pkb: r2Result.totalPkb + r2Result.totalDendaPkb,
         swdkllj: r2Result.totalSwdkllj,
         dendaSwdkllj: r2Result.totalDendaSwdkllj + cetakSkpAmount + prosesAccAmount + r2Result.totalInsidental,
-        total: r2Result.totalEstimasi,
+        total: grandTotal,
         breakdown,
         snapshot,
         isR4Annual: false,
         r4Result: undefined as EstimationResult | undefined,
         isR2Annual: true,
         r2Result,
+        isExtendedEstimation: false,
+        extResult: undefined as EstimationResult | undefined,
+        extTemplate: undefined,
+        courierFee,
+        kustomItems,
+        totalKustomFees,
+      };
+    }
+
+    const extTemplateId = resolveEstimationTemplateId(formData.layanan, formData.jenisKendaraan);
+    const isExtendedEstimation = Boolean(
+      extTemplateId &&
+      !isR4Annual &&
+      !isR2Annual
+    );
+
+    if (isExtendedEstimation && extTemplateId) {
+      const baseTemplate = estimationStore.getTemplate(extTemplateId);
+      const isKhusus = extKondisiBerkas === "TIDAK ADA KTP" && Boolean(cfg?.biayaPengurusanKhusus?.enabled && (cfg.biayaPengurusanKhusus.nominal || 0) > 0);
+      const effectiveJasa = isKhusus
+        ? (cfg?.biayaPengurusanKhusus?.nominal || 0)
+        : (cfg?.jasaLengkap?.enabled !== false ? (cfg?.jasaLengkap?.nominal ?? cfg?.biayaJasa ?? baseTemplate.biayaJasa) : 0);
+
+      const template = {
+        ...baseTemplate,
+        biayaJasa: effectiveJasa,
+        components: baseTemplate.components.map((c) =>
+          c.ruleId === "JASA" ? { ...c, defaultValue: effectiveJasa } : c
+        ),
+      };
+
+      const estimationInput: EstimationInput = {
+        pkbDasar: pkb,
+        tanggalJatuhTempo: formData.pkbBerlakuSd || "",
+        tanggalEstimasi: new Date().toISOString().split("T")[0],
+        programSamsat: extProgramSamsat,
+        kondisiBerkas: extKondisiBerkas,
+        wilayahAccId: extWilayahAccId,
+        manualValues: extManualValues,
+        freeBbn: extFreeBbn !== false,
+        wilayahAsal: formData.wilayahSamsatAsal,
+        wilayahTujuan: formData.wilayahSamsatTujuan,
+      };
+
+      const extResult = calculateEstimation(estimationInput, template);
+
+      const breakdown = extResult.items
+        .filter((it) => it.amount > 0 || it.includesInTotal)
+        .map((it) => {
+          let category: "Pajak" | "Jasa" | "Samsat" | "Operasional" = "Pajak";
+          if (it.category === "JASA") category = "Jasa";
+          else if (it.category === "ADMIN" || it.category === "PROSES" || it.category === "BBN") category = "Samsat";
+          else if (it.category === "INSIDENTAL") category = "Operasional";
+
+          return {
+            itemId: it.id,
+            code: it.code,
+            name: it.name,
+            amount: it.amount,
+            category,
+            source: it.isManual
+              ? ("Operasional" as const)
+              : it.category === "JASA"
+              ? ("BiayaLayanan" as const)
+              : ("Kendaraan" as const),
+            isRequired: !it.isManual,
+          };
+        });
+
+      if (isAntarJemput && courierFee > 0) {
+        breakdown.push({
+          itemId: "fee-antar-jemput",
+          code: "OPS-ANTARJEMPUT",
+          name: `Layanan Kurir Antar-Jemput (${cfg?.antarJemputMode || "Antar & Jemput"})`,
+          amount: courierFee,
+          category: "Operasional",
+          source: "Operasional",
+          isRequired: false,
+        });
+      }
+
+      kustomItems.forEach((ki) => breakdown.push(ki));
+
+      const jasaAmount = extResult.items.find((i) => i.category === "JASA")?.amount ?? effectiveJasa;
+      const prosesAmount = extResult.items
+        .filter((i) => i.category === "ADMIN" || i.category === "PROSES" || i.category === "BBN")
+        .reduce((sum, i) => sum + i.amount, 0);
+
+      const grandTotal = extResult.totalEstimasi + courierFee + totalKustomFees;
+
+      const snapshot: any = {
+        serviceId: resolveServiceId(formData.layanan),
+        serviceName: formData.layanan,
+        samsatId: resolveSamsatId(formData.wilayahSamsatAsal),
+        samsatName: formData.wilayahSamsatAsal,
+        metodeLayanan: formData.metodeLayanan,
+        biayaJasa: jasaAmount,
+        biayaPengurusanKhusus: isKhusus ? effectiveJasa : undefined,
+        biayaSamsat: prosesAmount,
+        biayaAntarJemput: courierFee,
+        pkb: extResult.totalPkb + extResult.totalDendaPkb,
+        swdkllj: extResult.totalSwdkllj,
+        dendaSwdkllj: extResult.totalDendaSwdkllj + prosesAmount + extResult.totalInsidental,
+        totalEstimasi: grandTotal,
+        breakdown,
+        createdAt: new Date().toISOString(),
+      };
+
+      return {
+        biayaJasa: jasaAmount,
+        biayaSamsat: prosesAmount,
+        biayaAntarJemput: courierFee,
+        subtotalLayanan: extResult.totalAdminDanJasa + extResult.totalInsidental + courierFee + totalKustomFees,
+        pkb: extResult.totalPkb + extResult.totalDendaPkb,
+        swdkllj: extResult.totalSwdkllj,
+        dendaSwdkllj: extResult.totalDendaSwdkllj + prosesAmount + extResult.totalInsidental,
+        total: grandTotal,
+        breakdown,
+        snapshot,
+        isR4Annual: false,
+        r4Result: undefined as EstimationResult | undefined,
+        isR2Annual: false,
+        r2Result: undefined as EstimationResult | undefined,
+        isExtendedEstimation: true,
+        extResult,
+        extTemplate: template,
+        courierFee,
+        kustomItems,
+        totalKustomFees,
       };
     }
 
@@ -468,31 +746,43 @@ export function BuatOrder({
       r4Result: undefined as EstimationResult | undefined,
       isR2Annual: false,
       r2Result: undefined as EstimationResult | undefined,
+      isExtendedEstimation: false,
+      extResult: undefined as EstimationResult | undefined,
+      extTemplate: undefined,
+      courierFee,
+      kustomItems,
+      totalKustomFees,
     };
   };
 
   const cost = calculateCost();
 
-  // Document upload handler
-  const handleDocFileSelect = (docKey: string, file: File) => {
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    const fileType = isPdf ? ("pdf" as const) : ("image" as const);
-    const fileUrl = URL.createObjectURL(file);
-    const fileSize = (file.size / 1024).toFixed(0) + " KB";
+  // Document upload handler with automatic HEIC conversion & adaptive compression
+  const handleDocFileSelect = async (docKey: string, file: File) => {
+    try {
+      const processed = await processDocumentUpload(file);
+      setDocs((prev) => ({
+        ...prev,
+        [docKey]: {
+          file: processed.file,
+          name: processed.fileName,
+          fileType: processed.fileType,
+          fileUrl: processed.fileUrl,
+          fileSize: formatFileSize(processed.fileSize),
+          attached: true,
+        },
+      }));
 
-    setDocs((prev) => ({
-      ...prev,
-      [docKey]: {
-        file,
-        name: file.name,
-        fileType,
-        fileUrl,
-        fileSize,
-        attached: true,
-      },
-    }));
-
-    toast.success(`Dokumen ${file.name} berhasil dilampirkan.`);
+      if (processed.compressed && processed.compressionRatio) {
+        toast.success(
+          `Dokumen ${processed.fileName} berhasil diproses (${formatFileSize(processed.originalSize)} ➔ ${formatFileSize(processed.fileSize)}, hemat ${processed.compressionRatio})!`
+        );
+      } else {
+        toast.success(`Dokumen ${processed.fileName} berhasil dilampirkan.`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || `Gagal memproses berkas ${file.name}`);
+    }
   };
 
   const handleDocRemove = (docKey: string) => {
@@ -510,22 +800,29 @@ export function BuatOrder({
     toast.info("Dokumen dihapus dari lampiran.");
   };
 
-  // Payment proof handler
-  const handlePaymentProofSelect = (file: File) => {
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    const fileType = isPdf ? ("pdf" as const) : ("image" as const);
-    const fileUrl = URL.createObjectURL(file);
-    const fileSize = (file.size / 1024).toFixed(0) + " KB";
+  // Payment proof handler with automatic HEIC conversion & adaptive compression
+  const handlePaymentProofSelect = async (file: File) => {
+    try {
+      const processed = await processDocumentUpload(file);
+      setPaymentProof({
+        file: processed.file,
+        name: processed.fileName,
+        fileType: processed.fileType,
+        fileUrl: processed.fileUrl,
+        fileSize: formatFileSize(processed.fileSize),
+        attached: true,
+      });
 
-    setPaymentProof({
-      file,
-      name: file.name,
-      fileType,
-      fileUrl,
-      fileSize,
-      attached: true,
-    });
-    toast.success(`Bukti pembayaran ${file.name} berhasil diunggah.`);
+      if (processed.compressed && processed.compressionRatio) {
+        toast.success(
+          `Bukti pembayaran ${processed.fileName} berhasil diproses (${formatFileSize(processed.originalSize)} ➔ ${formatFileSize(processed.fileSize)}, hemat ${processed.compressionRatio})!`
+        );
+      } else {
+        toast.success(`Bukti pembayaran ${processed.fileName} berhasil diunggah.`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || `Gagal memproses bukti pembayaran ${file.name}`);
+    }
   };
 
   const handlePaymentProofRemove = () => {
@@ -555,6 +852,7 @@ export function BuatOrder({
 
   const handleReset = () => {
     setCurrentStep(1);
+    setIsSameAsCustomer(false);
     setPlatePrefix("B");
     setPlateNumber("");
     setPlateSuffix("");
@@ -570,12 +868,13 @@ export function BuatOrder({
       wilayahSamsatAsal: "Jakarta Timur",
       wilayahSamsatTujuan: "Jakarta Timur",
       pkbBerlakuSd: "",
-      tahunPajak: new Date().getFullYear().toString(),
-      bulanPajak: "Januari",
+      tahunPajak: "",
+      bulanPajak: "",
       nominalPkbTerakhir: "",
       nominalSwdkllj: "143000",
       tipePembayaran: "Bayar di Akhir",
       metodePembayaran: "Transfer Bank BCA",
+      nominalDibayarAwal: "",
       jemputKota: "Jakarta Timur",
       jemputKecamatan: "",
       jemputKelurahan: "",
@@ -609,7 +908,6 @@ export function BuatOrder({
     setR4ProgramSamsat("NORMAL");
     setR4KondisiBerkas("LENGKAP");
     setR4WilayahAccId("DKI Jakarta");
-    setR4TanggalEstimasi("");
     setR4ShowIncidentals(false);
     setR4ManualValues({
       jr: 0,
@@ -620,8 +918,8 @@ export function BuatOrder({
     });
   };
 
-  // Step 1 Validation
-  const handleNextStep1 = () => {
+  // Step 1 Validation Helper
+  const validateStep1Fields = (): { isValid: boolean; errors: Record<string, string>; firstKey?: string } => {
     const errors: Record<string, string> = {};
 
     if (!formData.customer.trim()) {
@@ -644,21 +942,42 @@ export function BuatOrder({
     if (formData.metodeLayanan === "Antar Jemput" && !formData.jemputDetail.trim()) {
       errors.jemputDetail = "Detail alamat penjemputan dokumen wajib diisi untuk layanan Antar Jemput!";
     }
-
-    if (Object.keys(errors).length > 0) {
-      setStep1Errors(errors);
-      toast.error("Lengkapi data yang wajib diisi terlebih dahulu.");
-
-      // Auto-scroll to first invalid element
-      const firstErrorKey = Object.keys(errors)[0];
-      const el = document.getElementById(`field-${firstErrorKey}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        const inputEl = el.querySelector("input") || el;
-        if (inputEl && typeof (inputEl as any).focus === "function") {
-          (inputEl as any).focus();
-        }
+    if (!formData.pkbBerlakuSd || !formData.pkbBerlakuSd.trim()) {
+      errors.pkbBerlakuSd = "Masa Berlaku PKB S/D (Tanggal) wajib diisi!";
+    } else {
+      const parts = parseDateParts(formData.pkbBerlakuSd);
+      if (!parts || parts.y < 1900 || parts.y > 2100) {
+        errors.pkbBerlakuSd = "Format tanggal Masa Berlaku PKB S/D tidak valid!";
       }
+    }
+
+    const keys = Object.keys(errors);
+    return {
+      isValid: keys.length === 0,
+      errors,
+      firstKey: keys[0],
+    };
+  };
+
+  const focusAndScrollToError = (fieldKey: string) => {
+    const el = document.getElementById(`field-${fieldKey}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const inputEl = el.querySelector("input, select, textarea") || el;
+      if (inputEl && typeof (inputEl as any).focus === "function") {
+        (inputEl as any).focus();
+      }
+    }
+  };
+
+  // Step 1 Validation
+  const handleNextStep1 = () => {
+    const validation = validateStep1Fields();
+
+    if (!validation.isValid) {
+      setStep1Errors(validation.errors);
+      toast.error(validation.errors[validation.firstKey!] || "Lengkapi data yang wajib diisi terlebih dahulu.");
+      focusAndScrollToError(validation.firstKey!);
       return;
     }
 
@@ -668,6 +987,23 @@ export function BuatOrder({
 
   // Step 2 Validation
   const handleNextStep2 = () => {
+    if (formData.tipePembayaran === "Bayar di Awal") {
+      if (!formData.metodePembayaran) {
+        toast.error("Untuk pilihan 'Bayar di Awal', metode pembayaran wajib dipilih!");
+        return;
+      }
+      const rawNominal = formData.nominalDibayarAwal ? formData.nominalDibayarAwal.replace(/[^0-9]/g, "") : "";
+      if (!rawNominal) {
+        toast.error("Nominal dibayar di awal wajib diisi!");
+        return;
+      }
+      const parsed = Number(rawNominal);
+      if (isNaN(parsed) || parsed < 0) {
+        toast.error("Nominal dibayar di awal tidak valid!");
+        return;
+      }
+
+    }
     setCurrentStep(3);
   };
 
@@ -677,41 +1013,38 @@ export function BuatOrder({
 
     const fullNopol = getCombinedNopol();
 
-    // Final Validations
-    if (!formData.customer.trim()) {
-      toast.error("Nama Customer wajib diisi!");
+    // Final Validations using consistent Step 1 validation
+    const validation = validateStep1Fields();
+    if (!validation.isValid) {
+      setStep1Errors(validation.errors);
       setCurrentStep(1);
+      toast.error(validation.errors[validation.firstKey!] || "Lengkapi data wajib diisi terlebih dahulu.");
+      setTimeout(() => {
+        focusAndScrollToError(validation.firstKey!);
+      }, 100);
       return;
     }
-    if (!formData.nomorHP.trim() || formData.nomorHP.length < 9) {
-      toast.error("Nomor Telepon wajib diisi (minimal 9 digit)!");
-      setCurrentStep(1);
-      return;
-    }
-    if (!formData.layanan) {
-      toast.error("Silakan pilih jenis pengurusan terlebih dahulu!");
-      setCurrentStep(1);
-      return;
-    }
-    if (!plateNumber.trim()) {
-      toast.error("Nomor polisi kendaraan wajib diisi!");
-      setCurrentStep(1);
-      return;
-    }
-    if (formData.metodeLayanan === "Antar Jemput" && !formData.jemputDetail.trim()) {
-      toast.error("Detail alamat penjemputan dokumen wajib diisi untuk layanan Antar Jemput!");
-      setCurrentStep(1);
-      return;
-    }
+    setStep1Errors({});
 
-    if (formData.tipePembayaran === "Bayar di Awal" && !formData.metodePembayaran) {
-      toast.error("Untuk pilihan 'Bayar di Awal', metode pembayaran wajib dipilih!");
-      return;
-    }
+    if (formData.tipePembayaran === "Bayar di Awal") {
+      if (!formData.metodePembayaran) {
+        toast.error("Untuk pilihan 'Bayar di Awal', metode pembayaran wajib dipilih!");
+        setCurrentStep(2);
+        return;
+      }
+      const rawNominal = formData.nominalDibayarAwal ? formData.nominalDibayarAwal.replace(/[^0-9]/g, "") : "";
+      if (!rawNominal) {
+        toast.error("Nominal dibayar di awal wajib diisi!");
+        setCurrentStep(2);
+        return;
+      }
+      const parsed = Number(rawNominal);
+      if (isNaN(parsed) || parsed < 0) {
+        toast.error("Nominal dibayar di awal tidak valid!");
+        setCurrentStep(2);
+        return;
+      }
 
-    if (formData.tipePembayaran === "Bayar di Awal" && !paymentProof.attached) {
-      toast.error("Bukti pembayaran wajib diunggah untuk pembayaran di awal.");
-      return;
     }
 
     setIsSubmitting(true);
@@ -753,10 +1086,12 @@ export function BuatOrder({
       for (const key of Object.keys(docs)) {
         const item = docs[key];
         let fileUrl = item.fileUrl;
+        let docId: string | undefined = undefined;
         if (item.attached && item.file) {
           try {
             const uploaded = await documentRepository.uploadDocument(item.file, { documentType: key });
             fileUrl = uploaded.fileUrl;
+            docId = uploaded.id;
           } catch (uploadErr) {
             console.warn(`[BuatOrder] Upload warning for ${key}:`, uploadErr);
           }
@@ -769,6 +1104,7 @@ export function BuatOrder({
           fileType: item.fileType || undefined,
           fileUrl: fileUrl || undefined,
           fileSize: item.fileSize || undefined,
+          documentId: docId,
         };
       }
 
@@ -776,10 +1112,12 @@ export function BuatOrder({
       let buktiBayarPayload: PaymentProof | undefined;
       if (formData.tipePembayaran === "Bayar di Awal" && paymentProof.attached) {
         let paymentUrl = paymentProof.fileUrl;
+        let paymentDocId: string | undefined = undefined;
         if (paymentProof.file) {
           try {
             const uploaded = await documentRepository.uploadDocument(paymentProof.file, { documentType: "BUKTI_PEMBAYARAN" });
             paymentUrl = uploaded.fileUrl;
+            paymentDocId = uploaded.id;
           } catch (uploadErr) {
             console.warn("[BuatOrder] Payment proof upload warning:", uploadErr);
           }
@@ -790,6 +1128,7 @@ export function BuatOrder({
           fileUrl: paymentUrl,
           fileSize: paymentProof.fileSize,
           uploadedAt: new Date().toISOString(),
+          documentId: paymentDocId,
         };
       }
 
@@ -799,10 +1138,16 @@ export function BuatOrder({
           : formData.metodePembayaran || "Cash (Saat Dokumen Diterima)";
 
       // Tambahkan order ke OrderStore (masuk ke Stage 1: VERIFIKASI)
+      const selectedPm = activeMethods.find((m) => m.nama_metode === paymentMethodResolved);
+      const isBayarAwal = formData.tipePembayaran === "Bayar di Awal";
+      const nominalAwal = isBayarAwal ? (parseFloat(formData.nominalDibayarAwal.replace(/[^0-9]/g, "")) || 0) : 0;
+      const nowIso = new Date().toISOString();
+
       const createdOrder = await orderStore.addOrderAsync({
         customer: formData.customer.trim(),
         namaPemilik: formData.namaPemilik.trim() || formData.customer.trim(),
         nomorHP: formData.nomorHP.trim(),
+        tanggalMasukBerkas: formData.metodeLayanan === "Datang Langsung" ? nowIso : undefined,
         layanan: formData.layanan,
         metodeLayanan: formData.metodeLayanan,
         costBreakdown: cost.breakdown,
@@ -813,9 +1158,9 @@ export function BuatOrder({
         nopol: fullNopol,
         wilayahSamsatAsal: formData.wilayahSamsatAsal,
         wilayahSamsatTujuan: formData.layanan.includes("Mutasi") ? (formData.wilayahSamsatTujuan || formData.wilayahSamsatAsal) : formData.wilayahSamsatAsal,
-        pkbBerlakuSd: formData.pkbBerlakuSd || "",
-        tahunPajak: formData.tahunPajak,
-        bulanPajak: formData.bulanPajak,
+        pkbBerlakuSd: formData.pkbBerlakuSd,
+        tahunPajak: formData.tahunPajak || (pkbParts ? String(pkbParts.y) : ""),
+        bulanPajak: formData.bulanPajak || (formData.pkbBerlakuSd ? (getMonthNameFromDate(formData.pkbBerlakuSd) || "") : ""),
         nominalPkbTerakhir: parseFloat(formData.nominalPkbTerakhir) || 0,
         nominalSwdkllj: parseFloat(formData.nominalSwdkllj) || 143000,
         biayaJasa: cost.biayaJasa,
@@ -830,27 +1175,48 @@ export function BuatOrder({
         createdBy: currentUserName,
         createdById: currentUserId,
         createdByRole: currentUserRole,
-        estimationResult: cost.r4Result || cost.r2Result,
+        estimationResult: cost.r4Result || cost.r2Result || cost.extResult,
         payment: {
-          tipePembayaran: formData.tipePembayaran,
+          tipePembayaran: (formData.tipePembayaran as string) === "Tempo" ? "Bayar di Akhir" : formData.tipePembayaran,
           metodePembayaran: paymentMethodResolved,
-          statusPembayaran: "Belum Lunas",
+          namaBank: selectedPm?.bank || (paymentMethodResolved.includes("BCA") ? "BCA" : paymentMethodResolved.includes("BRI") ? "BRI" : paymentMethodResolved.includes("Mandiri") ? "Mandiri" : "Tunai"),
+          namaRekening: selectedPm?.nama_rekening || "",
+          noRekening: selectedPm?.nomor_rekening || "",
+          tanggalBayar: isBayarAwal && nominalAwal > 0 ? nowIso : undefined,
+          statusPembayaran: isBayarAwal
+            ? (nominalAwal >= cost.total ? "Lunas" : nominalAwal > 0 ? "Kurang Bayar" : "Belum Bayar")
+            : "Belum Lunas",
           totalBiaya: cost.total,
-          dibayar: 0,
-          kurang: cost.total,
+          dibayar: nominalAwal,
+          kurang: isBayarAwal ? Math.max(0, cost.total - nominalAwal) : cost.total,
+          overpayment: isBayarAwal ? Math.max(0, nominalAwal - cost.total) : 0,
+          nominalDibayarAwal: isBayarAwal ? nominalAwal : undefined,
           buktiPembayaran: buktiBayarPayload,
           isPaymentVerified: false,
+          paymentRecords: isBayarAwal && nominalAwal > 0 ? [
+            {
+              id: `pay-${Date.now()}`,
+              nominal: nominalAwal,
+              tanggal: nowIso,
+              metodePembayaran: paymentMethodResolved,
+              namaBank: selectedPm?.bank || (paymentMethodResolved.includes("BCA") ? "BCA" : paymentMethodResolved.includes("BRI") ? "BRI" : paymentMethodResolved.includes("Mandiri") ? "Mandiri" : "Tunai"),
+              namaRekening: selectedPm?.nama_rekening,
+              noRekening: selectedPm?.nomor_rekening,
+              buktiPembayaran: buktiBayarPayload,
+              statusVerifikasi: buktiBayarPayload ? "MENUNGGU_VERIFIKASI" : "MENUNGGU_BUKTI",
+              uploadedBy: currentUserName,
+            }
+          ] : [],
         },
       });
 
       setCreatedOrderSuccess(createdOrder);
-      toast.success(`Order ${createdOrder.orderNo} berhasil dibuat dan otomatis masuk ke tahap Verifikasi!`);
-      handleReset();
-      setStep1Errors({});
-
-      if (onOrderCreated) {
-        onOrderCreated(createdOrder);
+      if (formData.metodeLayanan === "Datang Langsung" || createdOrder.metodeLayanan === "Datang Langsung") {
+        toast.success(`Order ${createdOrder.orderNo} berhasil dibuat dan langsung masuk ke tahap Verifikasi Dokumen (Datang Langsung)!`);
+      } else {
+        toast.success(`Order ${createdOrder.orderNo} berhasil dibuat dan otomatis masuk ke tahap Verifikasi!`);
       }
+      setStep1Errors({});
     } catch {
       toast.error("Gagal membuat order. Silakan periksa kembali formulir.");
     } finally {
@@ -861,28 +1227,12 @@ export function BuatOrder({
   const samsatList = pricingStore.getSamsatList();
 
   return (
-    <div className="w-full space-y-5 p-4 sm:p-6 lg:p-8 min-w-0 text-left">
-      {/* HEADER: CLEAN ORDER ENTRY FRAMING */}
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="space-y-1">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[11px] text-muted-foreground ml-auto">
-            Petugas: <strong className="text-foreground">{currentUserName}</strong>
-          </span>
-        </div>
-        <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-foreground">
-          Entri Order Baru
-        </h1>
-        <p className="text-xs text-muted-foreground">
-          Formulir pencatatan berkas & order. Pesanan akan otomatis diteruskan ke tahap 1 (Verifikasi).
-        </p>
-      </motion.div>
-
-      {/* STEPPER NAVIGATION (3 Steps) */}
-      <div className="grid grid-cols-3 gap-2 p-1.5 bg-muted/40 rounded-xl border border-border/60">
+    <div className="w-full space-y-5 min-w-0 text-left content-fluid">
+      {/* STEPPER NAVIGATION (2 Steps) */}
+      <div className="grid grid-cols-2 gap-2 p-1.5 bg-muted/40 rounded-xl border border-border/60">
         {[
-          { step: 1, label: "01 Data Klien", desc: "Klien & Kendaraan" },
-          { step: 2, label: "02 Dokumen Kendaraan", desc: "Upload Berkas" },
-          { step: 3, label: "03 Pembayaran & Ringkasan", desc: "Estimasi & Simpan" },
+          { step: 1, label: "01 Data Klien & Kendaraan", desc: "Klien, Kendaraan & Layanan", short: "01 Klien" },
+          { step: 2, label: "02 Dokumen, Pembayaran & Ringkasan", desc: "Upload Berkas, Pembayaran & Estimasi", short: "02 Dokumen & Bayar" },
         ].map((s) => {
           const isActive = currentStep === s.step;
           const isDone = currentStep > s.step;
@@ -893,12 +1243,11 @@ export function BuatOrder({
               aria-label={`${s.label}: ${s.desc}`}
               aria-current={isActive ? "step" : undefined}
               onClick={() => {
-                if (s.step < currentStep) setCurrentStep(s.step as 1 | 2 | 3);
+                if (s.step < currentStep) setCurrentStep(s.step as 1 | 2);
                 else if (s.step === 2 && currentStep === 1) handleNextStep1();
-                else if (s.step === 3 && currentStep === 2) handleNextStep2();
               }}
               className={cn(
-                "flex items-center gap-2 p-2 sm:p-2.5 rounded-lg text-left transition-all",
+                "flex items-center gap-1.5 sm:gap-2.5 p-2 sm:p-2.5 rounded-lg text-left transition-all min-w-0 justify-center sm:justify-start",
                 isActive
                   ? "bg-card border border-border shadow-xs text-foreground"
                   : isDone
@@ -908,7 +1257,7 @@ export function BuatOrder({
             >
               <div
                 className={cn(
-                  "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 transition-colors",
+                  "w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-semibold shrink-0 transition-colors",
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : isDone
@@ -916,11 +1265,14 @@ export function BuatOrder({
                     : "bg-muted text-muted-foreground border border-border"
                 )}
               >
-                {isDone ? <Check className="w-3.5 h-3.5" /> : s.step}
+                {isDone ? <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> : s.step}
               </div>
               <div className="min-w-0 hidden sm:block">
                 <p className="text-xs font-semibold truncate leading-tight">{s.label}</p>
                 <p className="text-[10px] text-muted-foreground truncate">{s.desc}</p>
+              </div>
+              <div className="min-w-0 sm:hidden">
+                <p className="text-[11px] font-semibold truncate leading-tight">{s.short}</p>
               </div>
             </button>
           );
@@ -928,7 +1280,7 @@ export function BuatOrder({
       </div>
 
       <Card className="p-4 sm:p-5 md:p-6 border-border/80 shadow-xs bg-card">
-        <form onSubmit={handleSubmitOrder} className="space-y-6">
+        <form onSubmit={handleSubmitOrder} noValidate className="space-y-6">
           <AnimatePresence mode="wait">
             {/* ======================================================== */}
             {/* STEP 1: DATA KLIEN, KENDARAAN & INFORMASI ORDER           */}
@@ -939,11 +1291,11 @@ export function BuatOrder({
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 10 }}
-                className="space-y-6"
+                className="space-y-8 md:space-y-10"
               >
                 {/* 1. DATA KLIEN & PEMILIK */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-border/60">
+                <div className="space-y-4 p-4 sm:p-5 rounded-xl border border-border/70 bg-card shadow-xs">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
                     <User className="w-3.5 h-3.5 text-primary" />
                     1. Data Klien & Pemilik Kendaraan
                   </h4>
@@ -958,7 +1310,12 @@ export function BuatOrder({
                         placeholder="Nama pemesan atau instansi klien"
                         value={formData.customer}
                         onChange={(e) => {
-                          setFormData({ ...formData, customer: e.target.value });
+                          const val = e.target.value;
+                          setFormData((prev) => ({
+                            ...prev,
+                            customer: val,
+                            ...(isSameAsCustomer ? { namaPemilik: val } : {}),
+                          }));
                           clearFieldError("customer");
                         }}
                         className={cn(
@@ -1000,13 +1357,34 @@ export function BuatOrder({
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label htmlFor="input-namaPemilik" className="text-xs">Nama Pemilik Sesuai STNK/BPKB</Label>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="input-namaPemilik" className="text-xs">Nama Pemilik Sesuai STNK/BPKB</Label>
+                        <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground select-none">
+                          <input
+                            type="checkbox"
+                            checked={isSameAsCustomer}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setIsSameAsCustomer(checked);
+                              if (checked) {
+                                setFormData((prev) => ({ ...prev, namaPemilik: prev.customer }));
+                              }
+                            }}
+                            className="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary"
+                          />
+                          <span>Sama dengan nama customer</span>
+                        </label>
+                      </div>
                       <Input
                         id="input-namaPemilik"
-                        placeholder="Kosongkan jika sama dengan nama customer"
+                        placeholder={isSameAsCustomer ? (formData.customer || "Sama dengan nama customer") : "Nama pemilik sesuai STNK/BPKB"}
                         value={formData.namaPemilik}
+                        disabled={isSameAsCustomer}
                         onChange={(e) => setFormData({ ...formData, namaPemilik: e.target.value })}
-                        className="bg-input-background border-border h-9 text-xs"
+                        className={cn(
+                          "bg-input-background border-border h-9 text-xs",
+                          isSameAsCustomer && "bg-muted/40 cursor-not-allowed opacity-80"
+                        )}
                       />
                     </div>
 
@@ -1029,8 +1407,8 @@ export function BuatOrder({
                 </div>
 
                 {/* 2. DATA KENDARAAN & LAYANAN */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-border/60">
+                <div className="space-y-4 p-4 sm:p-5 rounded-xl border border-border/70 bg-card shadow-xs">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
                     <Car className="w-3.5 h-3.5 text-primary" />
                     2. Data Kendaraan & Layanan
                   </h4>
@@ -1097,17 +1475,17 @@ export function BuatOrder({
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <p className="font-semibold text-xs text-foreground">Antar Jemput Dokumen</p>
+                              <p className="font-semibold text-xs text-foreground">Antar Jemput</p>
                               {!isAntarJemputEnabled && (
                                 <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-600 border-amber-500/20">
-                                  Nonaktif di Master (Rp 0)
+                                  Nonaktif di Master
                                 </Badge>
                               )}
                             </div>
                             <p className="text-[11px] text-muted-foreground mt-0.5">
                               {isAntarJemputEnabled
-                                ? `Kurir menjemput berkas ke alamat klien (Rp ${(currentConfig?.biayaAntarJemput ?? 50000).toLocaleString("id-ID")}).`
-                                : "Kurir antar jemput berkas (Tarif dinonaktifkan di Master Data = Rp 0)."}
+                                ? "Kurir menjemput berkas ke alamat klien."
+                                : "Kurir antar jemput berkas (Tarif dinonaktifkan di Master Data)."}
                             </p>
                           </div>
                         </div>
@@ -1135,7 +1513,7 @@ export function BuatOrder({
                             {formData.metodeLayanan === "Datang Langsung" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                           </div>
                           <div>
-                            <p className="font-semibold text-xs text-foreground">Datang Langsung ke Loket</p>
+                            <p className="font-semibold text-xs text-foreground">Datang Langsung</p>
                             <p className="text-[11px] text-muted-foreground mt-0.5">Klien menyerahkan berkas langsung di loket.</p>
                           </div>
                         </div>
@@ -1175,49 +1553,17 @@ export function BuatOrder({
                       <Label htmlFor="input-plateNumber" className="text-xs font-medium text-foreground">
                         Nomor Polisi <span className="text-destructive">*</span>
                       </Label>
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 shrink-0">
-                          <Input
-                            placeholder="B"
-                            maxLength={2}
-                            aria-label="Plat depan (huruf)"
-                            value={platePrefix}
-                            onChange={(e) => setPlatePrefix(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
-                            className="bg-input-background border-border h-9 text-xs font-mono font-bold text-center uppercase tracking-wider"
-                            title="Plat Depan (Huruf)"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <Input
-                            id="input-plateNumber"
-                            required
-                            placeholder="1234"
-                            maxLength={4}
-                            aria-label="Nomor plat (angka)"
-                            value={plateNumber}
-                            onChange={(e) => {
-                              setPlateNumber(e.target.value.replace(/\D/g, ""));
-                              clearFieldError("plateNumber");
-                            }}
-                            className={cn(
-                              "bg-input-background border-border h-9 text-xs font-mono font-bold text-center tracking-widest",
-                              step1Errors.plateNumber && "border-destructive ring-1 ring-destructive/40"
-                            )}
-                            title="Nomor Plat (Angka)"
-                          />
-                        </div>
-                        <div className="w-28 shrink-0">
-                          <Input
-                            placeholder="ABC"
-                            maxLength={3}
-                            aria-label="Plat belakang (huruf)"
-                            value={plateSuffix}
-                            onChange={(e) => setPlateSuffix(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
-                            className="bg-input-background border-border h-9 text-xs font-mono font-bold text-center uppercase tracking-wider"
-                            title="Plat Belakang (Huruf)"
-                          />
-                        </div>
-                      </div>
+                      <PlateNumberInput
+                        value={getCombinedNopol()}
+                        onChange={(_full, parts) => {
+                          setPlatePrefix(parts.prefix);
+                          setPlateNumber(parts.number);
+                          setPlateSuffix(parts.suffix);
+                          if (parts.number) clearFieldError("plateNumber");
+                        }}
+                        hasError={Boolean(step1Errors.plateNumber)}
+                        id="input-plateNumber"
+                      />
                       {step1Errors.plateNumber && (
                         <p className="text-[11px] text-destructive mt-1 flex items-center gap-1 font-medium">
                           <AlertCircle className="w-3 h-3 shrink-0" /> {step1Errors.plateNumber}
@@ -1230,9 +1576,9 @@ export function BuatOrder({
                     </div>
 
                     {/* Wilayah Samsat Asal */}
-                    <div className="space-y-1.5">
+                    <div id="field-wilayahSamsatAsal" className="space-y-1.5">
                       <Label className="text-xs">Wilayah Samsat Asal</Label>
-                      <Select
+                      <SearchableSamsatSelect
                         value={formData.wilayahSamsatAsal}
                         onValueChange={(value) => {
                           const cfg = pricingStore.getServiceFeeConfig(formData.layanan, value);
@@ -1244,18 +1590,9 @@ export function BuatOrder({
                             wilayahSamsatTujuan: prev.wilayahSamsatTujuan || value,
                           }));
                         }}
-                      >
-                        <SelectTrigger className="bg-input-background border-border h-9 text-xs">
-                          <SelectValue placeholder="Pilih Samsat Asal" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {samsatList.map((samsat: any) => (
-                            <SelectItem key={samsat.id} value={samsat.wilayah} className="text-xs">
-                              {samsat.wilayah}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Pilih Samsat Asal"
+                        id="select-wilayahSamsatAsal"
+                      />
                     </div>
 
                     {/* Wilayah Samsat Tujuan (HANYA DITAMPILKAN JIKA LAYANAN = MUTASI) */}
@@ -1264,24 +1601,16 @@ export function BuatOrder({
                         <Label className="text-xs">
                           Wilayah Samsat Tujuan <span className="text-destructive">*</span>
                         </Label>
-                        <Select
+                        <SearchableSamsatSelect
                           value={formData.wilayahSamsatTujuan || formData.wilayahSamsatAsal}
                           onValueChange={(value) => {
                             setFormData({ ...formData, wilayahSamsatTujuan: value });
                             clearFieldError("wilayahSamsatTujuan");
                           }}
-                        >
-                          <SelectTrigger className={cn("bg-input-background border-border h-9 text-xs", step1Errors.wilayahSamsatTujuan && "border-destructive ring-1 ring-destructive/40")}>
-                            <SelectValue placeholder="Pilih Samsat Tujuan" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {samsatList.map((samsat: any) => (
-                              <SelectItem key={`tujuan-${samsat.id}`} value={samsat.wilayah} className="text-xs">
-                                {samsat.wilayah}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          placeholder="Pilih Samsat Tujuan"
+                          error={!!step1Errors.wilayahSamsatTujuan}
+                          id="select-wilayahSamsatTujuan"
+                        />
                         {step1Errors.wilayahSamsatTujuan && (
                           <p className="text-[11px] text-destructive mt-1 flex items-center gap-1 font-medium">
                             <AlertCircle className="w-3 h-3 shrink-0" /> {step1Errors.wilayahSamsatTujuan}
@@ -1293,49 +1622,43 @@ export function BuatOrder({
                 </div>
 
                 {/* 3. INFORMASI PAJAK KENDARAAN */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-border/60">
+                <div className="space-y-4 p-4 sm:p-5 rounded-xl border border-border/70 bg-card shadow-xs">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
                     <ShieldCheck className="w-3.5 h-3.5 text-primary" />
                     3. Informasi Pajak Kendaraan
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Masa Berlaku PKB S/D (Tanggal)</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                    <div id="field-pkbBerlakuSd" className="space-y-1.5">
+                      <Label htmlFor="input-pkbBerlakuSd" className="text-xs">
+                        Masa Berlaku PKB S/D (Tanggal) <span className="text-destructive">*</span>
+                      </Label>
                       <Input
+                        id="input-pkbBerlakuSd"
                         type="date"
                         value={formData.pkbBerlakuSd}
-                        onChange={(e) => setFormData({ ...formData, pkbBerlakuSd: e.target.value })}
-                        className="bg-input-background border-border h-9 text-xs"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const parts = parseDateParts(val);
+                          const derivedMonth = parts ? bulanOptions[parts.m - 1] : "";
+                          const derivedYear = parts ? String(parts.y) : "";
+                          setFormData((prev) => ({
+                            ...prev,
+                            pkbBerlakuSd: val,
+                            bulanPajak: derivedMonth,
+                            tahunPajak: derivedYear,
+                          }));
+                          clearFieldError("pkbBerlakuSd");
+                        }}
+                        className={cn(
+                          "bg-input-background border-border h-9 text-xs",
+                          step1Errors.pkbBerlakuSd && "border-destructive ring-1 ring-destructive/40"
+                        )}
                       />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Bulan Jatuh Tempo</Label>
-                      <Select
-                        value={formData.bulanPajak}
-                        onValueChange={(value) => setFormData({ ...formData, bulanPajak: value })}
-                      >
-                        <SelectTrigger className="bg-input-background border-border h-9 text-xs">
-                          <SelectValue placeholder="Pilih bulan" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {bulanOptions.map((bulan) => (
-                            <SelectItem key={bulan} value={bulan} className="text-xs">
-                              {bulan}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Tahun Pajak</Label>
-                      <Input
-                        placeholder="Contoh: 2024"
-                        value={formData.tahunPajak}
-                        onChange={(e) => setFormData({ ...formData, tahunPajak: e.target.value.replace(/\D/g, "") })}
-                        className="bg-input-background border-border h-9 text-xs font-mono tabular-nums"
-                      />
+                      {step1Errors.pkbBerlakuSd && (
+                        <p className="text-[11px] text-destructive mt-1 flex items-center gap-1 font-medium">
+                          <AlertCircle className="w-3 h-3 shrink-0" /> {step1Errors.pkbBerlakuSd}
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -1368,16 +1691,21 @@ export function BuatOrder({
                             Otomatis R2 (Rp 35.000 + Tunggakan)
                           </Badge>
                         )}
+                        {cost.isExtendedEstimation && cost.extTemplate && (
+                          <Badge variant="outline" className="text-[10px] bg-purple-500/10 text-purple-600 border-purple-500/20">
+                            Otomatis {cost.extTemplate.name}
+                          </Badge>
+                        )}
                       </div>
                       <Input
                         type="number"
-                        placeholder={isR4Annual ? "143000 (Otomatis)" : isR2Annual ? "35000 (Otomatis)" : (isOpsenEnabled ? "143000" : "0")}
-                        disabled={!isOpsenEnabled || isR4Annual || isR2Annual}
-                        value={isR4Annual ? (cost.r4Result?.totalSwdkllj.toString() || "143000") : isR2Annual ? (cost.r2Result?.totalSwdkllj.toString() || "35000") : (isOpsenEnabled ? formData.nominalSwdkllj : "0")}
+                        placeholder={isR4Annual ? "143000 (Otomatis)" : isR2Annual ? "35000 (Otomatis)" : cost.isExtendedEstimation ? `${cost.extResult?.totalSwdkllj || 0} (Otomatis)` : (isOpsenEnabled ? "143000" : "0")}
+                        disabled={!isOpsenEnabled || isR4Annual || isR2Annual || cost.isExtendedEstimation}
+                        value={isR4Annual ? (cost.r4Result?.totalSwdkllj.toString() || "143000") : isR2Annual ? (cost.r2Result?.totalSwdkllj.toString() || "35000") : cost.isExtendedEstimation ? (cost.extResult?.totalSwdkllj.toString() || "0") : (isOpsenEnabled ? formData.nominalSwdkllj : "0")}
                         onChange={(e) => setFormData({ ...formData, nominalSwdkllj: e.target.value })}
                         className={cn(
                           "bg-input-background border-border h-9 text-xs font-mono tabular-nums",
-                          (!isOpsenEnabled || isR4Annual || isR2Annual) && "opacity-60 bg-muted cursor-not-allowed"
+                          (!isOpsenEnabled || isR4Annual || isR2Annual || cost.isExtendedEstimation) && "opacity-60 bg-muted cursor-not-allowed"
                         )}
                       />
                       {!isOpsenEnabled && (
@@ -1393,6 +1721,11 @@ export function BuatOrder({
                       {isR2Annual && (
                         <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
                           Perpanjangan 1 Tahun Motor (R2) menggunakan formula resmi: SWDKLLJ Pokok Rp 35.000 + SWDKLLJ Tertunggak ({cost.r2Result?.tahunTunggakan || 0} thn).
+                        </p>
+                      )}
+                      {cost.isExtendedEstimation && cost.extResult && cost.extTemplate && (
+                        <p className="text-[10px] text-purple-600 dark:text-purple-400">
+                          {cost.extTemplate.name} menggunakan formula resmi: SWDKLLJ Pokok (Rp {(cost.extTemplate.vehicleType === "Mobil" ? 143000 : 35000).toLocaleString("id-ID")}) + SWDKLLJ Tertunggak ({cost.extResult.tahunTunggakan || 0} thn).
                         </p>
                       )}
                     </div>
@@ -1458,18 +1791,6 @@ export function BuatOrder({
                             </Select>
                           </div>
 
-                          {/* Tanggal Estimasi */}
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-foreground">
-                              Tanggal Estimasi (Default: Hari Ini)
-                            </Label>
-                            <Input
-                              type="date"
-                              value={r4TanggalEstimasi || new Date().toISOString().split("T")[0]}
-                              onChange={(e) => setR4TanggalEstimasi(e.target.value)}
-                              className="bg-background border-border h-9 text-xs font-mono"
-                            />
-                          </div>
 
                           {/* Kondisi Berkas / KTP */}
                           <div className="space-y-1.5">
@@ -1518,7 +1839,7 @@ export function BuatOrder({
                           </div>
 
                           {/* Toggle Incidentals */}
-                          <div className="space-y-1.5 sm:col-span-2 flex flex-col justify-end">
+                          <div className="space-y-1.5 md:col-span-3 sm:col-span-2 flex flex-col justify-end">
                             <Button
                               type="button"
                               variant="outline"
@@ -1661,19 +1982,6 @@ export function BuatOrder({
                             </Select>
                           </div>
 
-                          {/* Tanggal Estimasi */}
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-foreground">
-                              Tanggal Estimasi (Default: Hari Ini)
-                            </Label>
-                            <Input
-                              type="date"
-                              value={r2TanggalEstimasi || new Date().toISOString().split("T")[0]}
-                              onChange={(e) => setR2TanggalEstimasi(e.target.value)}
-                              className="bg-background border-border h-9 text-xs font-mono"
-                            />
-                          </div>
-
                           {/* Kondisi Berkas / KTP */}
                           <div className="space-y-1.5">
                             <Label className="text-xs font-medium text-foreground">
@@ -1721,7 +2029,7 @@ export function BuatOrder({
                           </div>
 
                           {/* Toggle Incidentals */}
-                          <div className="space-y-1.5 sm:col-span-2 flex flex-col justify-end">
+                          <div className="space-y-1.5 md:col-span-3 sm:col-span-2 flex flex-col justify-end">
                             <Button
                               type="button"
                               variant="outline"
@@ -1802,6 +2110,243 @@ export function BuatOrder({
                         )}
                       </div>
                     )}
+
+                    {/* EXTENDED ESTIMATION PARAMETERS (5-TAHUNAN, BBN, MUTASI AS, MUTASI LD) */}
+                    {cost.isExtendedEstimation && cost.extTemplate && (
+                      <div className="sm:col-span-2 md:col-span-3 mt-2 p-3.5 rounded-lg border border-purple-500/30 bg-purple-500/5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-purple-500/20">
+                          <div className="flex items-center gap-2">
+                            <span className="p-1.5 rounded-md bg-purple-500/10 text-purple-600">
+                              <Calculator className="w-4 h-4" />
+                            </span>
+                            <div>
+                              <h5 className="text-xs font-semibold text-foreground">
+                                Parameter Perhitungan: {cost.extTemplate.name}
+                              </h5>
+                              <p className="text-[11px] text-muted-foreground">
+                                Menggunakan formula resmi workbook {cost.extTemplate.serviceType} ({cost.extTemplate.vehicleType})
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                              className="h-7 text-[11px] gap-1 px-2.5 font-medium border-purple-500/30 text-purple-600 hover:bg-purple-500/10 bg-background/80 shadow-2xs"
+                            >
+                              <HelpCircle className="w-3.5 h-3.5" />
+                              Penjelasan Rumus
+                            </Button>
+                            {cost.extResult && (
+                              <Badge variant="outline" className="text-[11px] font-mono bg-background text-foreground border-border gap-1 py-1 px-2.5">
+                                <Clock className="w-3.5 h-3.5 text-purple-600" />
+                                Keterlambatan: <strong className="text-purple-600">{cost.extResult.durasiKeterlambatan}</strong> ({cost.extResult.tahunTunggakan} Thn {cost.extResult.bulanTunggakan} Bln)
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {/* Program Samsat */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Program Samsat <span className="text-destructive">*</span>
+                            </Label>
+                            <Select
+                              value={extProgramSamsat}
+                              onValueChange={(val: ProgramSamsat) => setExtProgramSamsat(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="NORMAL" className="text-xs font-medium">
+                                  NORMAL (Denda PKB & SWDKLLJ Aktif)
+                                </SelectItem>
+                                <SelectItem value="FREE Biaya Denda" className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                  FREE Biaya Denda (Denda PKB Bebas)
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Free Biaya BBN selector (if Balik Nama or Mutasi) */}
+                          {(cost.extTemplate.serviceType === "Balik Nama" || cost.extTemplate.serviceType.includes("Mutasi")) && (
+                            <div className="space-y-1.5">
+                              <Label className="text-xs font-medium text-foreground">
+                                Biaya Pokok BBN
+                              </Label>
+                              <Select
+                                value={extFreeBbn ? "FREE" : "BAYAR"}
+                                onValueChange={(val: string) => setExtFreeBbn(val === "FREE")}
+                              >
+                                <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="FREE" className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                    FREE Biaya BBN (Pemutihan / Bebas Bea)
+                                  </SelectItem>
+                                  <SelectItem value="BAYAR" className="text-xs font-medium">
+                                    BAYAR (Sesuai Rumus BBN Pokok)
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          {/* Kondisi Berkas / KTP */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Kelengkapan Berkas / KTP
+                            </Label>
+                            <Select
+                              value={extKondisiBerkas}
+                              onValueChange={(val: KondisiBerkas) => setExtKondisiBerkas(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="LENGKAP" className="text-xs">
+                                  LENGKAP (Ada KTP / BPKB Asli)
+                                </SelectItem>
+                                <SelectItem value="TIDAK ADA KTP" className="text-xs">
+                                  TIDAK ADA KTP (Perlu ACC ID)
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Wilayah ACC ID */}
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-medium text-foreground">
+                              Wilayah ACC ID (Opsional)
+                            </Label>
+                            <Select
+                              value={extWilayahAccId}
+                              onValueChange={(val: WilayahAccId) => setExtWilayahAccId(val)}
+                            >
+                              <SelectTrigger className="bg-background border-border h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="DKI Jakarta" className="text-xs">DKI Jakarta</SelectItem>
+                                <SelectItem value="Bogor" className="text-xs">Bogor</SelectItem>
+                                <SelectItem value="Tanggerang" className="text-xs">Tangerang</SelectItem>
+                                <SelectItem value="Depok" className="text-xs">Depok</SelectItem>
+                                <SelectItem value="Bekasi" className="text-xs">Bekasi</SelectItem>
+                                <SelectItem value="NON ACC ID" className="text-xs">NON ACC ID</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Toggle Incidentals */}
+                          <div className="space-y-1.5 md:col-span-3 sm:col-span-2 flex flex-col justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setExtShowIncidentals(!extShowIncidentals)}
+                              className="h-9 text-xs w-full sm:w-auto self-start justify-between gap-2 border-dashed"
+                            >
+                              <span>Biaya Tambahan / Insidental (Opsional)</span>
+                              {extShowIncidentals ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Expandable Incidentals */}
+                        {extShowIncidentals && (
+                          <div className="p-3 bg-background/60 rounded-md border border-border/60 space-y-2 mt-2">
+                            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              Biaya Insidental (Input Manual Bila Dikenakan Samsat / Permintaan Khusus):
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">ETLE / Blokir Tilang</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={extManualValues["etle"] || ""}
+                                  onChange={(e) => setExtManualValues({ ...extManualValues, etle: parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">STNK Hilang</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={extManualValues["stnk-hilang"] || ""}
+                                  onChange={(e) => setExtManualValues({ ...extManualValues, "stnk-hilang": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Pemekaran Wilayah</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={extManualValues["pemekaran-wilayah"] || ""}
+                                  onChange={(e) => setExtManualValues({ ...extManualValues, "pemekaran-wilayah": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Buang Nopol</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={extManualValues["buang-nopol"] || ""}
+                                  onChange={(e) => setExtManualValues({ ...extManualValues, "buang-nopol": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Req Nopol / Nopil</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={extManualValues["req-nopol-ganjil-acak"] || extManualValues["pnbp-nopil"] || ""}
+                                  onChange={(e) => setExtManualValues({ ...extManualValues, "req-nopol-ganjil-acak": parseFloat(e.target.value) || 0, "pnbp-nopil": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Buka Blokir</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={extManualValues["buka-blokir"] || ""}
+                                  onChange={(e) => setExtManualValues({ ...extManualValues, "buka-blokir": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-[10px] text-muted-foreground">Cetak SKP</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={extManualValues["cetak-skp"] || ""}
+                                  onChange={(e) => setExtManualValues({ ...extManualValues, "cetak-skp": parseFloat(e.target.value) || 0 })}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1809,8 +2354,8 @@ export function BuatOrder({
                 {formData.metodeLayanan === "Antar Jemput" && (
                   <>
                     {/* 4. ALAMAT PENJEMPUTAN DOKUMEN */}
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-border/60">
+                    <div className="space-y-4 p-4 sm:p-5 rounded-xl border border-border/70 bg-card shadow-xs">
+                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
                         <MapPin className="w-3.5 h-3.5 text-primary" />
                         4. Alamat Penjemputan Dokumen
                       </h4>
@@ -1822,7 +2367,7 @@ export function BuatOrder({
                               Detail Alamat / Jalan <span className="text-destructive">*</span>
                             </Label>
                             <Input
-                              required
+                              required={formData.metodeLayanan === "Antar Jemput"}
                               placeholder="Nama jalan, gedung, blok, atau patokan penjemputan berkas"
                               value={formData.jemputDetail}
                               onChange={(e) => {
@@ -1908,8 +2453,8 @@ export function BuatOrder({
                     </div>
 
                     {/* 5. ALAMAT PENGANTARAN DOKUMEN */}
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-border/60">
+                    <div className="space-y-4 p-4 sm:p-5 rounded-xl border border-border/70 bg-card shadow-xs">
+                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/60">
                         <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                         5. Alamat Pengantaran Dokumen
                       </h4>
@@ -2013,9 +2558,9 @@ export function BuatOrder({
                   <Button
                     type="button"
                     onClick={handleNextStep1}
-                    className="h-9 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-xs"
+                    className="h-9 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-xs font-semibold px-4"
                   >
-                    <span>Berikutnya</span>
+                    <span>Lanjut ke Dokumen & Pembayaran</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Button>
                 </div>
@@ -2139,7 +2684,7 @@ export function BuatOrder({
                             </span>
                             <input
                               type="file"
-                              accept=".pdf,.jpg,.jpeg,.png"
+                              accept=".pdf,.jpg,.jpeg,.png,.heic,.HEIC"
                               className="hidden"
                               onChange={(e) => {
                                 if (e.target.files && e.target.files[0]) {
@@ -2154,40 +2699,12 @@ export function BuatOrder({
                   })}
                 </div>
 
-                {/* STEP 2 NAVIGATION BUTTONS */}
-                <div className="flex justify-between items-center pt-3 border-t border-border/60">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 text-xs gap-1.5"
-                    onClick={() => setCurrentStep(1)}
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>Kembali</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleNextStep2}
-                    className="h-9 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-xs"
-                  >
-                    <span>Berikutnya</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-
-            {/* ======================================================== */}
-            {/* STEP 3: PEMBAYARAN & RINGKASAN ORDER                     */}
-            {/* ======================================================== */}
-            {currentStep === 3 && (
-              <motion.div
-                key="step3"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                className="space-y-6"
-              >
+                  <div className="pt-6 pb-2 border-b border-border/60">
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5 text-primary" />
+                      Skema & Metode Pembayaran Serta Ringkasan Order
+                    </h4>
+                  </div>
                 {/* 1. SKEMA & METODE PEMBAYARAN */}
                 <div className="space-y-4">
                   <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-border/60">
@@ -2195,7 +2712,7 @@ export function BuatOrder({
                     Skema & Metode Pembayaran
                   </h4>
 
-                  {/* Scheme Selection */}
+                  {/* Scheme Selection (Decision 1) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {/* Bayar di Awal */}
                     <div
@@ -2218,9 +2735,9 @@ export function BuatOrder({
                         {formData.tipePembayaran === "Bayar di Awal" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                       </div>
                       <div>
-                        <p className="font-semibold text-xs text-foreground">Bayar di Awal (Pelunasan di Depan)</p>
+                        <p className="font-semibold text-xs text-foreground">Bayar di Awal</p>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Klien melunasi biaya saat order diinput di loket. Lampirkan bukti pembayaran untuk verifikasi di Stage 1.
+                          Pelunasan di depan saat order diinput di loket biro jasa.
                         </p>
                       </div>
                     </div>
@@ -2246,9 +2763,9 @@ export function BuatOrder({
                         {formData.tipePembayaran === "Bayar di Akhir" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                       </div>
                       <div>
-                        <p className="font-semibold text-xs text-foreground">Bayar di Akhir (COD / Saat Serah Terima)</p>
+                        <p className="font-semibold text-xs text-foreground">Bayar di Akhir</p>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Klien membayar setelah seluruh dokumen selesai diproses dan diantar ke alamat pengantaran.
+                          Pelunasan saat pengerjaan selesai / serah terima dokumen (COD).
                         </p>
                       </div>
                     </div>
@@ -2259,7 +2776,7 @@ export function BuatOrder({
                     <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-4">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold text-foreground">
-                          Metode Pembayaran di Loket <span className="text-destructive">*</span>
+                          Metode Pembayaran <span className="text-destructive">*</span>
                         </Label>
                         <Select
                           value={formData.metodePembayaran}
@@ -2269,40 +2786,60 @@ export function BuatOrder({
                             <SelectValue placeholder="Pilih saluran pembayaran" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Transfer Bank BCA" className="text-xs">Transfer Bank BCA</SelectItem>
-                            <SelectItem value="Transfer Bank Mandiri" className="text-xs">Transfer Bank Mandiri</SelectItem>
-                            <SelectItem value="QRIS" className="text-xs">QRIS Biro Jasa SUN89</SelectItem>
-                            <SelectItem value="Cash" className="text-xs">Cash (Tunai di Loket)</SelectItem>
+                            {activeMethods && activeMethods.length > 0 ? (
+                              activeMethods.map((m) => (
+                                <SelectItem key={m.id} value={m.nama_metode} className="text-xs">
+                                  {m.nama_metode} {m.bank && m.bank !== "Tunai" && m.nomor_rekening ? `(${m.bank} - ${m.nomor_rekening})` : ""}
+                                </SelectItem>
+                              ))
+                            ) : (
+                              <>
+                                <SelectItem value="Transfer Bank BCA" className="text-xs">Transfer Bank BCA</SelectItem>
+                                <SelectItem value="Transfer Bank Mandiri" className="text-xs">Transfer Bank Mandiri</SelectItem>
+                                <SelectItem value="Transfer Bank BRI" className="text-xs">Transfer Bank BRI</SelectItem>
+                                <SelectItem value="Cash" className="text-xs">Cash (Tunai di Loket)</SelectItem>
+                              </>
+                            )}
                           </SelectContent>
                         </Select>
                       </div>
 
-                      {/* Transfer BCA / Mandiri details */}
-                      {formData.metodePembayaran.includes("Transfer") && (
-                        <div className="p-3 rounded-lg border border-border bg-card text-xs space-y-2">
-                          <p className="font-medium text-foreground text-xs flex items-center gap-1.5">
-                            <Building className="w-3.5 h-3.5 text-primary" />
-                            Rekening Resmi Penerimaan SUN89:
-                          </p>
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-md bg-muted/30 border border-border/60">
-                            <div>
-                              <p className="font-semibold text-foreground text-xs">Bank Central Asia (BCA)</p>
-                              <p className="font-mono text-sm font-bold text-primary mt-0.5">772-019-2831</p>
-                              <p className="text-[11px] text-muted-foreground">a.n. PT Biro Jasa SUN89 Abadi</p>
+                      {/* Transfer / Bank details dynamically from selected Master Data method */}
+                      {(() => {
+                        const matchedPm = activeMethods?.find((m) => m.nama_metode === formData.metodePembayaran);
+                        const isTransfer = formData.metodePembayaran.includes("Transfer") || (matchedPm && matchedPm.bank !== "Tunai" && matchedPm.bank !== "QRIS");
+                        if (!isTransfer) return null;
+
+                        const bankName = matchedPm?.bank || "Bank Central Asia (BCA)";
+                        const accNo = matchedPm?.nomor_rekening || "772-019-2831";
+                        const accName = matchedPm?.nama_rekening || "PT Biro Jasa SUN89 Abadi";
+
+                        return (
+                          <div className="p-3 rounded-lg border border-border bg-card text-xs space-y-2">
+                            <p className="font-medium text-foreground text-xs flex items-center gap-1.5">
+                              <Building className="w-3.5 h-3.5 text-primary" />
+                              Rekening Resmi Penerimaan SUN89:
+                            </p>
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-md bg-muted/30 border border-border/60">
+                              <div>
+                                <p className="font-semibold text-foreground text-xs">{bankName}</p>
+                                <p className="font-mono text-sm font-bold text-primary mt-0.5">{accNo}</p>
+                                {accName && <p className="text-[11px] text-muted-foreground">a.n. {accName}</p>}
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleCopy(accNo.replace(/[^0-9]/g, ""), "bank")}
+                                className="h-8 text-xs gap-1.5 shrink-0"
+                              >
+                                {copiedBank ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                {copiedBank ? "Tersalin" : "Salin Rekening"}
+                              </Button>
                             </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleCopy("7720192831", "bank")}
-                              className="h-8 text-xs gap-1.5 shrink-0"
-                            >
-                              {copiedBank ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                              {copiedBank ? "Tersalin" : "Salin Rekening"}
-                            </Button>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {/* QRIS details */}
                       {formData.metodePembayaran === "QRIS" && (
@@ -2352,15 +2889,97 @@ export function BuatOrder({
                         </div>
                       )}
 
+                      {/* Nominal Dibayar di Awal */}
+                      <div className="pt-2 border-t border-primary/20 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                            <Banknote className="w-3.5 h-3.5 text-primary" />
+                            Nominal Dibayar di Awal <span className="text-destructive">*</span>
+                          </Label>
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, nominalDibayarAwal: String(cost.total) })}
+                            className="text-[11px] font-medium text-primary hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Sesuai Total Estimasi (Rp {cost.total.toLocaleString("id-ID")})</span>
+                          </button>
+                        </div>
+
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs text-muted-foreground">
+                            Rp
+                          </span>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={formData.nominalDibayarAwal ? Number(formData.nominalDibayarAwal.replace(/[^0-9]/g, "")).toLocaleString("id-ID") : ""}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/[^0-9]/g, "");
+                              setFormData({ ...formData, nominalDibayarAwal: raw });
+                            }}
+                            className="pl-9 bg-background border-border h-9 text-xs font-mono font-bold tabular-nums"
+                          />
+                        </div>
+
+                        {/* Dynamic Calculation Helper */}
+                        {(() => {
+                          const parsed = parseFloat(formData.nominalDibayarAwal.replace(/[^0-9]/g, "")) || 0;
+                          if (!formData.nominalDibayarAwal) {
+                            return (
+                              <p className="text-[11px] text-muted-foreground">
+                                Masukkan nominal aktual rupiah yang dibayarkan pelanggan saat order di loket (Total Estimasi: Rp {cost.total.toLocaleString("id-ID")}).
+                              </p>
+                            );
+                          }
+                          if (parsed < cost.total) {
+                            const sisa = cost.total - parsed;
+                            return (
+                              <div className="p-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5 text-xs flex items-center justify-between gap-2">
+                                <span className="text-amber-700 dark:text-amber-400 font-medium text-[11px]">
+                                  Kurang Bayar: Sisa kewajiban Rp {sisa.toLocaleString("id-ID")} akan dicatat di tagihan dan ditagihkan saat penyerahan berkas.
+                                </span>
+                                <Badge variant="outline" className="text-[10px] shrink-0 bg-amber-500/10 text-amber-600 border-amber-500/20">
+                                  Kurang Bayar
+                                </Badge>
+                              </div>
+                            );
+                          } else if (parsed === cost.total) {
+                            return (
+                              <div className="p-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 text-xs flex items-center justify-between gap-2">
+                                <span className="text-emerald-700 dark:text-emerald-400 font-medium text-[11px]">
+                                  Lunas: Nominal pas sesuai 100% total tagihan estimasi (Rp {cost.total.toLocaleString("id-ID")}).
+                                </span>
+                                <Badge variant="outline" className="text-[10px] shrink-0 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                                  Lunas Pas
+                                </Badge>
+                              </div>
+                            );
+                          } else {
+                            const kelebihan = parsed - cost.total;
+                            return (
+                              <div className="p-2.5 rounded-lg border border-blue-500/20 bg-blue-500/5 text-xs flex items-center justify-between gap-2">
+                                <span className="text-blue-700 dark:text-blue-400 font-medium text-[11px]">
+                                  Kelebihan Bayar: Rp {kelebihan.toLocaleString("id-ID")}. Kelebihan akan dialokasikan ke Cashback Terpending setelah penjemputan berkas selesai.
+                                </span>
+                                <Badge variant="outline" className="text-[10px] shrink-0 bg-blue-500/10 text-blue-600 border-blue-500/20">
+                                  Kelebihan Bayar
+                                </Badge>
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+
                       {/* Proof upload */}
                       <div className="pt-2 border-t border-primary/20 space-y-2">
                         <div className="flex items-center justify-between">
                           <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                             <FileUp className="w-3.5 h-3.5 text-primary" />
-                            Bukti Pembayaran <span className="text-destructive">*</span>
+                            Bukti Pembayaran <span className="text-muted-foreground font-normal text-xs">(Opsional)</span>
                           </Label>
                           <span className={cn("text-[11px] font-medium", paymentProof.attached ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
-                            {paymentProof.attached ? "Terlampir" : "Wajib diunggah"}
+                            {paymentProof.attached ? "Terlampir" : "Dapat dilengkapi di Verifikasi"}
                           </span>
                         </div>
 
@@ -2387,7 +3006,7 @@ export function BuatOrder({
                               <p className="text-[11px] text-muted-foreground">
                                 {paymentProof.attached
                                   ? `Format: ${paymentProof.fileType?.toUpperCase()} • ${paymentProof.fileSize}`
-                                  : "Unggah struk transfer bank atau bukti pembayaran loket (Wajib untuk Bayar di Awal)"}
+                                  : "Unggah struk transfer bank atau bukti pembayaran loket (Opsional saat input order)"}
                               </p>
                             </div>
                           </div>
@@ -2432,7 +3051,7 @@ export function BuatOrder({
                               </span>
                               <input
                                 type="file"
-                                accept=".pdf,.jpg,.jpeg,.png"
+                                accept=".pdf,.jpg,.jpeg,.png,.heic,.HEIC"
                                 className="hidden"
                                 onChange={(e) => {
                                   if (e.target.files && e.target.files[0]) {
@@ -2808,6 +3427,52 @@ export function BuatOrder({
                             * Biaya ACC ID merupakan biaya referensi dokumen dan tidak digabungkan ke total tagihan invoice order.
                           </p>
                         </div>
+
+                        {/* Kurir Antar-Jemput */}
+                        {cost.courierFee > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <Truck className="w-3.5 h-3.5 text-blue-500" />
+                                Layanan Kurir Antar-Jemput
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.courierFee.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs pl-2">
+                              <span className="text-muted-foreground">Metode Pengiriman:</span>
+                              <Badge variant="outline" className="text-[10px] bg-background">
+                                {currentConfig?.antarJemputMode || "Antar & Jemput"}
+                              </Badge>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Biaya Tambahan Wilayah (Kustom) */}
+                        {cost.kustomItems && cost.kustomItems.length > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                                Biaya Tambahan Wilayah ({formData.wilayahSamsatAsal})
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.totalKustomFees.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.kustomItems.map((item: any, idx: number) => (
+                                <div key={item.itemId || idx} className="flex justify-between items-center">
+                                  <span className="text-muted-foreground">{item.name}:</span>
+                                  <span className="font-mono tabular-nums">
+                                    Rp {item.amount.toLocaleString("id-ID")}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : cost.isR2Annual && cost.r2Result ? (
                       <div className="space-y-3 pb-2.5 border-b border-border/60">
@@ -3105,6 +3770,320 @@ export function BuatOrder({
                             </div>
                           </div>
                         )}
+
+                        {/* Kurir Antar-Jemput */}
+                        {cost.courierFee > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <Truck className="w-3.5 h-3.5 text-blue-500" />
+                                Layanan Kurir Antar-Jemput
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.courierFee.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs pl-2">
+                              <span className="text-muted-foreground">Metode Pengiriman:</span>
+                              <Badge variant="outline" className="text-[10px] bg-background">
+                                {currentConfig?.antarJemputMode || "Antar & Jemput"}
+                              </Badge>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Biaya Tambahan Wilayah (Kustom) */}
+                        {cost.kustomItems && cost.kustomItems.length > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                                Biaya Tambahan Wilayah ({formData.wilayahSamsatAsal})
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.totalKustomFees.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.kustomItems.map((item: any, idx: number) => (
+                                <div key={item.itemId || idx} className="flex justify-between items-center">
+                                  <span className="text-muted-foreground">{item.name}:</span>
+                                  <span className="font-mono tabular-nums">
+                                    Rp {item.amount.toLocaleString("id-ID")}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : cost.isExtendedEstimation && cost.extResult && cost.extTemplate ? (
+                      <div className="space-y-3 pb-2.5 border-b border-border/60">
+                        {/* Header Banner */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-purple-500/5 border border-purple-500/20 text-xs">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-purple-600" />
+                            <div>
+                              <span className="font-semibold text-foreground">
+                                Durasi Keterlambatan: {cost.extResult.durasiKeterlambatan}
+                              </span>
+                              <span className="text-muted-foreground text-[11px] block">
+                                {cost.extResult.tahunTunggakan} Tahun, Denda: {cost.extResult.bulanTunggakan} Bulan • Program: <strong className="text-foreground">{extProgramSamsat}</strong> {cost.extTemplate.serviceType === "Balik Nama" || cost.extTemplate.serviceType.includes("Mutasi") ? `• BBN: ${extFreeBbn ? "FREE" : "BAYAR"}` : ""}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenExplanation("denda-pkb-pajak-baru")}
+                              className="h-7 text-[11px] gap-1 px-2.5 font-medium border-purple-500/30 text-purple-600 hover:bg-purple-500/10 bg-background/80 shadow-2xs"
+                            >
+                              <Calculator className="w-3.5 h-3.5" />
+                              Detail Penjelasan Hitungan
+                            </Button>
+                            <Badge variant="outline" className="text-[10px] font-mono bg-background text-purple-600 border-purple-500/30">
+                              {cost.extTemplate.name}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {/* Breakdown per Item Category */}
+                        {/* 1. Pokok & Denda PKB */}
+                        {(cost.extResult.totalPkb > 0 || cost.extResult.totalDendaPkb > 0) && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                1. Pokok & Denda PKB
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {(cost.extResult.totalPkb + cost.extResult.totalDendaPkb).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.extResult.items
+                                .filter((i) => i.category === "PKB" && (i.amount > 0 || !i.isManual))
+                                .map((item) => (
+                                  <div key={item.id} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground flex items-center gap-1">
+                                      {item.name}:
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenExplanation(item.id)}
+                                        className="text-muted-foreground/60 hover:text-purple-600 transition-colors p-0.5 rounded cursor-pointer"
+                                        title={`Lihat aturan ${item.name}`}
+                                      >
+                                        <HelpCircle className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                    <span className={cn("font-mono tabular-nums", item.id.includes("denda") && item.amount > 0 ? "text-destructive" : "")}>
+                                      Rp {item.amount.toLocaleString("id-ID")}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 2. Pokok & Denda SWDKLLJ */}
+                        {(cost.extResult.totalSwdkllj > 0 || cost.extResult.totalDendaSwdkllj > 0) && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                2. Pokok & Denda SWDKLLJ
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {(cost.extResult.totalSwdkllj + cost.extResult.totalDendaSwdkllj).toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.extResult.items
+                                .filter((i) => i.category === "SWDKLLJ" && (i.amount > 0 || !i.isManual))
+                                .map((item) => (
+                                  <div key={item.id} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground flex items-center gap-1">
+                                      {item.name}:
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenExplanation(item.id)}
+                                        className="text-muted-foreground/60 hover:text-purple-600 transition-colors p-0.5 rounded cursor-pointer"
+                                        title={`Lihat aturan ${item.name}`}
+                                      >
+                                        <HelpCircle className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                    <span className={cn("font-mono tabular-nums", item.id.includes("denda") && item.amount > 0 ? "text-destructive" : "")}>
+                                      Rp {item.amount.toLocaleString("id-ID")}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 3. Administrasi, Proses & BBN */}
+                        {cost.extResult.items.some((i) => (i.category === "ADMIN" || i.category === "PROSES" || i.category === "BBN") && i.amount > 0) && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                                3. Administrasi, Proses & BBN (Samsat)
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.extResult.items
+                                  .filter((i) => (i.category === "ADMIN" || i.category === "PROSES" || i.category === "BBN"))
+                                  .reduce((sum, i) => sum + i.amount, 0)
+                                  .toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.extResult.items
+                                .filter((i) => (i.category === "ADMIN" || i.category === "PROSES" || i.category === "BBN") && i.amount > 0)
+                                .map((item) => (
+                                  <div key={item.id} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground flex items-center gap-1">
+                                      {item.name}:
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenExplanation(item.id)}
+                                        className="text-muted-foreground/60 hover:text-purple-600 transition-colors p-0.5 rounded cursor-pointer"
+                                        title={`Lihat aturan ${item.name}`}
+                                      >
+                                        <HelpCircle className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                    <span className="font-mono tabular-nums font-semibold">
+                                      Rp {item.amount.toLocaleString("id-ID")}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 4. Jasa Pengurusan Biro */}
+                        {cost.extResult.items.some((i) => i.category === "JASA" && i.amount > 0) && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                4. Jasa Layanan Biro
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.extResult.items
+                                  .filter((i) => i.category === "JASA")
+                                  .reduce((sum, i) => sum + i.amount, 0)
+                                  .toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.extResult.items
+                                .filter((i) => i.category === "JASA" && i.amount > 0)
+                                .map((item) => (
+                                  <div key={item.id} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground flex items-center gap-1">
+                                      {item.name}:
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenExplanation("jasa")}
+                                        className="text-muted-foreground/60 hover:text-emerald-600 transition-colors p-0.5 rounded cursor-pointer"
+                                        title="Lihat tarif Jasa Biro"
+                                      >
+                                        <HelpCircle className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                    <span className="font-mono tabular-nums font-semibold">
+                                      Rp {item.amount.toLocaleString("id-ID")}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 5. Biaya Insidental (bila ada nilai) */}
+                        {cost.extResult.totalInsidental > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-pink-500" />
+                                5. Biaya Insidental / Tambahan
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.extResult.totalInsidental.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.extResult.items
+                                .filter((i) => i.category === "INSIDENTAL" && i.amount > 0)
+                                .map((item) => (
+                                  <div key={item.id} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground flex items-center gap-1">
+                                      {item.name}:
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenExplanation("insidental")}
+                                        className="text-muted-foreground/60 hover:text-purple-600 transition-colors p-0.5 rounded cursor-pointer"
+                                        title="Lihat penjelasan biaya insidental"
+                                      >
+                                        <HelpCircle className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                    <span className="font-mono tabular-nums">Rp {item.amount.toLocaleString("id-ID")}</span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Kurir Antar-Jemput */}
+                        {cost.courierFee > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <Truck className="w-3.5 h-3.5 text-blue-500" />
+                                Layanan Kurir Antar-Jemput
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.courierFee.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs pl-2">
+                              <span className="text-muted-foreground">Metode Pengiriman:</span>
+                              <Badge variant="outline" className="text-[10px] bg-background">
+                                {currentConfig?.antarJemputMode || "Antar & Jemput"}
+                              </Badge>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Biaya Tambahan Wilayah (Kustom) */}
+                        {cost.kustomItems && cost.kustomItems.length > 0 && (
+                          <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5 bg-card/40">
+                            <div className="flex justify-between items-center text-xs font-semibold text-foreground pb-1 border-b border-border/40">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                                Biaya Tambahan Wilayah ({formData.wilayahSamsatAsal})
+                              </span>
+                              <span className="font-mono tabular-nums text-primary font-bold">
+                                Rp {cost.totalKustomFees.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div className="space-y-1 text-xs pl-2">
+                              {cost.kustomItems.map((item: any, idx: number) => (
+                                <div key={item.itemId || idx} className="flex justify-between items-center">
+                                  <span className="text-muted-foreground">{item.name}:</span>
+                                  <span className="font-mono tabular-nums">
+                                    Rp {item.amount.toLocaleString("id-ID")}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       cost.breakdown && cost.breakdown.length > 0 ? (
@@ -3155,7 +4134,7 @@ export function BuatOrder({
                       )
                     )}
 
-                    {!cost.isR4Annual && !cost.isR2Annual && (
+                    {!cost.isR4Annual && !cost.isR2Annual && !cost.isExtendedEstimation && (
                       <>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Subtotal Biaya Layanan:</span>
@@ -3191,10 +4170,11 @@ export function BuatOrder({
                     <div className="border-t border-border/80 pt-2 flex justify-between items-baseline">
                       <div>
                         <span className="text-sm font-semibold text-foreground">
-                          {cost.isR4Annual || cost.isR2Annual ? "Total Estimasi Akhir (Pajak + Jasa):" : "Total Estimasi Awal:"}
+                          {cost.isR4Annual || cost.isR2Annual || cost.isExtendedEstimation ? "Total Estimasi Akhir (Pajak + Jasa):" : "Total Estimasi Awal:"}
                         </span>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
                           Skema: <strong className="text-foreground">{formData.tipePembayaran}</strong> • Metode: <strong className="text-foreground">{formData.metodeLayanan}</strong>
+                          {cost.totalKustomFees > 0 && <span> • Biaya Tambahan: <strong className="text-foreground">Rp {cost.totalKustomFees.toLocaleString("id-ID")}</strong></span>}
                         </p>
                       </div>
                       <span className="text-base font-bold text-primary font-mono tabular-nums">
@@ -3204,20 +4184,21 @@ export function BuatOrder({
                   </div>
                 </div>
 
-                {/* STEP 3 NAVIGATION & SUBMIT BUTTONS */}
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-2.5 pt-3 border-t border-border/60">
+                {/* STEP 2 NAVIGATION & SUBMIT BUTTONS */}
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-2.5 pt-4 border-t border-border/60">
                   <Button
                     type="button"
                     variant="outline"
                     className="w-full sm:w-auto h-9 text-xs gap-1.5"
-                    onClick={() => setCurrentStep(2)}
+                    onClick={() => setCurrentStep(1)}
                     disabled={isSubmitting}
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>Kembali</span>
+                    <span>Kembali ke Data Klien & Kendaraan</span>
                   </Button>
                   <Button
                     type="submit"
+                    onClick={handleSubmitOrder}
                     disabled={isSubmitting}
                     className="w-full sm:w-auto h-9 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-xs font-semibold"
                   >
@@ -3409,12 +4390,31 @@ export function BuatOrder({
             </div>
           )}
 
-          <DialogFooter className="sm:justify-center">
+          <DialogFooter className="sm:justify-between gap-2 pt-2">
             <Button
-              className="w-full h-8.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs font-semibold"
-              onClick={() => setCreatedOrderSuccess(null)}
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto h-8.5 text-xs gap-1.5"
+              onClick={() => {
+                setCreatedOrderSuccess(null);
+                handleReset();
+                setCurrentStep(1);
+              }}
             >
-              Tutup & Lanjutkan
+              <Plus className="w-3.5 h-3.5" />
+              <span>Buat Order Baru</span>
+            </Button>
+            <Button
+              type="button"
+              className="w-full sm:w-auto h-8.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs font-semibold gap-1.5"
+              onClick={() => {
+                const ord = createdOrderSuccess?.orderNo;
+                setCreatedOrderSuccess(null);
+                navigate("/order/tracking", { state: { orderNo: ord } });
+              }}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Lihat Tracking Order</span>
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3425,15 +4425,22 @@ export function BuatOrder({
         open={explanationModalOpen}
         onOpenChange={setExplanationModalOpen}
         initialItemId={explanationTargetItemId}
-        estimationResult={cost.r4Result || cost.r2Result || null}
+        estimationResult={cost.r4Result || cost.r2Result || cost.extResult || null}
+        template={
+          cost.isR4Annual
+            ? estimationStore.getTemplate("template-pajak-tahunan-r4")
+            : cost.isR2Annual
+            ? estimationStore.getTemplate("template-pajak-tahunan-r2")
+            : cost.extTemplate || null
+        }
         vehicleType={formData.jenisKendaraan}
         serviceType={formData.layanan}
         pkbDasar={parseFloat(formData.nominalPkbTerakhir) || 0}
         tanggalJatuhTempo={formData.pkbBerlakuSd || ""}
-        tanggalEstimasi={isR2Annual ? r2TanggalEstimasi : r4TanggalEstimasi}
-        programSamsat={isR2Annual ? r2ProgramSamsat : r4ProgramSamsat}
-        kondisiBerkas={isR2Annual ? r2KondisiBerkas : r4KondisiBerkas}
-        wilayahAccId={isR2Annual ? r2WilayahAccId : r4WilayahAccId}
+        tanggalEstimasi={new Date().toISOString().split("T")[0]}
+        programSamsat={cost.isR2Annual ? r2ProgramSamsat : cost.isExtendedEstimation ? extProgramSamsat : r4ProgramSamsat}
+        kondisiBerkas={cost.isR2Annual ? r2KondisiBerkas : cost.isExtendedEstimation ? extKondisiBerkas : r4KondisiBerkas}
+        wilayahAccId={cost.isR2Annual ? r2WilayahAccId : cost.isExtendedEstimation ? extWilayahAccId : r4WilayahAccId}
       />
     </div>
   );

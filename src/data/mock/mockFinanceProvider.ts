@@ -31,11 +31,16 @@ export interface IFinanceDataProvider {
   getKasKantorList(): KasKantorItem[];
   getKasMessengerList(): KasMessengerItem[];
   getPengeluaranList(): PengeluaranItem[];
-  recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): boolean;
+  recordPayment(idOrInvoice: number | string, paymentAmount: number, details?: any): boolean | Promise<boolean>;
   resolveInvoice(id: number, details?: any): boolean;
   completeInvoice(id: number, completedBy?: string): boolean;
+  payoutCashback?(id: number, payoutData: any): Promise<boolean> | boolean;
   addKasKantor?(item: Omit<KasKantorItem, "id">): KasKantorItem | null;
+  addKasMessenger?(item: Omit<KasMessengerItem, "id" | "total"> & { total?: number }): KasMessengerItem | null;
+  deleteKasKantor?(id: number): Promise<boolean> | boolean;
+  deleteKasMessenger?(id: number): Promise<boolean> | boolean;
   addPengeluaran?(item: Omit<PengeluaranItem, "id">): PengeluaranItem | null;
+  deletePengeluaran?(id: number): Promise<boolean> | boolean;
   saveInvoice?(invoice: InvoiceBillingRecord): void;
   subscribe(listener: () => void): () => void;
   isLoading?(): boolean;
@@ -179,6 +184,40 @@ export class MockFinanceProvider implements IFinanceDataProvider {
     return newEntry;
   }
 
+  public deleteKasKantor(id: number): boolean {
+    const idx = this.kasKantor.findIndex((k) => k.id === id);
+    if (idx === -1) return false;
+    this.kasKantor.splice(idx, 1);
+    this.notify();
+    return true;
+  }
+
+  public addKasMessenger(item: Omit<KasMessengerItem, "id" | "total"> & { total?: number }): KasMessengerItem {
+    const lastTotal = this.kasMessenger.length > 0 ? this.kasMessenger[this.kasMessenger.length - 1].total : 0;
+    const runningTotal = item.total !== undefined ? item.total : lastTotal + item.in - item.out;
+    const newItem: KasMessengerItem = {
+      id: this.kasCounter++,
+      tanggal: item.tanggal,
+      jenis: item.jenis,
+      messenger: item.messenger,
+      keterangan: item.keterangan,
+      in: item.in,
+      out: item.out,
+      total: runningTotal,
+    };
+    this.kasMessenger.push(newItem);
+    this.notify();
+    return newItem;
+  }
+
+  public deleteKasMessenger(id: number): boolean {
+    const idx = this.kasMessenger.findIndex((k) => k.id === id);
+    if (idx === -1) return false;
+    this.kasMessenger.splice(idx, 1);
+    this.notify();
+    return true;
+  }
+
   public addPengeluaran(item: Omit<PengeluaranItem, "id">): PengeluaranItem {
     const nextId = Math.max(0, ...this.pengeluaran.map((p) => p.id)) + 1;
     const newEntry: PengeluaranItem = {
@@ -191,6 +230,14 @@ export class MockFinanceProvider implements IFinanceDataProvider {
     this.pengeluaran.unshift(newEntry);
     this.notify();
     return newEntry;
+  }
+
+  public deletePengeluaran(id: number): boolean {
+    const idx = this.pengeluaran.findIndex((p) => p.id === id);
+    if (idx === -1) return false;
+    this.pengeluaran.splice(idx, 1);
+    this.notify();
+    return true;
   }
 
   public saveInvoice(invoice: InvoiceBillingRecord): void {

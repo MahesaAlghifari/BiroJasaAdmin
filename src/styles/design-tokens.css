@@ -1,16 +1,66 @@
-/* Central design system tokens */
+/* Central design system tokens — Admin SUN89 */
 :root {
+  /* Font Family Tokens */
   --font-family-sans: "Quick Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-family-base: var(--font-family-sans);
   --font-family-heading: var(--font-family-sans);
 
-  --font-size-page-title: 1.5rem;      /* 24px */
-  --font-size-section-title: 1.125rem; /* 18px */
-  --font-size-label: 0.8125rem;       /* 13px */
-  --font-size-body: 0.875rem;          /* 14px */
-  --font-size-table: 0.8125rem;        /* 13px */
-  --font-size-caption: 0.75rem;        /* 12px */
+  /* Typography Scale Tokens */
+  --font-size-page-title: 1.25rem;      /* 20px (Desktop: 22-24px via clamp/sm) */
+  --font-size-section-title: 1.0625rem; /* 17px */
+  --font-size-card-title: 0.9375rem;    /* 15px */
+  --font-size-body: 0.875rem;           /* 14px */
+  --font-size-label: 0.8125rem;         /* 13px */
+  --font-size-table: 0.8125rem;         /* 13px */
+  --font-size-table-head: 0.75rem;      /* 12px */
+  --font-size-caption: 0.75rem;         /* 12px */
+  --font-size-tiny: 0.6875rem;          /* 11px */
 
+  /* Line Heights */
+  --line-height-tight: 1.25;
+  --line-height-snug: 1.35;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.6;
+
+  /* Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Layout Container Dimensions — Global Full-Container Fill */
+  --container-compact: 100%;
+  --container-standard: 100%;
+  --container-fluid: 100%;
+
+  /* Control Heights */
+  --height-control: 2.25rem;            /* 36px (Standard Input, Button default, Select trigger) */
+  --height-control-sm: 2rem;            /* 32px (Compact/toolbar buttons, filters) */
+  --height-control-lg: 2.5rem;          /* 40px (Hero CTA buttons) */
+
+  /* Semantic Status Color Tokens (Light Mode Defaults) */
+  --color-success: #16a34a;
+  --color-success-bg: #f0fdf4;
+  --color-success-border: #bbf7d0;
+
+  --color-warning: #d97706;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fde68a;
+
+  --color-error: #ef4444;
+  --color-error-bg: #fef2f2;
+  --color-error-border: #fecaca;
+
+  --color-info: #2563eb;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #bfdbfe;
+
+  --color-purple: #9333ea;
+  --color-purple-bg: #faf5ff;
+  --color-purple-border: #e9d5ff;
+
+  /* Base Semantic Palette Links */
   --color-primary: var(--primary);
   --color-secondary: var(--secondary);
   --color-background: var(--background);
@@ -20,45 +70,142 @@
   --color-text-label: var(--foreground);
   --color-text-muted: var(--muted-foreground);
   --color-border: var(--border);
-  --color-success: #16a34a;
-  --color-warning: #d97706;
-  --color-error: var(--destructive);
-  --color-info: #2563eb;
+
+  /* Unified Focus Ring Tokens */
+  --focus-ring-offset: 1px;
 }
 
 .dark {
+  /* Semantic Status Color Tokens (Dark Mode) */
+  --color-success: #22c55e;
+  --color-success-bg: rgba(22, 163, 74, 0.15);
+  --color-success-border: rgba(34, 197, 94, 0.3);
+
+  --color-warning: #f59e0b;
+  --color-warning-bg: rgba(217, 119, 6, 0.15);
+  --color-warning-border: rgba(245, 158, 11, 0.3);
+
+  --color-error: #ef4444;
+  --color-error-bg: rgba(239, 68, 68, 0.15);
+  --color-error-border: rgba(239, 68, 68, 0.3);
+
+  --color-info: #3b82f6;
+  --color-info-bg: rgba(37, 99, 235, 0.15);
+  --color-info-border: rgba(59, 130, 246, 0.3);
+
+  --color-purple: #a855f7;
+  --color-purple-bg: rgba(147, 51, 234, 0.15);
+  --color-purple-border: rgba(168, 85, 247, 0.3);
+
   --color-background: var(--background);
   --color-surface: var(--card);
 }
 
+/* Typography Utility Classes */
 .typography-page-title {
   font-family: var(--font-family-heading);
   font-size: var(--font-size-page-title);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.015em;
+  line-height: var(--line-height-tight);
   color: var(--foreground);
 }
+
 .typography-section-title {
   font-family: var(--font-family-heading);
   font-size: var(--font-size-section-title);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.01em;
+  line-height: var(--line-height-snug);
   color: var(--foreground);
 }
+
+.typography-card-title {
+  font-family: var(--font-family-heading);
+  font-size: var(--font-size-card-title);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-snug);
+  color: var(--foreground);
+}
+
 .typography-label {
   font-size: var(--font-size-label);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
   color: var(--foreground);
 }
+
 .typography-body {
   font-size: var(--font-size-body);
-  line-height: 1.5;
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
   color: var(--foreground);
 }
+
 .typography-table {
   font-size: var(--font-size-table);
+  line-height: var(--line-height-normal);
 }
+
+.typography-table-head {
+  font-size: var(--font-size-table-head);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+
 .typography-caption {
   font-size: var(--font-size-caption);
   color: var(--muted-foreground);
+  line-height: var(--line-height-normal);
+}
+
+.typography-mono-num {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Global Semantic Full-Container Patterns (100% Fill Container) */
+.content-compact,
+.content-standard,
+.content-fluid {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Canonical Page Shell Padding */
+.page-shell {
+  width: 100%;
+  min-width: 0;
+  padding: 0.875rem; /* 14px mobile */
+}
+
+@media (min-width: 640px) {
+  .page-shell {
+    padding: 1.25rem; /* 20px tablet */
+  }
+}
+
+@media (min-width: 1024px) {
+  .page-shell {
+    padding: 1.5rem; /* 24px desktop */
+  }
+}
+
+/* Focus Ring Utility */
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 var(--focus-ring-offset) var(--background), 0 0 0 calc(var(--focus-ring-offset) + 2px) var(--primary);
+  border-color: var(--primary) !important;
+}
+
+/* Form Input Error State */
+.form-input-error {
+  border-color: var(--color-error) !important;
+  box-shadow: 0 0 0 1px var(--color-error) !important;
 }

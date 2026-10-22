@@ -10,6 +10,7 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  resetUserPassword,
 } from "../controllers/userController";
 import { requireAuth, requireRoles, requireUserSelfOrAdmin } from "../middleware/auth";
 import { validateUserMutationPayload } from "../middleware/validation";
@@ -54,4 +55,12 @@ userRouter.delete(
   requireAuth,
   requireRoles("administrator", "admin"),
   deleteUser
+);
+
+// Reset password to date-of-birth (Administrator & Admin only)
+userRouter.post(
+  "/:id/reset-password",
+  requireAuth,
+  requireRoles("administrator", "admin"),
+  resetUserPassword
 );

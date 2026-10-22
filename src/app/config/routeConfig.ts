@@ -20,9 +20,6 @@ export const DATA_PENJUALAN_CATEGORIES: Record<string, string> = {
   "bbn": "BBN",
   "perpanjangan-pajak": "Perpanjangan Pajak",
   "lain-lain": "Lain-Lain",
-  "belum-kurang-bayar": "Belum & Kurang Bayar",
-  "profit-terpending": "Profit Terpending",
-  "cashback-terpending": "Cashback Terpending",
 };
 
 export const CANONICAL_ROUTES: Record<string, RouteMeta> = {
@@ -75,12 +72,28 @@ export const CANONICAL_ROUTES: Record<string, RouteMeta> = {
     breadcrumbs: ["Finance", "Data Penjualan"],
     parentGroupId: "finance",
   },
-  "/finance/tagihan": {
-    path: "/finance/tagihan",
-    id: "finance-tagihan",
-    title: "Tagihan",
-    description: "Monitoring status pelunasan dan piutang tagihan berkas",
-    breadcrumbs: ["Finance", "Tagihan"],
+  "/finance/belum-bayar": {
+    path: "/finance/belum-bayar",
+    id: "finance-belum-bayar",
+    title: "Belum & Kurang Bayar",
+    description: "Monitoring transaksi customer yang belum lunas atau kurang bayar",
+    breadcrumbs: ["Finance", "Belum & Kurang Bayar"],
+    parentGroupId: "finance",
+  },
+  "/finance/profit-pending": {
+    path: "/finance/profit-pending",
+    id: "finance-profit-pending",
+    title: "Profit Terpending",
+    description: "Monitoring profit transaksi yang masih berstatus pending verifikasi",
+    breadcrumbs: ["Finance", "Profit Terpending"],
+    parentGroupId: "finance",
+  },
+  "/finance/cashback-pending": {
+    path: "/finance/cashback-pending",
+    id: "finance-cashback-pending",
+    title: "Cashback Terpending",
+    description: "Monitoring cashback rekanan yang masih tertahan atau pending pencairan",
+    breadcrumbs: ["Finance", "Cashback Terpending"],
     parentGroupId: "finance",
   },
   "/finance/laba-rugi": {
@@ -98,6 +111,14 @@ export const CANONICAL_ROUTES: Record<string, RouteMeta> = {
     title: "Data Samsat",
     description: "Kelola data Samsat yang digunakan dalam sistem",
     breadcrumbs: ["Master Data", "Samsat"],
+    parentGroupId: "master-data",
+  },
+  "/master-data/metode-pembayaran": {
+    path: "/master-data/metode-pembayaran",
+    id: "master-metode-pembayaran",
+    title: "Metode Pembayaran",
+    description: "Kelola nomor rekening resmi dan metode pembayaran transaksi",
+    breadcrumbs: ["Master Data", "Metode Pembayaran"],
     parentGroupId: "master-data",
   },
   "/master-data/biaya-layanan": {
@@ -158,6 +179,14 @@ export const CANONICAL_ROUTES: Record<string, RouteMeta> = {
     breadcrumbs: ["Messenger", "Messenger Task"],
     parentGroupId: "messenger-menu",
   },
+  "/messenger/history": {
+    path: "/messenger/history",
+    id: "messenger-history",
+    title: "Messenger History",
+    description: "Arsip riwayat pekerjaan Messenger selesai, kronologi proses, dan rincian pengajuan biaya",
+    breadcrumbs: ["Messenger", "Messenger History"],
+    parentGroupId: "messenger-menu",
+  },
   // Order
   "/order/buat": {
     path: "/order/buat",
@@ -190,6 +219,13 @@ export const CANONICAL_ROUTES: Record<string, RouteMeta> = {
     title: "Pengaturan",
     description: "Kelola preferensi dan konfigurasi sistem",
     breadcrumbs: ["Pengaturan"],
+  },
+  "/notifikasi": {
+    path: "/notifikasi",
+    id: "notifikasi",
+    title: "Riwayat Notifikasi",
+    description: "Pusat log pemberitahuan, pengingat tagihan, dan pesan operasional",
+    breadcrumbs: ["Notifikasi"],
   },
   "/profile": {
     path: "/profile",
